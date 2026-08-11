@@ -12,6 +12,7 @@ import (
 var AgentsRuleFiles = []string{
 	"AGENTS.md",
 	".agents.md",
+	filepath.Join(".agents", "AGENTS.md"),
 }
 
 // UserRule represents a single user rule to inject into the prompt.
