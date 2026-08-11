@@ -7924,8 +7924,8 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x06prompt\x18\x04 \x01(\tR\x06prompt\x12\x17\n" +
 	"\atask_id\x18\n" +
 	" \x01(\tR\x06taskId\x12\x18\n" +
-	"\asuccess\x18\v \x01(\bR\asuccessB\xce\x01\n" +
-	"\x13com.localharness.v1B\x11LocalharnessProtoP\x01ZGgithub.com/divmora/localharness/gen/go/localharness/v1;localharnessv1\xa2\x02\x03LXX\xaa\x02\x0fLocalharness.V1\xca\x02\x0fLocalharness\\V1\xe2\x02\x1bLocalharness\\V1\\GPBMetadata\xea\x02\x10Localharness::V1b\x06proto3"
+	"\asuccess\x18\v \x01(\bR\asuccessB\xcc\x01\n" +
+	"\x13com.localharness.v1B\x11LocalharnessProtoP\x01ZEgithub.com/divmora/localharness/gen/go/localharness/v1;localharnessv1\xa2\x02\x03LXX\xaa\x02\x0fLocalharness.V1\xca\x02\x0fLocalharness\\V1\xe2\x02\x1bLocalharness\\V1\\GPBMetadata\xea\x02\x10Localharness::V1b\x06proto3"
 
 var (
 	file_localharness_v1_localharness_proto_rawDescOnce sync.Once
