@@ -1,0 +1,116 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: go
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-release:
+    name: Build & Publish (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Run tests
+        run: go test -race -count=1 ./...
+
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${{ needs.release-please.outputs.version }}"
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/divmora/localharness/internal/config.HarnessVersion=${VERSION}" \
+            -o localharness-${GOOS}-${GOARCH} \
+            ./cmd/localharness
+
+          go build -trimpath \
+            -ldflags="-s -w" \
+            -o testclient-${GOOS}-${GOARCH} \
+            ./cmd/testclient
+
+      - name: Package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${{ needs.release-please.outputs.version }}"
+          ARCHIVE="localharness-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+
+          # Tarball contains 'localharness' directly at root for easy extraction
+          mv localharness-${GOOS}-${GOARCH} localharness
+          tar czf "${ARCHIVE}" localharness
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${{ needs.release-please.outputs.version }}"
+          ARCHIVE="localharness-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" \
+            "${ARCHIVE}" "${ARCHIVE}.sha256"
+
+  checksums:
+    name: Aggregate Checksums
+    needs: [release-please, build-release]
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          gh release download "${TAG}" --repo ${{ github.repository }} --pattern '*.sha256'
+
+      - name: Generate checksums.txt
+        run: |
+          # Merge all per-platform .sha256 files into one checksums.txt
+          cat *.sha256 | sort > checksums.txt
+
+      - name: Upload checksums.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+          gh release upload "${TAG}" checksums.txt --repo ${{ github.repository }}
+

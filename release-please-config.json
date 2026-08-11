@@ -1,0 +1,18 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "package-name": "localharness",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "internal/config/config.go",
+          "glob": false
+        }
+      ]
+    }
+  },
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
+}

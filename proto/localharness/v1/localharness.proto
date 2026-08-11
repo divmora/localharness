@@ -1,0 +1,1092 @@
+// Copyright 2026 Divmora LLP.
+// LocalHarness — Agent Runtime Engine Protocol
+//
+// This proto defines the wire protocol between LocalHarness (Go binary)
+// and SDK clients (Python, JS, Go) over WebSocket + Protobuf.
+
+syntax = "proto3";
+
+package localharness.v1;
+
+option go_package = "github.com/divmora/localharness/gen/go/localharness/v1;localharnessv1";
+
+// ═══════════════════════════════════════════════════════════════════════
+// PIPE HANDSHAKE (stdin/stdout before WebSocket)
+// ═══════════════════════════════════════════════════════════════════════
+
+// InputConfig is written by the SDK to the binary's stdin during handshake.
+// Wire format: 4-byte little-endian length prefix + protobuf payload.
+// This message configures the binary before it starts the WebSocket server.
+message InputConfig {
+  string workspace = 1;        // Default workspace path (empty = cwd)
+  bool debug = 2;              // Enable debug logging
+}
+
+// OutputConfig is written by the binary to stdout during handshake.
+// Wire format: 4-byte little-endian length prefix + protobuf payload.
+// After writing this, the binary closes stdout to signal handshake completion.
+message OutputConfig {
+  int32 port = 1;              // The port the binary bound to (via :0 atomic bind)
+  string api_key = 2;          // Crypto-random API key for WebSocket auth header
+  string harness_version = 3;  // Binary version string
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CLIENT → HARNESS MESSAGES
+// ═══════════════════════════════════════════════════════════════════════
+
+// ClientMessage wraps all messages sent from the SDK to the harness.
+message ClientMessage {
+  oneof payload {
+    InitRequest init = 1;
+    UserMessage user_message = 2;
+    ToolResult host_tool_result = 3;
+    CancelRequest cancel = 4;
+    PermissionResponse permission_response = 5;
+    QuestionResponse question_response = 6;
+  }
+}
+
+// InitRequest is the first message sent after WebSocket connect.
+// It configures the harness for this session.
+message InitRequest {
+  HarnessConfig config = 1;
+}
+
+// UserMessage sends a user prompt to the agent.
+message UserMessage {
+  string content = 1;
+  string conversation_id = 2;
+  UserContext context = 3;       // Per-message dynamic context from host
+
+  // Ephemeral directives injected by the SDK/host.
+  // The agent must follow these strictly but not acknowledge them to the user.
+  // Rendered as <EPHEMERAL_MESSAGE> blocks in the enriched prompt.
+  repeated string ephemeral_messages = 4;
+
+  // Settings changes made by the user since the last message.
+  // Rendered as <USER_SETTINGS_CHANGE> blocks in the enriched prompt so the
+  // model can adapt its behavior (e.g., after a model switch or mode toggle).
+  repeated SettingsChange settings_changes = 5;
+}
+
+// FileInfo describes a file with optional language annotation.
+message FileInfo {
+  string path = 1;       // Absolute file path
+  string language = 2;   // Language identifier (e.g. "LANGUAGE_GO"), optional
+}
+
+// UserContext provides per-message metadata from the host (IDE, CLI, etc.).
+message UserContext {
+  FileInfo active_file = 1;        // Currently open/focused file
+  int32 cursor_line = 2;           // Cursor line position (1-indexed)
+  repeated FileInfo open_files = 3; // Other open files
+  map<string, string> extra = 4;   // Extensible key-value metadata
+}
+
+// ToolResult returns the result of a host-side tool call back to the harness.
+message ToolResult {
+  string step_id = 1;
+  string tool_name = 2;
+  string result_json = 3;
+  bool is_error = 4;
+}
+
+// CancelRequest aborts the current turn.
+message CancelRequest {}
+
+// ═══════════════════════════════════════════════════════════════════════
+// HARNESS → CLIENT MESSAGES
+// ═══════════════════════════════════════════════════════════════════════
+
+// ServerMessage wraps all messages sent from the harness to the SDK.
+message ServerMessage {
+  oneof payload {
+    InitResponse init_response = 1;
+    StepUpdate step_update = 2;
+    TrajectoryState trajectory_state = 3;
+    ErrorEvent error = 4;
+  }
+}
+
+// InitResponse acknowledges the session initialization.
+message InitResponse {
+  string conversation_id = 1;
+  string harness_version = 2;
+}
+
+// ErrorEvent reports a harness-level error (not a tool error).
+message ErrorEvent {
+  string message = 1;
+  string code = 2;
+  bool fatal = 3;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// STEP UPDATE — The Core Streaming Event
+// ═══════════════════════════════════════════════════════════════════════
+
+// StepUpdate is the primary event streamed from harness to client.
+// Each step represents one action in the agent's trajectory:
+// a text response, a tool call, a tool result, etc.
+message StepUpdate {
+  // Identity
+  string conversation_id = 1;
+  string trajectory_id = 2;
+  int32 step_index = 3;
+
+  // Text content (for model responses)
+  string text = 4;
+  string text_delta = 5;
+
+  // Model thinking/reasoning (if thinking model)
+  string thinking = 6;
+  string thinking_delta = 7;
+
+  // Step metadata
+  Source source = 8;
+  State state = 9;
+  Target target = 10;
+
+  // Tool action — at most one is set per step.
+  // Populated with args on STATE_ACTIVE, results added on STATE_DONE.
+  oneof action {
+    ActionViewFile view_file = 20;
+    ActionWriteToFile write_to_file = 21;
+    ActionReplaceFileContent replace_file_content = 22;
+    ActionListDir list_dir = 23;
+    ActionGrepSearch grep_search = 24;
+    ActionFindFile find_file = 25;
+    ActionRunCommand run_command = 26;
+    ActionFinish finish = 27;
+    ActionHostToolCall host_tool_call = 28;
+    ActionCompaction compaction = 29;          // Phase 2: context compaction
+    ActionUserQuestion user_question = 30;     // Phase 2: interactive questions
+    ActionManageTask manage_task = 31;         // Background task management
+    ActionPermissionRequest permission_request = 32; // Policy: SDK approval needed
+    ActionInvokeSubagent invoke_subagent = 33;          // Spawn child agent(s)
+    ActionSearchWeb search_web = 34;
+    ActionReadUrlContent read_url_content = 35;
+    ActionMcpTool mcp_tool = 36;              // MCP server tool call
+    ActionSchedule schedule = 37;             // One-shot timer or recurring cron
+    ActionDefineSubagent define_subagent = 50;          // Define a named subagent type
+    ActionManageSubagents manage_subagents = 51;        // List/kill subagents
+    ActionSendMessage send_message_action = 52;         // Inter-agent messaging
+    ActionBrowserSubagent browser_subagent = 53;        // Spawn browser subagent
+  }
+
+  // Error details (when state = STATE_ERROR)
+  ErrorInfo error_info = 40;
+
+  // Token usage (populated on model response steps)
+  UsageMetadata usage = 41;
+
+  // Source indicates who produced this step.
+  enum Source {
+    SOURCE_UNSPECIFIED = 0;
+    SOURCE_SYSTEM = 1;
+    SOURCE_USER = 2;
+    SOURCE_MODEL = 3;
+  }
+
+  // State tracks the step lifecycle.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_ACTIVE = 1;      // Tool is executing / model is generating
+    STATE_DONE = 2;        // Step completed successfully
+    STATE_WAITING = 3;     // Waiting for user input (e.g., permission)
+    STATE_ERROR = 4;       // Step failed
+    STATE_STREAMING = 5;   // Partial streaming delta (text_delta / thinking_delta)
+  }
+
+  // Target indicates who this step is directed at.
+  enum Target {
+    TARGET_UNSPECIFIED = 0;
+    TARGET_USER = 1;       // User-visible content
+    TARGET_INTERNAL = 2;   // Internal (tool results fed back to model)
+  }
+}
+
+// TrajectoryState signals trajectory-level lifecycle events.
+message TrajectoryState {
+  string trajectory_id = 1;
+  TrajState state = 2;
+  string parent_trajectory_id = 3;   // Empty for root trajectory
+  int32 depth = 4;                   // 0 for root, increments per spawn
+
+  enum TrajState {
+    TRAJ_UNSPECIFIED = 0;
+    TRAJ_RUNNING = 1;
+    TRAJ_IDLE = 2;
+    TRAJ_COMPLETED = 3;
+    TRAJ_ERROR = 4;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TOOL ACTION MESSAGES
+// ═══════════════════════════════════════════════════════════════════════
+
+// ActionViewFile reads a file with optional line range.
+message ActionViewFile {
+  // Args (set on STATE_ACTIVE)
+  string path = 1;
+  int32 start_line = 2;    // 1-indexed, inclusive. 0 = from start.
+  int32 end_line = 3;      // 1-indexed, inclusive. 0 = to end.
+
+  // Result (set on STATE_DONE)
+  string content = 10;
+  int32 total_lines = 11;
+  int64 total_bytes = 12;
+  bool is_binary = 13;
+}
+
+// ArtifactMetadata provides metadata for artifact files (brain directory).
+// Used by create_file and edit_file when operating on conversation artifacts.
+message ArtifactMetadata {
+  // Type of artifact: "implementation_plan", "walkthrough", "task", or "other".
+  string artifact_type = 1;
+
+  // Description of the artifact contents.
+  string summary = 2;
+
+  // When true, signals the artifact needs user review before the agent continues.
+  // SDKs can use OnArtifactFeedbackHook to detect this and surface the artifact.
+  bool request_feedback = 3;
+}
+
+// ActionWriteToFile creates a new file on disk.
+message ActionWriteToFile {
+  // Args
+  string path = 1;
+  string content = 2;
+  bool overwrite = 3;
+
+  // Artifact metadata (set when creating artifact files in brain directory)
+  bool is_artifact = 4;
+  ArtifactMetadata artifact_metadata = 5;
+
+  // Result
+  bool created = 10;
+}
+
+// ActionReplaceFileContent performs targeted edits on an existing file.
+message ActionReplaceFileContent {
+  // Args
+  string path = 1;
+  repeated EditChunk chunks = 2;
+
+  // Artifact metadata (optional, for meaningful updates to artifact files)
+  ArtifactMetadata artifact_metadata = 3;
+
+  // Result
+  string diff_block = 10;
+  bool success = 11;
+}
+
+// EditChunk describes a single contiguous replacement in a file.
+message EditChunk {
+  int32 start_line = 1;        // 1-indexed
+  int32 end_line = 2;          // 1-indexed
+  string target_content = 3;   // Exact text to find and replace
+  string replacement = 4;      // Replacement text
+  bool allow_multiple = 5;     // Replace all occurrences in range
+}
+
+// ActionListDir lists directory contents.
+message ActionListDir {
+  // Args
+  string path = 1;
+
+  // Result
+  repeated DirEntry entries = 10;
+}
+
+// DirEntry represents one item in a directory listing.
+message DirEntry {
+  string name = 1;
+  bool is_dir = 2;
+  int64 size_bytes = 3;
+  int32 child_count = 4;      // Recursive count for directories
+}
+
+// ActionGrepSearch performs grep-style search (wraps ripgrep).
+message ActionGrepSearch {
+  // Args
+  string query = 1;
+  string path = 2;
+  bool is_regex = 3;
+  bool case_insensitive = 4;
+  bool match_per_line = 5;
+  repeated string includes = 6;  // Glob patterns (e.g., "*.go")
+  int32 max_results = 7;         // Default: 50
+
+  // Result
+  repeated SearchMatch matches = 10;
+  int32 total_matches = 11;
+  bool truncated = 12;
+}
+
+// SearchMatch is a single grep result.
+message SearchMatch {
+  string filename = 1;
+  int32 line_number = 2;
+  string line_content = 3;
+}
+
+// ActionFindFile finds files by name/pattern.
+message ActionFindFile {
+  // Args
+  string pattern = 1;
+  string path = 2;
+
+  // Result
+  repeated string matches = 10;
+}
+
+// ActionRunCommand executes a shell command.
+message ActionRunCommand {
+  // Args
+  string command = 1;
+  string cwd = 2;
+  int32 timeout_ms = 3;        // Max execution time. 0 = 30s default.
+  map<string, string> env = 4; // Additional env vars
+
+  // Background/persistent execution args
+  bool background = 5;              // If true, start as background task
+  bool persistent = 6;              // If true, use a persistent terminal session
+  string terminal_id = 7;           // Reuse an existing persistent terminal
+  int32 wait_ms_before_async = 8;   // Wait this many ms before promoting to background
+
+  // Result
+  string stdout = 10;
+  string stderr = 11;
+  int32 exit_code = 12;
+  bool timed_out = 13;
+  string task_id = 14;              // ID of the background task (when background=true)
+  string assigned_terminal_id = 15; // Terminal ID assigned (when persistent=true)
+}
+
+// ActionFinish signals task completion with optional structured output.
+message ActionFinish {
+  string output_json = 1;     // Structured result (JSON string)
+}
+
+// ActionHostToolCall invokes a host-side (SDK-registered) tool.
+// The harness sends this, then waits for a ToolResult from the client.
+message ActionHostToolCall {
+  string tool_name = 1;
+  string args_json = 2;       // JSON-encoded arguments
+  string call_id = 3;         // LLM-assigned call ID
+  int32 step_index = 4;       // Harness step index (use as ToolResult.step_id)
+}
+
+// ActionCompaction is emitted when the harness compacts the context window.
+// Older messages are summarized to fit within the token budget.
+message ActionCompaction {
+  int32 original_tokens = 1;     // Token count before compaction
+  int32 compacted_tokens = 2;    // Token count after compaction
+  int32 messages_removed = 3;    // Number of messages replaced
+  string summary = 4;            // Generated summary of removed messages
+}
+
+// ActionUserQuestion presents interactive questions to the user.
+// The harness waits for a response before continuing.
+message ActionUserQuestion {
+  // Request ID for correlating response.
+  string request_id = 1;
+
+  // Questions to present.
+  repeated UserQuestion questions = 2;
+
+  // --- Result fields (populated on STATE_DONE) ---
+
+  // Answers from the user, one per question.
+  repeated QuestionAnswer answers = 10;
+
+  // True if the user skipped (did not answer).
+  bool skipped = 11;
+}
+
+// UserQuestion is a single question in an interactive prompt.
+message UserQuestion {
+  string question = 1;
+  repeated string options = 2;
+  bool is_multi_select = 3;
+}
+
+// QuestionAnswer is the user's response to a single question.
+message QuestionAnswer {
+  // Selected option indices (0-based).
+  repeated int32 selected_indices = 1;
+
+  // Selected option texts.
+  repeated string selected_options = 2;
+
+  // Free-form text response (write-in).
+  string text = 3;
+}
+
+// QuestionResponse sends the user's answers back to the harness.
+message QuestionResponse {
+  string request_id = 1;
+  repeated QuestionAnswer answers = 2;
+  bool skipped = 3;
+}
+
+// ActionManageTask manages background tasks (list, status, kill, send_input).
+message ActionManageTask {
+  // Args
+  string action = 1;     // "list", "status", "kill", "send_input"
+  string task_id = 2;    // Required for status/kill/send_input
+  string input = 3;      // stdin input for send_input
+
+  // Result
+  repeated TaskInfo tasks = 10;     // Populated by "list" and "status"
+  bool success = 11;
+}
+
+// TaskInfo describes a running or completed background task.
+message TaskInfo {
+  string task_id = 1;
+  string command = 2;
+  string cwd = 3;
+  string status = 4;          // "running", "completed", "failed", "killed"
+  int32 exit_code = 5;
+  string started_at = 6;      // RFC3339
+  string completed_at = 7;    // RFC3339
+  string recent_output = 8;   // Last N bytes of combined stdout+stderr
+  string terminal_id = 9;     // If using a persistent terminal
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SUBAGENT MESSAGES
+// ═══════════════════════════════════════════════════════════════════════
+
+// ActionInvokeSubagent spawns one or more child agents in the background.
+// Each child runs a full agentic loop with its own fresh context.
+message ActionInvokeSubagent {
+  // New: array-based async invocation (set on STATE_ACTIVE)
+  repeated SubagentInvocation subagents = 20;
+
+  // Result: launched subagent info (set on STATE_DONE)
+  repeated SubagentLaunchResult launch_results = 21;
+
+  // Legacy fields (kept for backward compatibility, deprecated)
+  string prompt = 1 [deprecated = true];                     // Use subagents[] instead
+  string system_instructions = 2 [deprecated = true];        // Use define_subagent instead
+  int32 max_turns = 4 [deprecated = true];
+  string subagent_id = 5;               // Assigned by engine
+
+  // Legacy result fields (kept for backward compatibility, deprecated)
+  string result_text = 10 [deprecated = true];
+  int32 steps_executed = 11 [deprecated = true];
+  string child_trajectory_id = 12 [deprecated = true];
+  UsageMetadata child_usage = 13 [deprecated = true];
+  string error_message = 14;
+}
+
+// SubagentInvocation describes a single subagent to launch.
+message SubagentInvocation {
+  string type_name = 1;    // Name from registry (e.g. "research", "self")
+  string role = 2;         // 2-5 word job title (e.g. "Codebase Researcher")
+  string prompt = 3;       // Task description for the subagent
+  string workspace = 4;    // Workspace mode: "inherit" (default), "branch", "share"
+}
+
+// SubagentLaunchResult reports a successfully launched subagent.
+message SubagentLaunchResult {
+  string conversation_id = 1;
+  string type_name = 2;
+  string role = 3;
+}
+
+// ActionBrowserSubagent spawns a specialized browser subagent.
+message ActionBrowserSubagent {
+  string task_name = 1;
+  string task = 2;
+  string task_summary = 3;
+  string recording_name = 4;
+  string reused_subagent_id = 5;
+  repeated string media_paths = 6;
+  
+  // Result fields (set on STATE_DONE)
+  string conversation_id = 10;
+  string error_message = 11;
+}
+
+// ActionDefineSubagent defines a named subagent type for the conversation.
+message ActionDefineSubagent {
+  string name = 1;                    // Unique name (used by invoke_subagent)
+  string description = 2;            // Human-readable description
+  string system_prompt = 3;          // System prompt for this subagent type
+  bool enable_write_tools = 4;       // Give write tools (create_file, edit_file, run_command)
+  bool enable_mcp_tools = 5;         // Give MCP server tools
+  bool enable_subagent_tools = 6;    // Give subagent tools (recursive)
+}
+
+// ActionManageSubagents manages active subagent instances.
+message ActionManageSubagents {
+  string action = 1;                          // "list", "kill", "kill_all"
+  repeated string conversation_ids = 2;       // For "kill" action
+
+  // Result (set on STATE_DONE for "list")
+  repeated SubagentInfo active_subagents = 10;
+}
+
+// SubagentInfo describes an active subagent instance.
+message SubagentInfo {
+  string conversation_id = 1;
+  string type_name = 2;
+  string role = 3;
+  string state = 4;    // "running", "idle", "error"
+}
+
+// ActionSendMessage sends a message to another agent.
+message ActionSendMessage {
+  string recipient = 1;     // Conversation ID of the recipient
+  string message = 2;       // Message content
+}
+
+// ActionSearchWeb searches the web for a query.
+message ActionSearchWeb {
+  // Args
+  string query = 1;
+
+  // Result
+  repeated WebSearchResult results = 10;
+}
+
+// WebSearchResult represents a single search result.
+message WebSearchResult {
+  string title = 1;
+  string url = 2;
+  string snippet = 3;
+}
+
+// ActionReadUrlContent fetches the content of a URL.
+message ActionReadUrlContent {
+  // Args
+  string url = 1;
+
+  // Result
+  string content = 10;
+  string content_type = 11;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PERMISSION / POLICY MESSAGES
+// ═══════════════════════════════════════════════════════════════════════
+
+// ActionPermissionRequest is emitted by the engine (STATE_WAITING) when
+// it needs SDK approval before executing a tool call. The SDK evaluates
+// its policies and responds with a PermissionResponse.
+message ActionPermissionRequest {
+  string request_id = 1;        // Unique ID to correlate response
+  string tool_name = 2;         // Which tool needs approval
+  string args_json = 3;         // Full args for policy predicate evaluation
+  string args_summary = 4;      // Human-readable summary for UIs
+  string call_id = 5;           // LLM-assigned tool call ID
+}
+
+// PermissionResponse is sent by the SDK after evaluating its policies.
+// Must be correlated with ActionPermissionRequest.request_id.
+message PermissionResponse {
+  string request_id = 1;        // Must match ActionPermissionRequest.request_id
+  bool approved = 2;
+  string denial_reason = 3;     // Human-readable reason (fed back to LLM)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CONFIGURATION MESSAGES
+// ═══════════════════════════════════════════════════════════════════════
+
+// HarnessConfig is the complete configuration sent in InitRequest.
+message HarnessConfig {
+  // Name of the LiteLLM endpoint to load from ~/.divmora/config/litellm.json.
+  // If empty, the default endpoint from the config will be used.
+  string litellm_endpoint = 1;
+
+  // Inline LiteLLM configuration (takes priority over endpoint lookup if set)
+  string litellm_api_key = 2;
+  string litellm_base_url = 3;
+  string litellm_model = 4;
+
+  // Agent configuration
+  string system_instructions = 5;
+  repeated ToolDef host_tools = 6;         // SDK-registered custom tools
+
+  BuiltinToolsConfig builtin_tools = 7;    // Toggle built-in tools
+  repeated Workspace workspaces = 8;
+  int32 compaction_threshold = 9;          // Context compaction: 0=default (100K), -1=disabled, >0=custom threshold
+  string conversation_id = 11;            // Resume existing conversation
+
+  int32 keep_recent_messages = 13;  // Messages to preserve during compaction (default: 10, 0 = use default)
+  int32 max_subagent_depth = 14;    // Max nesting depth (default: 3, 0 = disabled)
+  int32 max_concurrent_subagents = 15; // Max concurrent children (default: 5)
+
+  // Per-tool configuration (Phase 2)
+  ToolConfigs tool_configs = 12;
+
+  // MCP server connections (merged with global ~/.divmora/config/mcp_config.json)
+  repeated McpServerConfig mcp_servers = 16;
+
+  // Structured system instructions (modular prompt composition).
+  // If set, takes priority over system_instructions string.
+  StructuredSystemInstructions structured_instructions = 17;
+
+  // Optional prompt modules — toggles domain-specific system prompt sections.
+  PromptModules prompt_modules = 18;
+
+  // Max synthetic auto-wake turns per trajectory (default: 0 = disabled).
+  // When a background task or timer fires while the engine is idle, the
+  // session starts a synthetic turn. This caps how many such turns can
+  // occur before requiring a real user message.
+  int32 max_auto_wake_turns = 19;
+
+  // Slash command definitions — available chat shortcuts the agent can recommend.
+  // Only used when prompt_modules.enable_slash_commands is true.
+  repeated SlashCommandDef slash_commands = 20;
+
+  // Available standalone skills — if non-empty, the <skills> section is emitted.
+  repeated SkillDef skills = 21;
+
+  // Installed plugin bundles — if non-empty, the <plugins> section is emitted.
+  repeated PluginDef plugins = 22;
+
+  // SDK-registered subagent type definitions.
+  // Merged with built-in types (research, self). SDK overrides built-in if same name.
+  repeated SubagentTypeConfig subagent_types = 23;
+
+  // Exclude specific built-in subagent types by name.
+  // Example: ["self"] to disable the self-clone type.
+  repeated string exclude_builtin_subagents = 24;
+
+  // Disable ALL built-in subagent types (research, self).
+  // Only SDK-registered and agent-defined types will be available.
+  bool disable_all_builtin_subagents = 25;
+
+  // SDK-injected user rules. Each entry carries a label and inline content.
+  // These are merged with auto-discovered AGENTS.md files from workspace roots
+  // and rendered in the <user_rules> section of every user message.
+  repeated UserRuleConfig user_rules = 26;
+}
+
+// UserRuleConfig is an SDK-injected user rule with inline content.
+// Merged with auto-discovered AGENTS.md rules.
+message UserRuleConfig {
+  // Label identifies the rule source (e.g. "settings.json", "project-config").
+  // Used as the display name in <RULE[label]> tags.
+  string label = 1;
+
+  // Content is the rule text. The engine injects this verbatim into the prompt.
+  string content = 2;
+}
+
+// PromptModules toggles optional domain-specific system prompt sections.
+// Each module adds static, curated content that is hardcoded in the binary
+// and cannot be overridden by users. Modules can only be enabled or disabled.
+message PromptModules {
+  // Enable the web application development section.
+  // OFF by default. When enabled, provides design aesthetics, tech stack
+  // guidance, CSS/JS patterns, and SEO best practices.
+  // Enable for agents that build web UIs.
+  bool enable_web_development = 1;
+
+  // Enable the planning mode section.
+  // OFF by default. When enabled, provides the research→plan→execute→verify workflow.
+  // Enable for agents that handle complex, multi-step tasks.
+  bool enable_planning = 2;
+
+  // Enable the slash commands section.
+  // OFF by default. When enabled, the agent can recommend slash commands
+  // (e.g., /goal, /schedule) to the user. Requires slash_commands definitions
+  // on HarnessConfig to be useful.
+  bool enable_slash_commands = 3;
+
+  // Enable the knowledge items section.
+  // OFF by default. When enabled, teaches the agent to check curated KI
+  // summaries before starting research. For IDE agents with a KI store.
+  bool enable_knowledge_items = 4;
+}
+
+// SlashCommandDef defines a user-facing chat shortcut that the agent can recommend.
+message SlashCommandDef {
+  string name = 1;        // e.g. "/goal"
+  string description = 2; // e.g. "Run a long-running task with extra thoroughness"
+}
+
+// SkillDef describes an available skill the agent can use.
+// Skills are folders containing a SKILL.md instruction file and optional
+// scripts, examples, and resources that extend the agent's capabilities.
+message SkillDef {
+  string name = 1;        // e.g. "run-security-scanner"
+  string description = 2; // e.g. "Scan files for common security issues"
+  string skill_path = 3;  // Absolute path to the SKILL.md file
+}
+
+// PluginDef describes an installed plugin bundle.
+// Plugins group skills, subagents, and configuration together for a
+// specific feature or domain.
+message PluginDef {
+  string name = 1;             // e.g. "securecoder"
+  string description = 2;     // Optional description
+  string path = 3;            // Path to the plugin directory
+  repeated SkillDef skills = 4; // Skills exposed by this plugin
+}
+
+// SubagentTypeConfig defines a subagent type that can be invoked by the agent.
+// Used in HarnessConfig.subagent_types for SDK-registered types.
+message SubagentTypeConfig {
+  string name = 1;                    // Unique name (e.g. "security-reviewer")
+  string description = 2;            // Human-readable description
+  string system_prompt = 3;          // System prompt for this subagent type
+  bool enable_write_tools = 4;       // Give write tools (create_file, edit_file, run_command)
+  bool enable_mcp_tools = 5;         // Give MCP server tools
+  bool enable_subagent_tools = 6;    // Give subagent tools (recursive)
+}
+
+// StructuredSystemInstructions enables modular system prompt composition.
+// The engine assembles the final prompt from identity, auto-generated tool/workspace
+// sections, user-provided guidelines, and custom tagged sections.
+message StructuredSystemInstructions {
+  // Identity sets who the agent is.
+  // Default: "You are a helpful AI coding assistant."
+  string identity = 1;
+
+  // Guidelines are behavioral rules the agent should always follow.
+  string guidelines = 2;
+
+  // CommunicationStyle controls how the agent formats responses.
+  string communication_style = 3;
+
+  // Sections are custom tagged content blocks, rendered as <tag>content</tag>.
+  repeated SystemSection sections = 4;
+}
+
+// SystemSection is a custom tagged content block in the system prompt.
+message SystemSection {
+  string tag = 1;       // XML tag name (e.g., "rules", "project_context")
+  string content = 2;   // Section body
+  int32 priority = 3;   // Ordering priority (lower = earlier). Default: 100
+}
+
+// ToolDef defines a host-side (custom) tool.
+message ToolDef {
+  string name = 1;
+  string description = 2;
+  string parameters_json_schema = 3;   // JSON Schema for args
+  string response_json_schema = 4;     // JSON Schema for response
+}
+
+// BuiltinToolsConfig toggles which built-in tools are enabled.
+// All default to true except run_command.
+message BuiltinToolsConfig {
+  bool view_file = 1;        // default: true
+  bool create_file = 2;      // default: true
+  bool edit_file = 3;        // default: true
+  bool list_dir = 4;         // default: true
+  bool search_dir = 5;       // default: true
+  bool find_file = 6;        // default: true
+  bool run_command = 7;      // default: false (safety)
+  bool finish = 8;           // default: true
+  bool manage_task = 9;      // default: false (requires run_command)
+  bool invoke_subagent = 10; // default: false (must opt-in)
+  bool web_search = 11;      // default: false
+  bool web_fetch = 12;       // default: false
+  bool schedule = 13;        // default: true (timers and cron)
+  bool browser = 14;         // default: false (requires Node.js + npx, auto-injects @playwright/mcp)
+  bool define_subagent = 15; // default: false (follows invoke_subagent)
+  bool manage_subagents = 16; // default: false (follows invoke_subagent)
+  bool send_message = 17;    // default: false (follows invoke_subagent)
+}
+
+// ToolConfigs provides per-tool configuration (Phase 2).
+message ToolConfigs {
+  ViewFileToolConfig view_file = 1;
+  RunCommandToolConfig run_command = 2;
+  FileEditToolConfig edit_file = 3;
+  FindToolConfig find_file = 4;
+  GrepSearchToolConfig grep_search = 5;
+  ListDirToolConfig list_dir = 6;
+  WriteToFileToolConfig write_file = 7;
+  WebSearchToolConfig web_search = 8;
+  WebFetchToolConfig web_fetch = 9;
+}
+
+// Per-tool configuration messages.
+message ViewFileToolConfig {
+  int32 max_lines = 1;            // Max lines to return. Default: 800
+}
+message RunCommandToolConfig {
+  int32 default_timeout_ms = 1;   // Default timeout. Default: 30000
+  bool allow_background = 2;      // Allow background execution
+}
+message FileEditToolConfig {
+  int32 max_chunk_lines = 1;      // Max lines per edit chunk
+}
+message FindToolConfig {
+  int32 max_results = 1;          // Max find results. Default: 100
+}
+message GrepSearchToolConfig {
+  int32 max_results = 1;          // Max search results. Default: 50
+}
+message ListDirToolConfig {
+  int32 max_entries = 1;          // Max entries to return. Default: 500
+}
+message WriteToFileToolConfig {
+  int64 max_file_size = 1;        // Max file size in bytes
+}
+
+message WebSearchToolConfig {
+  int32 max_results = 1;          // Max search results. Default: 5
+}
+
+message WebFetchToolConfig {
+  int64 max_content_size = 1;     // Max content size to fetch in bytes. Default: 51200 (50KB)
+}
+
+// Workspace defines a directory the agent can operate in.
+message Workspace {
+  string directory = 1;       // Absolute path
+  string name = 2;            // Human-readable name
+  string corpus_name = 3;     // Semantic search corpus identifier (e.g. "divmora/localharness")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MCP (Model Context Protocol)
+// ═══════════════════════════════════════════════════════════════════════
+
+// McpServerConfig defines how to connect to an MCP server.
+message McpServerConfig {
+  string name = 1;                    // Unique identifier for this server
+
+  oneof transport {
+    McpStdioTransport stdio = 2;      // Launch as subprocess (stdin/stdout)
+    McpHttpTransport http = 3;        // Connect to SSE/Streamable HTTP endpoint
+  }
+
+  repeated string enabled_tools = 4;  // Tool whitelist (empty = all discovered tools)
+  map<string, string> env = 5;        // Environment variables for the server process
+}
+
+// McpStdioTransport launches an MCP server as a subprocess.
+message McpStdioTransport {
+  string command = 1;                 // Binary to execute (e.g., "npx", "uvx", "node")
+  repeated string args = 2;          // Arguments (e.g., ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
+}
+
+// McpHttpTransport connects to an MCP server via SSE or Streamable HTTP.
+message McpHttpTransport {
+  string url = 1;                     // Endpoint URL
+  map<string, string> headers = 2;   // Auth/custom headers
+}
+
+// ActionMcpTool represents a tool call to an MCP server.
+message ActionMcpTool {
+  // Args (set on STATE_ACTIVE)
+  string server_name = 1;            // Which MCP server owns this tool
+  string tool_name = 2;              // MCP tool name
+  string args_json = 3;              // JSON-encoded arguments
+  string call_id = 4;                // LLM-assigned call ID
+
+  // Result (set on STATE_DONE)
+  string result_json = 10;           // JSON-encoded result
+  bool is_error = 11;                // Whether the tool call failed
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SETTINGS CHANGE
+// ═══════════════════════════════════════════════════════════════════════
+
+// SettingsChange describes a user-initiated settings change.
+// Rendered as <USER_SETTINGS_CHANGE> in the enriched prompt so the model
+// can adapt its behavior (e.g., after a model switch or planning mode toggle).
+message SettingsChange {
+  // The setting that changed (e.g. "Model Selection", "Planning Mode").
+  string setting = 1;
+
+  // Previous value (e.g. "None", "off"). Empty if newly set.
+  string old_value = 2;
+
+  // New value (e.g. "Claude Opus 4.6 (Thinking)", "on").
+  string new_value = 3;
+
+  // Optional instruction for the model about how to handle this change.
+  // e.g. "No need to comment on this change if the user doesn't ask about it."
+  string hint = 4;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHARED TYPES
+// ═══════════════════════════════════════════════════════════════════════
+
+// ErrorInfo provides structured error details.
+message ErrorInfo {
+  string message = 1;
+  string code = 2;
+  map<string, string> metadata = 3;
+}
+
+// UsageMetadata tracks token consumption for a model call.
+message UsageMetadata {
+  int32 prompt_tokens = 1;
+  int32 completion_tokens = 2;
+  int32 thinking_tokens = 3;
+  int32 total_tokens = 4;
+  int32 cached_tokens = 5;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TRACING
+// ═══════════════════════════════════════════════════════════════════════
+
+// TraceEvent records a single LLM call/response for debugging and replay.
+message TraceEvent {
+  string timestamp = 1;          // RFC3339Nano
+  string conversation_id = 2;
+  string trajectory_id = 3;
+  int32 step_index = 4;
+
+  oneof event {
+    ModelCallTrace model_call = 10;
+    ModelResponseTrace model_response = 11;
+  }
+}
+
+// ModelCallTrace captures the full LLM request for replay/debugging.
+message ModelCallTrace {
+  string model_name = 1;
+  string contents_json = 2;      // Serialized conversation history
+  string config_json = 3;        // Serialized generation config
+  int32 tool_count = 4;          // Number of tools passed
+}
+
+// ModelResponseTrace captures the full LLM response.
+message ModelResponseTrace {
+  string response_json = 1;      // Serialized response
+  string error = 2;              // Error message if failed
+  bool eof = 3;                  // Stream ended
+  int32 latency_ms = 4;         // Round-trip latency
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CONVERSATION PERSISTENCE (stored as .pb files)
+// ═══════════════════════════════════════════════════════════════════════
+
+// ConversationState is the full state of a conversation, persisted as
+// conversations/<uuid>.pb. It holds config, history, and metadata.
+message ConversationState {
+  string conversation_id = 1;
+  string created_at = 2;            // RFC3339
+  string updated_at = 3;            // RFC3339
+  string harness_version = 4;
+
+  // Original config used to create this conversation
+  HarnessConfig config = 5;
+
+  // Conversation message history (for LLM context)
+  repeated ConversationMessage messages = 6;
+
+  // Accumulated token usage across all turns
+  UsageMetadata total_usage = 7;
+
+  // Current trajectory index (increments per user message)
+  int32 trajectory_count = 8;
+
+  // Step counter (global across all trajectories)
+  int32 step_count = 9;
+
+  // Number of times context was compacted in this conversation
+  int32 compaction_count = 11;
+
+  // Agent lineage — populated for subagent conversations.
+  // Enables UI and lhctl to reconstruct the full agent tree from flat .pb files.
+  string parent_conversation_id = 12;  // Empty for root conversations
+  string agent_role = 13;              // Human-readable role: "developer", "reviewer"
+  string agent_type_name = 14;         // Type name: "research", "self", custom
+  int32  agent_depth = 15;             // 0 = root, 1 = child, 2 = grandchild, etc.
+
+  // Conversation status
+  ConversationStatus status = 10;
+
+  enum ConversationStatus {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACTIVE = 1;
+    STATUS_COMPLETED = 2;
+    STATUS_ERROR = 3;
+  }
+}
+
+// ConversationMessage is a single message in the conversation history.
+// This is what gets fed back to the LLM for context.
+message ConversationMessage {
+  string role = 1;                   // "user", "model", "tool", "system"
+  string content = 2;                // Single-part content (backward compat)
+  repeated ToolCallRecord tool_calls = 3;
+  ToolResultRecord tool_result = 4;
+  string timestamp = 5;
+  repeated string parts = 6;         // Multi-part content (user messages)
+}
+
+// ToolCallRecord persists a tool call made by the model.
+message ToolCallRecord {
+  string call_id = 1;
+  string name = 2;
+  string args_json = 3;             // JSON-encoded arguments
+}
+
+// ToolResultRecord persists the result of a tool execution.
+message ToolResultRecord {
+  string call_id = 1;
+  string name = 2;
+  string content = 3;
+  bool is_error = 4;
+}
+
+// TranscriptLog is the append-only step log, persisted as transcript.pb.
+// Contains every StepUpdate emitted during the conversation.
+message TranscriptLog {
+  repeated TranscriptEntry entries = 1;
+}
+
+// TranscriptEntry is a single step in the transcript log.
+message TranscriptEntry {
+  int32 step_index = 1;
+  string source = 2;                // USER_EXPLICIT, MODEL, SYSTEM
+  string type = 3;                   // USER_INPUT, MODEL_RESPONSE, TOOL_CALL, TOOL_RESULT, TRAJECTORY_STATE, ERROR
+  string status = 4;                 // DONE, ERROR, ACTIVE
+  string timestamp = 5;             // RFC3339Nano
+
+  // The full step update (for replay)
+  StepUpdate step_update = 10;
+
+  // Trajectory state change (if type = TRAJECTORY_STATE)
+  TrajectoryState trajectory_state = 11;
+}
+
+// ActionSchedule sets a one-shot timer or recurring cron schedule.
+// When the timer/cron fires, it sends a notification with the prompt text.
+message ActionSchedule {
+  // One-shot timer: fire once after this many seconds.
+  // Mutually exclusive with cron_expression.
+  int32 duration_seconds = 1;
+
+  // Recurring cron: 5-field cron expression (minute hour day-of-month month day-of-week).
+  // Mutually exclusive with duration_seconds.
+  string cron_expression = 2;
+
+  // Max iterations for cron schedules. 0 = unlimited.
+  int32 max_iterations = 3;
+
+  // The notification message when the timer/cron fires.
+  string prompt = 4;
+
+  // --- Result fields (populated on STATE_DONE) ---
+
+  // The task ID assigned to this schedule (can be used with manage_task to cancel).
+  string task_id = 10;
+
+  // Whether the schedule was created successfully.
+  bool success = 11;
+}

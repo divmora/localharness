@@ -1,0 +1,1277 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
+
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/conversation"
+	"github.com/divmora/localharness/internal/engine"
+	"github.com/divmora/localharness/internal/llm"
+	mcpbridge "github.com/divmora/localharness/internal/mcp"
+	"github.com/divmora/localharness/internal/discovery"
+	"github.com/divmora/localharness/internal/tools"
+	"github.com/divmora/localharness/internal/workspace"
+)
+
+// Session manages a single WebSocket connection from an SDK client.
+type Session struct {
+	conn               *websocket.Conn
+	logger             *slog.Logger
+	serverCfg          *config.ServerConfig
+	mu                 sync.Mutex // Protects writes to conn
+	engine             *engine.Engine
+	conv               *conversation.Conversation
+	cancel             context.CancelFunc
+	toolRegistry       *tools.Registry
+	mcpMgr             *mcpbridge.Manager                     // MCP server bridge
+	pendingToolResults    map[string]chan *pb.ToolResult      // stepID → result channel
+	pendingMu             sync.Mutex                         // Protects pendingToolResults
+	pendingPermissions    map[string]chan *pb.PermissionResponse // requestID → response channel
+	pendingPermissionsMu  sync.Mutex                         // Protects pendingPermissions
+	pendingQuestions      map[string]chan *pb.QuestionResponse // requestID → response channel
+	pendingQuestionsMu    sync.Mutex                          // Protects pendingQuestions
+	notifyCh              <-chan tools.SystemMessage           // System notifications for auto-wake
+	maxAutoWakeTurns      int                                 // Max synthetic turns before needing real user message (0 = disabled)
+	autoWakeCount         int                                 // Current count of consecutive auto-wake turns
+	turnWg                sync.WaitGroup                      // Tracks in-flight handleUserMessage goroutines
+}
+
+// NewSession creates a new session for a WebSocket connection.
+func NewSession(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *slog.Logger) *Session {
+	return &Session{
+		conn:               conn,
+		logger:             logger,
+		serverCfg:          serverCfg,
+		pendingToolResults: make(map[string]chan *pb.ToolResult),
+		pendingPermissions: make(map[string]chan *pb.PermissionResponse),
+		pendingQuestions:   make(map[string]chan *pb.QuestionResponse),
+	}
+}
+
+const (
+	// wsPingInterval is how often the server sends WebSocket ping frames.
+	// During long LLM calls (e.g., Workers AI free tier), the WebSocket
+	// connection can be killed by the OS/middleware if there's no traffic.
+	// Pings keep the connection alive.
+	wsPingInterval = 30 * time.Second
+
+	// wsPongTimeout is how long the server waits for a pong response
+	// before considering the client disconnected. Must be > wsPingInterval.
+	wsPongTimeout = 45 * time.Second
+)
+
+// Run is the main session loop — reads messages from the client and processes them.
+// It uses a select loop to handle both WebSocket messages and system notifications
+// (timer fires, task completions). When the engine is idle and a notification arrives,
+// an auto-wake synthetic turn is started.
+func (s *Session) Run() {
+	defer s.conn.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	defer cancel()
+
+	// Configure WebSocket keepalive: server pings, client pongs.
+	// Set initial read deadline; the pong handler resets it on each pong.
+	s.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	s.conn.SetPongHandler(func(string) error {
+		s.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		return nil
+	})
+
+	// Start ping sender goroutine
+	go s.pingLoop(ctx)
+
+	// Read WebSocket messages in a goroutine → channel
+	clientMsgs := make(chan *pb.ClientMessage, 10)
+	go s.readLoop(clientMsgs)
+
+
+	for {
+		// If we have a notification channel (engine initialized), use select.
+		// Otherwise, just read client messages (pre-init phase).
+		if s.notifyCh != nil {
+			select {
+			case <-ctx.Done():
+				s.cleanup()
+				return
+			case msg, ok := <-clientMsgs:
+				if !ok {
+					s.cleanup()
+					return
+				}
+				s.dispatchClientMessage(ctx, msg)
+			case notif := <-s.notifyCh:
+				// Auto-wake: if engine is idle and within limit, start a synthetic turn
+				if s.engine != nil && s.engine.IsIdle() && s.canAutoWake() {
+					s.handleAutoWake(ctx, notif)
+				}
+				// If engine is busy, the notification was drained from the channel.
+				// It won't be re-queued, but the engine will drain any remaining
+				// notifications at the start of its next turn.
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				s.cleanup()
+				return
+			case msg, ok := <-clientMsgs:
+				if !ok {
+					s.cleanup()
+					return
+				}
+				s.dispatchClientMessage(ctx, msg)
+			}
+		}
+	}
+}
+// pingLoop sends periodic WebSocket ping frames to keep the connection alive.
+// Without this, idle connections during long LLM calls (10-60s) can be dropped
+// by the OS TCP keepalive or intermediate proxies.
+func (s *Session) pingLoop(ctx context.Context) {
+	ticker := time.NewTicker(wsPingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			err := s.conn.WriteMessage(websocket.PingMessage, []byte("keepalive"))
+			s.mu.Unlock()
+			if err != nil {
+				s.logger.Debug("ping write failed, connection likely closed", "error", err)
+				return
+			}
+		}
+	}
+}
+
+// readLoop reads WebSocket messages in a goroutine and sends them to a channel.
+func (s *Session) readLoop(ch chan<- *pb.ClientMessage) {
+	defer close(ch)
+
+	for {
+		msgType, data, err := s.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				s.logger.Error("WebSocket read error", "error", err)
+			}
+			return
+		}
+
+		if msgType != websocket.BinaryMessage {
+			s.logger.Warn("received non-binary message, ignoring", "type", msgType)
+			continue
+		}
+
+		var clientMsg pb.ClientMessage
+		if err := proto.Unmarshal(data, &clientMsg); err != nil {
+			s.logger.Error("protobuf unmarshal error", "error", err)
+			s.sendError("PROTO_ERROR", fmt.Sprintf("invalid protobuf: %v", err), false)
+			continue
+		}
+
+		ch <- &clientMsg
+	}
+}
+
+// dispatchClientMessage routes a client message to the appropriate handler.
+func (s *Session) dispatchClientMessage(ctx context.Context, msg *pb.ClientMessage) {
+	switch payload := msg.Payload.(type) {
+	case *pb.ClientMessage_Init:
+		s.handleInit(ctx, payload.Init)
+	case *pb.ClientMessage_UserMessage:
+		// Real user message — reset auto-wake counter
+		s.autoWakeCount = 0
+		s.turnWg.Add(1)
+		go s.handleUserMessage(ctx, payload.UserMessage)
+	case *pb.ClientMessage_Cancel:
+		s.handleCancel()
+	case *pb.ClientMessage_HostToolResult:
+		s.handleToolResult(payload.HostToolResult)
+	case *pb.ClientMessage_PermissionResponse:
+		s.handlePermissionResponse(payload.PermissionResponse)
+	case *pb.ClientMessage_QuestionResponse:
+		s.handleQuestionResponse(payload.QuestionResponse)
+	default:
+		s.logger.Warn("unknown client message type")
+	}
+}
+
+// canAutoWake checks whether another synthetic turn is allowed.
+// Returns false when auto-wake is disabled (limit=0) or the limit is reached.
+func (s *Session) canAutoWake() bool {
+	if s.maxAutoWakeTurns <= 0 {
+		return false // Auto-wake disabled
+	}
+	return s.autoWakeCount < s.maxAutoWakeTurns
+}
+
+// handleAutoWake starts a synthetic agent turn triggered by a system notification.
+// The notification content is passed as the user message — the engine will also
+// drain any additional pending notifications via its notifyCh.
+func (s *Session) handleAutoWake(ctx context.Context, notif tools.SystemMessage) {
+	s.autoWakeCount++
+	s.logger.Info("auto-wake: starting synthetic turn",
+		"source", notif.Source,
+		"task_id", notif.TaskID,
+		"auto_wake_count", s.autoWakeCount,
+		"max_auto_wake_turns", s.maxAutoWakeTurns,
+	)
+
+	// Construct a synthetic user message from the notification
+	syntheticMsg := &pb.UserMessage{
+		Content: fmt.Sprintf("[System notification: %s] %s", notif.Source, notif.Content),
+	}
+
+	s.turnWg.Add(1)
+	go s.handleUserMessage(ctx, syntheticMsg)
+}
+
+// cleanup persists state and shuts down resources on disconnect.
+// Waits for any in-flight handleUserMessage goroutines to complete their
+// post-run save (SetMessages + SaveAll) before doing final cleanup.
+func (s *Session) cleanup() {
+	s.logger.Info("session cleanup: waiting for in-flight turns to complete")
+	s.turnWg.Wait()
+	s.logger.Info("session cleanup: all turns complete, saving state")
+
+	if s.conv != nil {
+		if err := s.conv.SaveAll(); err != nil {
+			s.logger.Error("failed to save conversation state during cleanup", "error", err)
+		}
+	}
+	if s.toolRegistry != nil {
+		s.toolRegistry.Shutdown()
+	}
+	if s.mcpMgr != nil {
+		s.mcpMgr.Close()
+	}
+}
+
+// handleInit processes the InitRequest and sets up the engine.
+func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
+	cfg := req.Config
+	if cfg == nil {
+		s.sendError("INIT_ERROR", "config is required", true)
+		return
+	}
+
+	s.logger.Info("initializing session")
+
+	// Set up workspace manager
+	var workspaceDirs []string
+	var workspaceInfos []engine.WorkspaceInfo
+	for _, ws := range cfg.Workspaces {
+		workspaceDirs = append(workspaceDirs, ws.Directory)
+		workspaceInfos = append(workspaceInfos, engine.WorkspaceInfo{
+			Directory:  ws.Directory,
+			CorpusName: ws.CorpusName,
+		})
+	}
+	if len(workspaceDirs) == 0 {
+		workspaceDirs = []string{s.serverCfg.Workspace}
+		workspaceInfos = []engine.WorkspaceInfo{{Directory: s.serverCfg.Workspace}}
+	}
+
+	wsMgr, err := workspace.NewManager(workspaceDirs)
+	if err != nil {
+		s.sendError("INIT_ERROR", fmt.Sprintf("workspace error: %v", err), true)
+		return
+	}
+
+	// Set up conversation manager — always uses the binary's resolved data dir
+	appDataDir := s.serverCfg.AppDataDir
+
+	convMgr, err := conversation.NewManager(appDataDir)
+	if err != nil {
+		s.sendError("INIT_ERROR", fmt.Sprintf("conversation manager error: %v", err), true)
+		return
+	}
+
+	// Create or resume conversation
+	if cfg.ConversationId != "" {
+		// Resume existing conversation
+		s.conv, err = convMgr.Resume(cfg.ConversationId)
+		if err != nil {
+			s.sendError("INIT_ERROR", fmt.Sprintf("cannot resume conversation: %v", err), true)
+			return
+		}
+		s.logger.Info("resumed conversation", "id", s.conv.ID)
+	} else {
+		// Create new conversation
+		s.conv, err = convMgr.Create(cfg)
+		if err != nil {
+			s.sendError("INIT_ERROR", fmt.Sprintf("cannot create conversation: %v", err), true)
+			return
+		}
+		s.logger.Info("created conversation", "id", s.conv.ID)
+	}
+
+	// Allow only the brain and knowledge subdirectories so agents can write
+	// artifacts, logs, and knowledge items — but NOT conversations/, plugins/,
+	// skills/, projects.json, or other harness-internal paths.
+	brainRoot := filepath.Join(appDataDir, "brain")
+	knowledgeRoot := filepath.Join(appDataDir, "knowledge")
+	if err := wsMgr.AddAllowedPath(brainRoot); err != nil {
+		s.logger.Warn("failed to allow brain dir in workspace manager", "error", err)
+	}
+	if err := wsMgr.AddAllowedPath(knowledgeRoot); err != nil {
+		s.logger.Warn("failed to allow knowledge dir in workspace manager", "error", err)
+	}
+
+	// Set up LLM provider
+	provider, err := s.createProvider(cfg)
+	if err != nil {
+		s.sendError("INIT_ERROR", fmt.Sprintf("LLM provider error: %v", err), true)
+		return
+	}
+
+
+
+	// Set up tool registry
+	toolRegistry := tools.NewRegistry(wsMgr, s.logger)
+	builtinCfg := cfg.BuiltinTools
+	if builtinCfg == nil {
+		builtinCfg = config.DefaultBuiltinTools()
+	}
+	tools.RegisterBuiltinTools(toolRegistry, builtinCfg)
+	s.toolRegistry = toolRegistry
+
+	// Build host tool declarations and name set from config
+	var hostToolDecls []llm.FunctionDeclaration
+	hostToolNames := make(map[string]bool)
+	for _, td := range cfg.HostTools {
+		var params map[string]interface{}
+		if td.ParametersJsonSchema != "" {
+			if err := json.Unmarshal([]byte(td.ParametersJsonSchema), &params); err != nil {
+				s.logger.Warn("invalid host tool parameter schema", "tool", td.Name, "error", err)
+				params = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+			}
+		} else {
+			params = map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
+		}
+		hostToolDecls = append(hostToolDecls, llm.FunctionDeclaration{
+			Name:        td.Name,
+			Description: td.Description,
+			Parameters:  params,
+		})
+		hostToolNames[td.Name] = true
+		s.logger.Info("registered host tool", "name", td.Name)
+	}
+
+	// Load initial history from conversation state
+	var initialHistory []llm.Message
+	for _, m := range s.conv.Messages() {
+		initialHistory = append(initialHistory, mapProtoMessageToLLM(m))
+	}
+
+	// Set up MCP servers (global config + agent-level merge)
+	var mcpMgr *mcpbridge.Manager
+	globalMcpServers := config.LoadGlobalMcpConfig(s.logger)
+	mergedMcpServers := config.MergeMcpConfigs(globalMcpServers, cfg.McpServers)
+
+	// Auto-inject Playwright MCP server when browser capability is enabled
+	if cfg.BuiltinTools != nil && cfg.BuiltinTools.Browser {
+		if _, err := exec.LookPath("npx"); err != nil {
+			s.logger.Warn("Browser capability enabled but npx not found in PATH — install Node.js to use browser tools")
+		} else {
+			// Check if user already configured a "playwright" MCP server
+			hasPlaywright := false
+			for _, srv := range mergedMcpServers {
+				if srv.Name == "playwright" {
+					hasPlaywright = true
+					break
+				}
+			}
+			if !hasPlaywright {
+				playwrightCfg := &pb.McpServerConfig{
+					Name: "playwright",
+					Transport: &pb.McpServerConfig_Stdio{
+						Stdio: &pb.McpStdioTransport{
+							Command: "npx",
+							Args:    []string{"-y", "@playwright/mcp@latest"},
+						},
+					},
+				}
+				mergedMcpServers = append(mergedMcpServers, playwrightCfg)
+				s.logger.Info("auto-injecting Playwright MCP server for browser capability")
+			}
+		}
+	}
+
+	if len(mergedMcpServers) > 0 {
+		mcpMgr = mcpbridge.NewManager(s.logger)
+		if err := mcpMgr.Connect(ctx, mergedMcpServers); err != nil {
+			s.sendError("INIT_ERROR", fmt.Sprintf("MCP connection error: %v", err), false)
+			// Non-fatal: continue without MCP tools
+			s.logger.Error("MCP connection failed, continuing without MCP tools", "error", err)
+			mcpMgr = nil
+		} else {
+			s.mcpMgr = mcpMgr
+			s.logger.Info("MCP servers connected",
+				"servers", mcpMgr.ServerCount(),
+				"tools", mcpMgr.ToolCount(),
+			)
+		}
+	}
+
+	// Create trajectory
+	trajID := s.conv.NextTrajectoryID()
+
+	// Load user rules: ADK-injected (from config) + auto-discovered (AGENTS.md from workspaces).
+	// SDK rules come first, then workspace rules.
+	var userRules []config.UserRule
+	for _, r := range cfg.UserRules {
+		if r.Content != "" {
+			userRules = append(userRules, config.UserRule{
+				Filename: r.Label,
+				Content:  r.Content,
+			})
+		}
+	}
+	discoveredRules := config.LoadAgentsRules(workspaceDirs, s.logger)
+	userRules = append(userRules, discoveredRules...)
+	if len(userRules) > 0 {
+		s.logger.Info("loaded user rules", "sdk", len(userRules)-len(discoveredRules), "agents_md", len(discoveredRules))
+	}
+
+	// Wire system notification channel: timers, cron, and task completions
+	// all push to the same channel so the engine can drain them before each turn.
+	var notifyCh <-chan tools.SystemMessage
+	if toolRegistry.TaskManager() != nil {
+		schedMgr := toolRegistry.TaskManager().ScheduleManager()
+		notifyCh = schedMgr.Notifications()
+		// TaskManager pushes completions to the same underlying channel
+		toolRegistry.TaskManager().SetNotifyChannel(schedMgr.NotifyChannel())
+	}
+
+	// Discover skills and plugins from filesystem (global + workspace)
+	// then merge with ADK-injected definitions (SDK > workspace > global)
+	adkSkills := protoSkillsToEngine(cfg.Skills)
+	adkPlugins := protoPluginsToEngine(cfg.Plugins)
+	allSkills, allPlugins := discovery.DiscoverAll(appDataDir, workspaceDirs, adkSkills, adkPlugins, s.logger)
+
+	// Create project registry for workspace → project UUID mapping (Knowledge Items)
+	projectRegistry := engine.NewProjectRegistry(appDataDir)
+	if err := projectRegistry.Load(); err != nil {
+		s.logger.Warn("failed to load project registry", "error", err)
+	}
+
+	s.engine = engine.NewEngine(engine.Config{
+		Provider:              provider,
+		ToolRegistry:          toolRegistry,
+		SystemPrompt:          cfg.SystemInstructions,
+		StructuredInstructions: cfg.StructuredInstructions,
+		ConversationID:        s.conv.ID,
+		TrajectoryID:          trajID,
+		OnStep:                s.onStep,
+		OnTrajectory:          s.onTrajectory,
+		CompactionThreshold:   resolveCompactionThreshold(int(cfg.CompactionThreshold)),
+		KeepRecentMessages:    int(cfg.KeepRecentMessages),
+		BrainDir:              s.conv.BrainDir,
+		AppDataDir:            appDataDir,
+		Logger:                s.logger,
+		HostToolHandler:       s.hostToolHandler,
+		HostToolNames:         hostToolNames,
+		HostToolDecls:         hostToolDecls,
+		PermissionHandler:     s.permissionHandler,
+		QuestionHandler:       s.questionHandler,
+		MCPManager:            mcpMgr,
+		Workspaces:            workspaceDirs,
+		WorkspaceInfos:        workspaceInfos,
+		UserRules:             userRules,
+		MaxDepth:              int(cfg.MaxSubagentDepth),
+		MaxSubagents:          int(cfg.MaxConcurrentSubagents),
+		SubagentsEnabled:      builtinCfg.InvokeSubagent,
+		InitialHistory:        initialHistory,
+		EnableWebDev:          cfg.PromptModules != nil && cfg.PromptModules.EnableWebDevelopment,
+		EnablePlanningMode:    cfg.PromptModules != nil && cfg.PromptModules.EnablePlanning,
+		EnableSlashCommands:   cfg.PromptModules != nil && cfg.PromptModules.EnableSlashCommands,
+		SlashCommands:         protoSlashCommandsToEngine(cfg.SlashCommands),
+		EnableKnowledgeItems:  cfg.PromptModules != nil && cfg.PromptModules.EnableKnowledgeItems,
+		Skills:                allSkills,
+		Plugins:               allPlugins,
+		NotifyCh:              notifyCh,
+		ProjectRegistry:       projectRegistry,
+		ConversationManager:   convMgr,
+	})
+
+	// Store notification channel on session for auto-wake in Run() select loop
+	s.notifyCh = notifyCh
+	s.maxAutoWakeTurns = int(cfg.MaxAutoWakeTurns)
+
+	// Register pre-completion hook to save conversation state BEFORE
+	// TRAJ_IDLE is emitted. This prevents a race condition where the SDK
+	// receives TRAJ_IDLE, Chat() returns, and agent.Close() kills the
+	// harness before handleUserMessage can reach SetMessages/SaveAll.
+	s.engine.SetPreCompletionHook(func() {
+		history := s.engine.History()
+		var protoMsgs []*pb.ConversationMessage
+		for _, m := range history {
+			protoMsgs = append(protoMsgs, mapLLMMessageToProto(m))
+		}
+		s.conv.SetMessages(protoMsgs)
+		if err := s.conv.SaveAll(); err != nil {
+			s.logger.Error("pre-completion save failed", "error", err)
+		} else {
+			s.logger.Debug("pre-completion save complete",
+				"messages", len(protoMsgs),
+				"conv_id", s.conv.ID,
+			)
+		}
+	})
+
+	// Send init response
+	s.sendServerMessage(&pb.ServerMessage{
+		Payload: &pb.ServerMessage_InitResponse{
+			InitResponse: &pb.InitResponse{
+				ConversationId: s.conv.ID,
+				HarnessVersion: config.HarnessVersion,
+			},
+		},
+	})
+
+	s.logger.Info("session initialized",
+		"conversation_id", s.conv.ID,
+		"conversation_dir", s.conv.BrainDir,
+		"model", provider.ModelName(),
+		"workspaces", workspaceDirs,
+	)
+}
+
+// handleUserMessage processes a user prompt and runs the agentic loop.
+// Caller must call turnWg.Add(1) before launching this in a goroutine.
+func (s *Session) handleUserMessage(ctx context.Context, msg *pb.UserMessage) {
+	defer s.turnWg.Done()
+
+	if s.engine == nil {
+		s.sendError("NOT_INITIALIZED", "send InitRequest first", false)
+		return
+	}
+
+	s.logger.Info("user message received", "content_len", len(msg.Content))
+
+	// Log user message to conversation
+	s.conv.AddMessage(&pb.ConversationMessage{
+		Role:    "user",
+		Content: msg.Content,
+	})
+
+	// Run the agentic loop with host context and ephemeral messages (blocking)
+	if len(msg.EphemeralMessages) > 0 {
+		s.engine.SetEphemeralMessages(msg.EphemeralMessages)
+	}
+	if len(msg.SettingsChanges) > 0 {
+		changes := make([]engine.SettingsChange, len(msg.SettingsChanges))
+		for i, sc := range msg.SettingsChanges {
+			changes[i] = engine.SettingsChange{
+				Setting:  sc.Setting,
+				OldValue: sc.OldValue,
+				NewValue: sc.NewValue,
+				Hint:     sc.Hint,
+			}
+		}
+		s.engine.SetSettingsChanges(changes)
+	}
+	if err := s.engine.RunWithContext(ctx, msg.Content, msg.Context); err != nil {
+		s.logger.Error("engine error", "error", err)
+		s.sendError("ENGINE_ERROR", err.Error(), false)
+	}
+
+	// Sync engine history back to conversation
+	history := s.engine.History()
+	var protoMsgs []*pb.ConversationMessage
+	for _, m := range history {
+		protoMsgs = append(protoMsgs, mapLLMMessageToProto(m))
+	}
+	s.conv.SetMessages(protoMsgs)
+
+	// Persist state after each turn
+	if err := s.conv.SaveAll(); err != nil {
+		s.logger.Error("failed to save conversation state", "error", err)
+	} else {
+		s.logger.Debug("conversation state saved",
+			"messages", len(protoMsgs),
+			"conv_id", s.conv.ID,
+		)
+	}
+}
+
+// handleCancel aborts the current turn.
+func (s *Session) handleCancel() {
+	if s.cancel != nil {
+		s.logger.Info("cancelling current turn")
+		s.cancel()
+	}
+}
+
+// hostToolHandler is the engine.HostToolHandler callback.
+// It creates a channel, stores it in pendingToolResults, and blocks until
+// the SDK client sends back a ToolResult (or timeout/context cancellation).
+func (s *Session) hostToolHandler(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) (string, bool, error) {
+	stepID := fmt.Sprintf("%d", step.StepIndex)
+	ch := make(chan *pb.ToolResult, 1)
+
+	s.pendingMu.Lock()
+	s.pendingToolResults[stepID] = ch
+	s.pendingMu.Unlock()
+
+	defer func() {
+		s.pendingMu.Lock()
+		delete(s.pendingToolResults, stepID)
+		s.pendingMu.Unlock()
+	}()
+
+	// Wait for client response (or timeout/cancel)
+	select {
+	case result := <-ch:
+		return result.ResultJson, result.IsError, nil
+	case <-ctx.Done():
+		return "", true, ctx.Err()
+	case <-time.After(5 * time.Minute):
+		return "", true, fmt.Errorf("host tool %q timed out waiting for result (5m)", tc.Name)
+	}
+}
+
+// handleToolResult routes an incoming ToolResult from the SDK client
+// to the pending channel that the engine's hostToolHandler is blocking on.
+func (s *Session) handleToolResult(result *pb.ToolResult) {
+	s.logger.Info("received host tool result", "tool", result.ToolName, "step_id", result.StepId)
+
+	s.pendingMu.Lock()
+	ch, ok := s.pendingToolResults[result.StepId]
+	s.pendingMu.Unlock()
+
+	if !ok {
+		s.logger.Warn("received tool result for unknown step",
+			"step_id", result.StepId,
+			"tool", result.ToolName,
+		)
+		return
+	}
+
+	// Non-blocking send (channel is buffered with capacity 1)
+	select {
+	case ch <- result:
+	default:
+		s.logger.Warn("duplicate tool result ignored", "step_id", result.StepId)
+	}
+}
+
+// permissionHandler is the engine.PermissionHandler callback.
+// It creates a channel, stores it in pendingPermissions, and blocks until
+// the SDK client sends back a PermissionResponse (or timeout/context cancellation).
+func (s *Session) permissionHandler(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+	ch := make(chan *pb.PermissionResponse, 1)
+
+	s.pendingPermissionsMu.Lock()
+	s.pendingPermissions[req.RequestId] = ch
+	s.pendingPermissionsMu.Unlock()
+
+	defer func() {
+		s.pendingPermissionsMu.Lock()
+		delete(s.pendingPermissions, req.RequestId)
+		s.pendingPermissionsMu.Unlock()
+	}()
+
+	// Wait for client response (or timeout/cancel)
+	select {
+	case resp := <-ch:
+		return resp.Approved, resp.DenialReason, nil
+	case <-ctx.Done():
+		return false, "cancelled", ctx.Err()
+	case <-time.After(5 * time.Minute):
+		return false, "timed out waiting for permission response (5m)", nil
+	}
+}
+
+// handlePermissionResponse routes an incoming PermissionResponse from the SDK client
+// to the pending channel that the engine's permissionHandler is blocking on.
+func (s *Session) handlePermissionResponse(resp *pb.PermissionResponse) {
+	s.logger.Info("received permission response", "request_id", resp.RequestId, "approved", resp.Approved)
+
+	s.pendingPermissionsMu.Lock()
+	ch, ok := s.pendingPermissions[resp.RequestId]
+	s.pendingPermissionsMu.Unlock()
+
+	if !ok {
+		s.logger.Warn("received permission response for unknown request",
+			"request_id", resp.RequestId,
+		)
+		return
+	}
+
+	// Non-blocking send (channel is buffered with capacity 1)
+	select {
+	case ch <- resp:
+	default:
+		s.logger.Warn("duplicate permission response ignored", "request_id", resp.RequestId)
+	}
+}
+
+// questionHandler is the engine.QuestionHandler callback.
+// It creates a channel, stores it in pendingQuestions, and blocks until
+// the SDK client sends back a QuestionResponse (or timeout/context cancellation).
+func (s *Session) questionHandler(ctx context.Context, req *pb.ActionUserQuestion) (*pb.QuestionResponse, error) {
+	ch := make(chan *pb.QuestionResponse, 1)
+
+	s.pendingQuestionsMu.Lock()
+	s.pendingQuestions[req.RequestId] = ch
+	s.pendingQuestionsMu.Unlock()
+
+	defer func() {
+		s.pendingQuestionsMu.Lock()
+		delete(s.pendingQuestions, req.RequestId)
+		s.pendingQuestionsMu.Unlock()
+	}()
+
+	// Wait for client response (or timeout/cancel)
+	select {
+	case resp := <-ch:
+		return resp, nil
+	case <-ctx.Done():
+		return &pb.QuestionResponse{Skipped: true}, ctx.Err()
+	case <-time.After(5 * time.Minute):
+		return &pb.QuestionResponse{Skipped: true}, nil
+	}
+}
+
+// handleQuestionResponse routes an incoming QuestionResponse from the SDK client
+// to the pending channel that the engine's questionHandler is blocking on.
+func (s *Session) handleQuestionResponse(resp *pb.QuestionResponse) {
+	s.logger.Info("received question response", "request_id", resp.RequestId, "skipped", resp.Skipped)
+
+	s.pendingQuestionsMu.Lock()
+	ch, ok := s.pendingQuestions[resp.RequestId]
+	s.pendingQuestionsMu.Unlock()
+
+	if !ok {
+		s.logger.Warn("received question response for unknown request",
+			"request_id", resp.RequestId,
+		)
+		return
+	}
+
+	// Non-blocking send (channel is buffered with capacity 1)
+	select {
+	case ch <- resp:
+	default:
+		s.logger.Warn("duplicate question response ignored", "request_id", resp.RequestId)
+	}
+}
+
+// createProvider creates the LLM provider from the HarnessConfig.
+// It loads the configuration from ~/.divmora/config/litellm.json.
+func (s *Session) createProvider(cfg *pb.HarnessConfig) (llm.Provider, error) {
+	liteLLMCfg := config.LoadGlobalLiteLLMConfig(s.logger)
+
+	var endpointName string
+	if cfg.LitellmEndpoint != "" {
+		endpointName = cfg.LitellmEndpoint
+	} else if liteLLMCfg.DefaultEndpoint != "" {
+		endpointName = liteLLMCfg.DefaultEndpoint
+	}
+
+	var baseURL, apiKey, model string
+
+	// Load from global config if an endpoint is resolved
+	if endpointName != "" {
+		if endpoint, ok := liteLLMCfg.Endpoints[endpointName]; ok {
+			baseURL = endpoint.BaseURL
+			apiKey = endpoint.APIKey
+			model = endpoint.DefaultModel
+			s.logger.Info("using LiteLLM endpoint from global config", "endpoint", endpointName)
+		} else if cfg.LitellmEndpoint != "" {
+			return nil, fmt.Errorf("litellm endpoint %q not found in ~/.divmora/config/litellm.json", endpointName)
+		}
+	}
+
+	// ADK inline config overrides global config
+	if cfg.LitellmBaseUrl != "" {
+		baseURL = cfg.LitellmBaseUrl
+	}
+	if cfg.LitellmApiKey != "" {
+		apiKey = cfg.LitellmApiKey
+	}
+	if cfg.LitellmModel != "" {
+		model = cfg.LitellmModel
+	}
+
+	if baseURL == "" {
+		return nil, fmt.Errorf("no LiteLLM base URL configured (missing in ADK config and no valid default endpoint in ~/.divmora/config/litellm.json)")
+	}
+
+	primary, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
+		BaseURL:   baseURL,
+		APIKey:    apiKey,
+		ModelName: model,
+	}, s.logger)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return primary, nil
+}
+
+// ─── Callbacks ──────────────────────────────────────────────────────────
+
+func (s *Session) onStep(step *pb.StepUpdate) {
+	// Log to transcript — skip streaming text deltas to avoid noisy repeated entries.
+	// Streaming steps have no new information worth persisting; the final DONE state
+	// captures the complete text.
+	isStreamingDelta := step.State == pb.StepUpdate_STATE_STREAMING && step.Action == nil
+	if s.conv != nil && !isStreamingDelta {
+		source := "MODEL"
+		switch step.Source {
+		case pb.StepUpdate_SOURCE_USER:
+			source = "USER_EXPLICIT"
+		case pb.StepUpdate_SOURCE_SYSTEM:
+			source = "SYSTEM"
+		}
+
+		status := "DONE"
+		switch step.State {
+		case pb.StepUpdate_STATE_ACTIVE:
+			status = "ACTIVE"
+		case pb.StepUpdate_STATE_ERROR:
+			status = "ERROR"
+		case pb.StepUpdate_STATE_STREAMING:
+			status = "RUNNING"
+		case pb.StepUpdate_STATE_WAITING:
+			status = "WAITING"
+		}
+
+		// Determine step type — use tool-specific types matching Antigravity format
+		stepType := stepTypeFromAction(step)
+
+		entry := &conversation.TranscriptJSONEntry{
+			StepIndex: step.StepIndex,
+			Source:    source,
+			Type:      stepType,
+			Status:    status,
+		}
+
+		// Include content from the step result (truncated for large outputs)
+		content := extractStepContent(step)
+		if content != "" {
+			entry.Content = truncate(content, 2000)
+		}
+
+		// Include thinking text
+		if step.Thinking != "" {
+			entry.Thinking = truncate(step.Thinking, 500)
+		}
+
+		// Include tool calls on model response entries (PLANNER_RESPONSE)
+		// These are not available on individual step callbacks in our architecture,
+		// but we encode the current tool's args as a single-element tool_calls array.
+		if step.Action != nil && step.State == pb.StepUpdate_STATE_ACTIVE {
+			tc := extractToolCall(step)
+			if tc != nil {
+				entry.ToolCalls = []conversation.TranscriptToolCall{*tc}
+			}
+		}
+
+		// Include error details
+		if step.ErrorInfo != nil && step.ErrorInfo.Message != "" {
+			entry.Error = truncate(step.ErrorInfo.Message, 500)
+		}
+
+		s.conv.LogStep(entry)
+
+		// Save step content to steps/<N>/content.md
+		if step.Text != "" {
+			s.conv.SaveStepContent(step.StepIndex, step.Text)
+		}
+	}
+
+	// Send to client via WebSocket
+	s.sendServerMessage(&pb.ServerMessage{
+		Payload: &pb.ServerMessage_StepUpdate{
+			StepUpdate: step,
+		},
+	})
+}
+
+// stepTypeFromAction maps a StepUpdate's Action to an Antigravity-compatible type string.
+// When no action is present, returns "PLANNER_RESPONSE" for model text responses.
+func stepTypeFromAction(step *pb.StepUpdate) string {
+	if step.Action == nil {
+		if step.Text != "" {
+			return "PLANNER_RESPONSE"
+		}
+		return "MODEL_RESPONSE"
+	}
+
+	switch step.Action.(type) {
+	case *pb.StepUpdate_ViewFile:
+		return "VIEW_FILE"
+	case *pb.StepUpdate_WriteToFile:
+		return "CODE_ACTION"
+	case *pb.StepUpdate_ReplaceFileContent:
+		return "CODE_ACTION"
+	case *pb.StepUpdate_ListDir:
+		return "LIST_DIRECTORY"
+	case *pb.StepUpdate_GrepSearch:
+		return "GREP_SEARCH"
+	case *pb.StepUpdate_FindFile:
+		return "FIND_FILE"
+	case *pb.StepUpdate_RunCommand:
+		return "RUN_COMMAND"
+	case *pb.StepUpdate_ManageTask:
+		return "MANAGE_TASK"
+	case *pb.StepUpdate_Finish:
+		return "FINISH"
+	case *pb.StepUpdate_InvokeSubagent:
+		return "INVOKE_SUBAGENT"
+	case *pb.StepUpdate_SearchWeb:
+		return "WEB_SEARCH"
+	case *pb.StepUpdate_ReadUrlContent:
+		return "WEB_FETCH"
+	case *pb.StepUpdate_Schedule:
+		return "SCHEDULE"
+	case *pb.StepUpdate_McpTool:
+		return "MCP_TOOL"
+	case *pb.StepUpdate_HostToolCall:
+		return "HOST_TOOL"
+	case *pb.StepUpdate_UserQuestion:
+		return "USER_QUESTION"
+	case *pb.StepUpdate_PermissionRequest:
+		return "PERMISSION_REQUEST"
+	case *pb.StepUpdate_DefineSubagent:
+		return "DEFINE_SUBAGENT"
+	case *pb.StepUpdate_ManageSubagents:
+		return "MANAGE_SUBAGENTS"
+	case *pb.StepUpdate_SendMessageAction:
+		return "SEND_MESSAGE"
+	default:
+		return "GENERIC"
+	}
+}
+
+// extractToolCall extracts tool name and key args from a step for the tool_calls array.
+func extractToolCall(step *pb.StepUpdate) *conversation.TranscriptToolCall {
+	if step.Action == nil {
+		return nil
+	}
+
+	tc := &conversation.TranscriptToolCall{}
+	args := make(map[string]string)
+
+	switch a := step.Action.(type) {
+	case *pb.StepUpdate_ViewFile:
+		tc.Name = "view_file"
+		args["path"] = a.ViewFile.Path
+		if a.ViewFile.StartLine > 0 || a.ViewFile.EndLine > 0 {
+			args["lines"] = fmt.Sprintf("%d-%d", a.ViewFile.StartLine, a.ViewFile.EndLine)
+		}
+	case *pb.StepUpdate_WriteToFile:
+		tc.Name = "create_file"
+		args["path"] = a.WriteToFile.Path
+		args["overwrite"] = fmt.Sprintf("%v", a.WriteToFile.Overwrite)
+	case *pb.StepUpdate_ReplaceFileContent:
+		tc.Name = "edit_file"
+		args["path"] = a.ReplaceFileContent.Path
+	case *pb.StepUpdate_ListDir:
+		tc.Name = "list_dir"
+		args["path"] = a.ListDir.Path
+	case *pb.StepUpdate_GrepSearch:
+		tc.Name = "grep_search"
+		args["path"] = a.GrepSearch.Path
+		args["query"] = a.GrepSearch.Query
+	case *pb.StepUpdate_FindFile:
+		tc.Name = "find_file"
+		args["pattern"] = a.FindFile.Pattern
+	case *pb.StepUpdate_RunCommand:
+		tc.Name = "run_command"
+		args["command"] = truncate(a.RunCommand.Command, 200)
+	case *pb.StepUpdate_ManageTask:
+		tc.Name = "manage_task"
+	case *pb.StepUpdate_Finish:
+		tc.Name = "finish"
+	case *pb.StepUpdate_InvokeSubagent:
+		tc.Name = "invoke_subagent"
+	case *pb.StepUpdate_SearchWeb:
+		tc.Name = "search_web"
+		args["query"] = a.SearchWeb.Query
+	case *pb.StepUpdate_ReadUrlContent:
+		tc.Name = "read_url_content"
+		args["url"] = a.ReadUrlContent.Url
+	case *pb.StepUpdate_Schedule:
+		tc.Name = "schedule"
+		if a.Schedule.DurationSeconds > 0 {
+			args["duration"] = fmt.Sprintf("%ds", a.Schedule.DurationSeconds)
+		}
+		if a.Schedule.CronExpression != "" {
+			args["cron"] = a.Schedule.CronExpression
+		}
+	case *pb.StepUpdate_McpTool:
+		tc.Name = a.McpTool.ToolName
+		args["server"] = a.McpTool.ServerName
+	case *pb.StepUpdate_HostToolCall:
+		tc.Name = a.HostToolCall.ToolName
+	case *pb.StepUpdate_UserQuestion:
+		tc.Name = "ask_question"
+	default:
+		return nil
+	}
+
+	if len(args) > 0 {
+		tc.Args = args
+	}
+	return tc
+}
+
+// extractStepContent builds a human-readable content summary from a step's result.
+// For text-only steps, returns the model text. For tool results, returns a brief summary.
+func extractStepContent(step *pb.StepUpdate) string {
+	// Model text response
+	if step.Action == nil {
+		return step.Text
+	}
+
+	switch a := step.Action.(type) {
+	case *pb.StepUpdate_ViewFile:
+		if a.ViewFile.Content != "" {
+			return fmt.Sprintf("File Path: %s\nTotal Lines: %d\n%s",
+				a.ViewFile.Path, a.ViewFile.TotalLines, truncate(a.ViewFile.Content, 1500))
+		}
+		return fmt.Sprintf("File Path: %s", a.ViewFile.Path)
+	case *pb.StepUpdate_WriteToFile:
+		if a.WriteToFile.Created {
+			return fmt.Sprintf("Created file %s", a.WriteToFile.Path)
+		}
+		return fmt.Sprintf("Create file %s (overwrite=%v)", a.WriteToFile.Path, a.WriteToFile.Overwrite)
+	case *pb.StepUpdate_ReplaceFileContent:
+		if a.ReplaceFileContent.Success {
+			return fmt.Sprintf("Edited %s\n%s", a.ReplaceFileContent.Path, truncate(a.ReplaceFileContent.DiffBlock, 1500))
+		}
+		return fmt.Sprintf("Edit %s", a.ReplaceFileContent.Path)
+	case *pb.StepUpdate_ListDir:
+		return fmt.Sprintf("Listed %s (%d entries)", a.ListDir.Path, len(a.ListDir.Entries))
+	case *pb.StepUpdate_GrepSearch:
+		return fmt.Sprintf("Searched %s for %q (%d matches)",
+			a.GrepSearch.Path, a.GrepSearch.Query, a.GrepSearch.TotalMatches)
+	case *pb.StepUpdate_FindFile:
+		return fmt.Sprintf("Find %q (%d matches)", a.FindFile.Pattern, len(a.FindFile.Matches))
+	case *pb.StepUpdate_RunCommand:
+		rc := a.RunCommand
+		parts := fmt.Sprintf("Command: %s\nExit code: %d", truncate(rc.Command, 200), rc.ExitCode)
+		if rc.TaskId != "" {
+			parts += fmt.Sprintf("\nTask ID: %s", rc.TaskId)
+		}
+		if rc.Stdout != "" {
+			parts += fmt.Sprintf("\nStdout: %s", truncate(rc.Stdout, 500))
+		}
+		if rc.Stderr != "" {
+			parts += fmt.Sprintf("\nStderr: %s", truncate(rc.Stderr, 500))
+		}
+		return parts
+	case *pb.StepUpdate_SearchWeb:
+		return fmt.Sprintf("Search: %q (%d results)", a.SearchWeb.Query, len(a.SearchWeb.Results))
+	case *pb.StepUpdate_ReadUrlContent:
+		return fmt.Sprintf("Fetch: %s", a.ReadUrlContent.Url)
+	case *pb.StepUpdate_InvokeSubagent:
+		return fmt.Sprintf("Subagent result (%d steps): %s",
+			a.InvokeSubagent.StepsExecuted, truncate(a.InvokeSubagent.ResultText, 500))
+	case *pb.StepUpdate_McpTool:
+		return fmt.Sprintf("MCP %s.%s", a.McpTool.ServerName, a.McpTool.ToolName)
+	case *pb.StepUpdate_HostToolCall:
+		return fmt.Sprintf("Host tool: %s", a.HostToolCall.ToolName)
+	}
+
+	return ""
+}
+
+// truncate returns the first n characters of s, appending "…" if truncated.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+func (s *Session) onTrajectory(state *pb.TrajectoryState) {
+	if s.conv != nil {
+		s.conv.LogStep(&conversation.TranscriptJSONEntry{
+			StepIndex: -1,
+			Source:    "SYSTEM",
+			Type:      "TRAJECTORY_STATE",
+			Status:    state.State.String(),
+		})
+	}
+
+	s.sendServerMessage(&pb.ServerMessage{
+		Payload: &pb.ServerMessage_TrajectoryState{
+			TrajectoryState: state,
+		},
+	})
+}
+
+// ─── Wire helpers ───────────────────────────────────────────────────────
+
+func (s *Session) sendServerMessage(msg *pb.ServerMessage) {
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		s.logger.Error("protobuf marshal error", "error", err)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		s.logger.Error("WebSocket write error", "error", err)
+	}
+}
+
+func (s *Session) sendError(code, message string, fatal bool) {
+	s.sendServerMessage(&pb.ServerMessage{
+		Payload: &pb.ServerMessage_Error{
+			Error: &pb.ErrorEvent{
+				Code:    code,
+				Message: message,
+				Fatal:   fatal,
+			},
+		},
+	})
+}
+
+func mapProtoMessageToLLM(msg *pb.ConversationMessage) llm.Message {
+	llmMsg := llm.Message{
+		Role:    msg.Role,
+		Content: msg.Content,
+		Parts:   msg.Parts,
+	}
+	if len(msg.ToolCalls) > 0 {
+		llmMsg.ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
+		for i, tc := range msg.ToolCalls {
+			var args map[string]interface{}
+			if tc.ArgsJson != "" {
+				_ = json.Unmarshal([]byte(tc.ArgsJson), &args)
+			}
+			llmMsg.ToolCalls[i] = llm.ToolCall{
+				ID:   tc.CallId,
+				Name: tc.Name,
+				Args: args,
+			}
+		}
+	}
+	if msg.ToolResult != nil {
+		llmMsg.ToolResult = &llm.ToolCallResult{
+			CallID:  msg.ToolResult.CallId,
+			Name:    msg.ToolResult.Name,
+			Content: msg.ToolResult.Content,
+			IsError: msg.ToolResult.IsError,
+		}
+	}
+	return llmMsg
+}
+
+func mapLLMMessageToProto(msg llm.Message) *pb.ConversationMessage {
+	protoMsg := &pb.ConversationMessage{
+		Role:    msg.Role,
+		Content: msg.Content,
+		Parts:   msg.Parts,
+	}
+	if len(msg.ToolCalls) > 0 {
+		protoMsg.ToolCalls = make([]*pb.ToolCallRecord, len(msg.ToolCalls))
+		for i, tc := range msg.ToolCalls {
+			argsBytes, _ := json.Marshal(tc.Args)
+			protoMsg.ToolCalls[i] = &pb.ToolCallRecord{
+				CallId:   tc.ID,
+				Name:     tc.Name,
+				ArgsJson: string(argsBytes),
+			}
+		}
+	}
+	if msg.ToolResult != nil {
+		protoMsg.ToolResult = &pb.ToolResultRecord{
+			CallId:  msg.ToolResult.CallID,
+			Name:    msg.ToolResult.Name,
+			Content: msg.ToolResult.Content,
+			IsError: msg.ToolResult.IsError,
+		}
+	}
+	return protoMsg
+}
+
+// protoSlashCommandsToEngine converts proto SlashCommandDef to engine SlashCommandDef.
+func protoSlashCommandsToEngine(defs []*pb.SlashCommandDef) []engine.SlashCommandDef {
+	if len(defs) == 0 {
+		return nil
+	}
+	result := make([]engine.SlashCommandDef, len(defs))
+	for i, d := range defs {
+		result[i] = engine.SlashCommandDef{
+			Name:        d.Name,
+			Description: d.Description,
+		}
+	}
+	return result
+}
+
+// protoSkillsToEngine converts proto SkillDef to engine SkillDef.
+func protoSkillsToEngine(defs []*pb.SkillDef) []engine.SkillDef {
+	if len(defs) == 0 {
+		return nil
+	}
+	result := make([]engine.SkillDef, len(defs))
+	for i, d := range defs {
+		result[i] = engine.SkillDef{
+			Name:        d.Name,
+			Description: d.Description,
+			SkillPath:   d.SkillPath,
+		}
+	}
+	return result
+}
+
+// protoPluginsToEngine converts proto PluginDef to engine PluginDef.
+func protoPluginsToEngine(defs []*pb.PluginDef) []engine.PluginDef {
+	if len(defs) == 0 {
+		return nil
+	}
+	result := make([]engine.PluginDef, len(defs))
+	for i, d := range defs {
+		result[i] = engine.PluginDef{
+			Name:        d.Name,
+			Description: d.Description,
+			Path:        d.Path,
+			Skills:      protoSkillsToEngine(d.Skills),
+		}
+	}
+	return result
+}
+
+// resolveCompactionThreshold converts the SDK-provided threshold into the
+// engine value using the convention:
+//
+//	0  → use DefaultCompactionThreshold (100K tokens)
+//	-1 → disable compaction (engine value 0)
+//	>0 → use the explicit value as-is
+func resolveCompactionThreshold(adkValue int) int {
+	switch {
+	case adkValue < 0:
+		return 0 // Disabled — engine treats 0 as "no compaction"
+	case adkValue == 0:
+		return config.DefaultCompactionThreshold
+	default:
+		return adkValue
+	}
+}
