@@ -1,6 +1,7 @@
-import { Plus, MessageSquare, Search, Filter, Settings, Cpu, FolderOpen } from 'lucide-react';
+import { Plus, MessageSquare, Search, Filter, Settings, Cpu, FolderOpen, Moon, Sun } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
+import { useTheme } from '../hooks/useTheme';
 
 import { Space } from '../App';
 
@@ -31,7 +32,7 @@ export function UnifiedSidebar({
   sessionSpaces = {},
   mcpServerCount = 0
 }: UnifiedSidebarProps) {
-
+  const { theme, toggleTheme } = useTheme();
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, sessionId: string } | null>(null);
 
   useEffect(() => {
@@ -41,14 +42,14 @@ export function UnifiedSidebar({
   }, []);
 
   return (
-    <div className="w-64 h-full bg-[#000000] border-r border-[#0A0A0A] flex flex-col text-[#F9FAFB] shrink-0">
+    <div className="w-64 h-full bg-bg-primary border-r border-border-primary flex flex-col text-text-primary shrink-0">
       {/* Top action */}
       <div className="p-3 pb-2">
         <button 
           onClick={onNewSession}
-          className="w-full flex items-center gap-2 bg-[#262626] hover:bg-[#333333] text-[#F9FAFB] px-3 py-2 rounded-md text-sm font-medium transition-colors border border-[#333333]"
+          className="w-full flex items-center gap-2 bg-bg-secondary hover:bg-bg-tertiary text-text-primary px-3 py-2 rounded-md text-sm font-medium transition-colors border border-border-primary"
         >
-          <Plus size={16} className="text-[#9CA3AF]" /> 
+          <Plus size={16} className="text-text-secondary" /> 
           New session
         </button>
       </div>
@@ -65,9 +66,9 @@ export function UnifiedSidebar({
               });
             }).catch(console.error);
           }}
-          className="w-full flex items-center gap-2 bg-transparent hover:bg-[#121212] text-[#9CA3AF] px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-transparent hover:border-[#262626]"
+          className="w-full flex items-center gap-2 bg-transparent hover:bg-bg-secondary text-text-secondary px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-transparent hover:border-border-highlight"
         >
-          <Plus size={14} className="text-[#6B7280]" /> 
+          <Plus size={14} className="text-text-tertiary" /> 
           New window
         </button>
       </div>
@@ -75,7 +76,7 @@ export function UnifiedSidebar({
       {/* Main Nav */}
       <div className="px-2">
         <div 
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-white bg-[#1A1A1A] cursor-pointer hover:bg-[#262626] transition-colors rounded-sm"
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-text-primary bg-bg-secondary cursor-pointer hover:bg-bg-tertiary transition-colors rounded-sm"
           onClick={onOpenSessionsManager}
         >
           <MessageSquare size={14} />
@@ -84,12 +85,12 @@ export function UnifiedSidebar({
       </div>
 
       {/* Spaces Header */}
-      <div className="px-4 mt-6 mb-2 flex items-center justify-between text-xs font-semibold text-[#9CA3AF]">
+      <div className="px-4 mt-6 mb-2 flex items-center justify-between text-xs font-semibold text-text-secondary">
         <span>Spaces</span>
         <div className="flex items-center gap-2">
-          <Search size={14} className="cursor-pointer hover:text-[#F9FAFB]" />
-          <Plus size={14} className="cursor-pointer hover:text-[#F9FAFB]" onClick={onCreateSpace} />
-          <Filter size={14} className="cursor-pointer hover:text-[#F9FAFB]" />
+          <Search size={14} className="cursor-pointer hover:text-text-primary" />
+          <Plus size={14} className="cursor-pointer hover:text-text-primary" onClick={onCreateSpace} />
+          <Filter size={14} className="cursor-pointer hover:text-text-primary" />
         </div>
       </div>
 
@@ -98,7 +99,7 @@ export function UnifiedSidebar({
         {(() => {
           if (sessions.length === 0) {
             return (
-              <div className="px-2 py-4 text-xs text-[#6B7280]">
+              <div className="px-2 py-4 text-xs text-text-tertiary">
                 No recent sessions
               </div>
             );
@@ -133,7 +134,7 @@ export function UnifiedSidebar({
 
           return Object.entries(groups).map(([spaceName, spaceSessions]) => (
             <div key={spaceName} className="mb-4">
-              <div className="px-2 py-1 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-[#6B7280] uppercase">
+              <div className="px-2 py-1 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-text-tertiary uppercase">
                 <FolderOpen size={12} />
                 <span className="truncate" title={spaceName}>{spaceName}</span>
               </div>
@@ -148,12 +149,12 @@ export function UnifiedSidebar({
                     }}
                     className={`w-full text-left px-2 py-1.5 rounded-md cursor-pointer transition-colors ${
                       activeSessionId === session.id 
-                        ? 'bg-[#262626] text-[#F9FAFB]' 
-                        : 'text-[#9CA3AF] hover:text-[#F9FAFB] hover:bg-[#0A0A0A]'
+                        ? 'bg-border-primary text-text-primary' 
+                        : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
                     }`}
                   >
                     <div className="text-sm font-medium truncate">{session.name || "Untitled session"}</div>
-                    <div className="text-[11px] text-[#6B7280] truncate mt-0.5">
+                    <div className="text-[11px] text-text-tertiary truncate mt-0.5">
                       {(() => {
                         const diff = Date.now() - (Number(session.updatedAt) * 1000);
                         const minutes = Math.floor(diff / 60000);
@@ -173,35 +174,45 @@ export function UnifiedSidebar({
 
       {contextMenu && (
         <div 
-          className="fixed z-50 bg-[#1A1A1A] border border-[#333333] rounded-md shadow-lg py-1 min-w-[150px] text-xs"
+          className="fixed z-50 bg-bg-secondary border border-border-primary rounded-md shadow-lg py-1 min-w-[150px] text-xs"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
-          <div className="px-3 py-1.5 text-[#6B7280] font-semibold">Move to Space</div>
+          <div className="px-3 py-1.5 text-text-tertiary font-semibold">Move to Space</div>
           {spaces.map(space => (
             <button
               key={space.id}
-              className="w-full text-left px-3 py-1.5 text-[#F9FAFB] hover:bg-[#262626]"
+              className="w-full text-left px-3 py-1.5 text-text-primary hover:bg-bg-tertiary"
               onClick={() => onMoveSessionToSpace?.(contextMenu.sessionId, space.id)}
             >
               {space.name}
             </button>
           ))}
           {spaces.length === 0 && (
-            <div className="px-3 py-1.5 text-[#9CA3AF] italic">No spaces created</div>
+            <div className="px-3 py-1.5 text-text-tertiary italic">No spaces created</div>
           )}
         </div>
       )}
 
       {/* Footer */}
-      <div className="p-3 border-t border-[#0A0A0A] flex flex-col gap-2">
-        <button 
-          onClick={onOpenCustomizations}
-          className="flex items-center justify-between w-full px-2 py-1.5 text-xs font-semibold text-[#F9FAFB] hover:bg-[#0A0A0A] rounded-md transition-colors"
-        >
-          <span>Customizations</span>
-          <Settings size={14} className="text-[#9CA3AF]" />
-        </button>
-        <div className="flex items-center justify-between px-2 text-[11px] text-[#6B7280] font-medium">
+      <div className="p-3 border-t border-border-primary flex flex-col gap-2">
+        <div className="flex gap-2">
+          <button 
+            onClick={onOpenCustomizations}
+            className="flex flex-1 items-center justify-between px-2 py-1.5 text-xs font-semibold text-text-primary hover:bg-bg-secondary rounded-md transition-colors"
+          >
+            <span>Customizations</span>
+            <Settings size={14} className="text-text-secondary" />
+          </button>
+          
+          <button 
+            onClick={toggleTheme}
+            className="flex items-center justify-center px-2 py-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-secondary rounded-md transition-colors"
+            title="Toggle Theme"
+          >
+            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+        </div>
+        <div className="flex items-center justify-between px-2 text-[11px] text-text-tertiary font-medium">
           <span>{mcpServerCount} MCP servers</span>
           <Cpu size={12} />
         </div>

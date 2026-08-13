@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Loader, AlertCircle, CheckCircle, Share2 } from 'lucide-react';
 
@@ -11,10 +11,19 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
   const [viewType, setViewType] = useState<'board' | 'list'>('board');
   const [searchQuery, setSearchQuery] = useState('');
 
+  const filteredSessions = useMemo(() => {
+    return sessions.filter(session => {
+      if (searchQuery && !session.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [sessions, searchQuery]);
+
   // Group sessions by status for the Board view
-  const runningSessions = sessions.filter(s => s.status === SessionStatus.RUNNING);
-  const blockedSessions = sessions.filter(s => s.status === SessionStatus.BLOCKED);
-  const readySessions = sessions.filter(s => s.status === SessionStatus.READY || s.status === SessionStatus.UNSPECIFIED || s.status === SessionStatus.ERROR);
+  const runningSessions = filteredSessions.filter(s => s.status === SessionStatus.RUNNING);
+  const blockedSessions = filteredSessions.filter(s => s.status === SessionStatus.BLOCKED);
+  const readySessions = filteredSessions.filter(s => s.status === SessionStatus.READY || s.status === SessionStatus.UNSPECIFIED || s.status === SessionStatus.ERROR);
 
   // Time formatter
   const formatTimeAgo = (updatedAt: bigint) => {
@@ -28,19 +37,19 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#0A0A0A] overflow-hidden text-sm">
+    <div className="flex-1 flex flex-col h-full bg-bg-secondary overflow-hidden text-sm">
       {/* Top Bar */}
-      <div className="flex items-center justify-between p-4 border-b border-[#262626]">
-        <div className="flex bg-[#121212] border border-[#262626] rounded-md p-0.5">
+      <div className="flex items-center justify-between p-4 border-b border-border-primary">
+        <div className="flex bg-bg-tertiary border border-border-primary rounded-md p-0.5">
           <button 
             onClick={() => setViewType('board')}
-            className={`px-3 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors ${viewType === 'board' ? 'bg-[#262626] text-white' : 'text-[#9CA3AF] hover:text-white'}`}
+            className={`px-3 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors ${viewType === 'board' ? 'bg-border-primary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
           >
             <LayoutGrid size={14} /> Board
           </button>
           <button 
             onClick={() => setViewType('list')}
-            className={`px-3 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors ${viewType === 'list' ? 'bg-[#262626] text-white' : 'text-[#9CA3AF] hover:text-white'}`}
+            className={`px-3 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition-colors ${viewType === 'list' ? 'bg-border-primary text-text-primary' : 'text-text-secondary hover:text-text-primary'}`}
           >
             <List size={14} /> List
           </button>
@@ -48,32 +57,32 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
 
         <div className="flex items-center gap-3">
           <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
             <input 
               type="text" 
               placeholder="Search sessions..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-[#121212] border border-[#262626] rounded-md pl-9 pr-4 py-1.5 text-xs text-white focus:outline-none focus:border-[#333333] w-64"
+              className="bg-bg-tertiary border border-border-primary rounded-md pl-9 pr-4 py-1.5 text-xs text-text-primary focus:outline-none focus:border-border-highlight w-64"
             />
           </div>
-          <button className="flex items-center gap-1.5 text-xs font-medium text-[#9CA3AF] hover:text-white px-3 py-1.5 bg-[#121212] border border-[#262626] rounded-md transition-colors">
+          <button className="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary px-3 py-1.5 bg-bg-tertiary border border-border-primary rounded-md transition-colors">
             Display <SlidersHorizontal size={14} />
           </button>
         </div>
       </div>
 
       {/* Filter Bar */}
-      <div className="flex items-center gap-2 p-4 border-b border-[#262626]">
-        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#121212] border border-[#262626] rounded text-xs text-[#9CA3AF]">
-          <Clock size={12} /> Time is <span className="text-white">Any time</span>
-          <span className="cursor-pointer ml-1 text-[#6B7280] hover:text-white">×</span>
+      <div className="flex items-center gap-2 p-4 border-b border-border-primary">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-secondary">
+          <Clock size={12} /> Time is <span className="text-text-primary">Any time</span>
+          <span className="cursor-pointer ml-1 text-text-tertiary hover:text-text-primary">×</span>
         </div>
-        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#121212] border border-[#262626] rounded text-xs text-[#9CA3AF]">
-          <Archive size={12} /> Archived is <span className="text-white">Excluded</span>
-          <span className="cursor-pointer ml-1 text-[#6B7280] hover:text-white">×</span>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-bg-tertiary border border-border-primary rounded text-xs text-text-secondary">
+          <Archive size={12} /> Archived is <span className="text-text-primary">Excluded</span>
+          <span className="cursor-pointer ml-1 text-text-tertiary hover:text-text-primary">×</span>
         </div>
-        <button className="flex items-center justify-center w-6 h-6 rounded-full border border-[#262626] text-[#9CA3AF] hover:bg-[#262626] hover:text-white transition-colors">
+        <button className="flex items-center justify-center w-6 h-6 rounded-full border border-border-primary text-text-secondary hover:bg-border-primary hover:text-text-primary transition-colors">
           <Plus size={14} />
         </button>
       </div>
@@ -83,31 +92,31 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
         {viewType === 'board' ? (
           <div className="flex h-full min-w-max">
             {/* Running Column */}
-            <div className="flex-1 min-w-[300px] border-r border-[#262626] p-4 flex flex-col gap-3">
+            <div className="flex-1 min-w-[300px] border-r border-border-primary p-4 flex flex-col gap-3">
               <div className="flex items-center gap-2 mb-2">
-                <Loader size={14} className="text-[#9CA3AF]" />
-                <span className="text-xs font-semibold text-white">Running</span>
-                <span className="text-xs text-[#6B7280]">{runningSessions.length}</span>
+                <Loader size={14} className="text-text-secondary" />
+                <span className="text-xs font-semibold text-text-primary">Running</span>
+                <span className="text-xs text-text-tertiary">{runningSessions.length}</span>
               </div>
               {runningSessions.map(session => (
-                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
-                  <div className="text-xs font-medium text-white mb-4 line-clamp-2">{session.name}</div>
-                  <div className="text-[10px] text-[#6B7280]">{formatTimeAgo(session.updatedAt)}</div>
+                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-bg-tertiary border border-border-primary rounded-md p-3 hover:border-border-highlight cursor-pointer transition-colors">
+                  <div className="text-xs font-medium text-text-primary mb-4 line-clamp-2">{session.name}</div>
+                  <div className="text-[10px] text-text-tertiary">{formatTimeAgo(session.updatedAt)}</div>
                 </div>
               ))}
             </div>
 
             {/* Blocked Column */}
-            <div className="flex-1 min-w-[300px] border-r border-[#262626] p-4 flex flex-col gap-3">
+            <div className="flex-1 min-w-[300px] border-r border-border-primary p-4 flex flex-col gap-3">
               <div className="flex items-center gap-2 mb-2">
                 <AlertCircle size={14} className="text-orange-500" />
-                <span className="text-xs font-semibold text-white">Blocked</span>
-                <span className="text-xs text-[#6B7280]">{blockedSessions.length}</span>
+                <span className="text-xs font-semibold text-text-primary">Blocked</span>
+                <span className="text-xs text-text-tertiary">{blockedSessions.length}</span>
               </div>
               {blockedSessions.map(session => (
-                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
-                  <div className="text-xs font-medium text-white mb-4 line-clamp-2">{session.name}</div>
-                  <div className="text-[10px] text-[#6B7280]">{formatTimeAgo(session.updatedAt)}</div>
+                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-bg-tertiary border border-border-primary rounded-md p-3 hover:border-border-highlight cursor-pointer transition-colors">
+                  <div className="text-xs font-medium text-text-primary mb-4 line-clamp-2">{session.name}</div>
+                  <div className="text-[10px] text-text-tertiary">{formatTimeAgo(session.updatedAt)}</div>
                 </div>
               ))}
             </div>
@@ -116,29 +125,32 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
             <div className="flex-1 min-w-[300px] p-4 flex flex-col gap-3">
               <div className="flex items-center gap-2 mb-2">
                 <CheckCircle size={14} className="text-emerald-500" />
-                <span className="text-xs font-semibold text-white">Ready</span>
-                <span className="text-xs text-[#6B7280]">{readySessions.length}</span>
+                <span className="text-xs font-semibold text-text-primary">Ready</span>
+                <span className="text-xs text-text-tertiary">{readySessions.length}</span>
               </div>
               {readySessions.map(session => (
-                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
-                  <div className="text-xs font-medium text-white mb-4 line-clamp-2">{session.name}</div>
-                  <div className="text-[10px] text-[#6B7280]">{formatTimeAgo(session.updatedAt)}</div>
+                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-bg-tertiary border border-border-primary rounded-md p-3 hover:border-border-highlight cursor-pointer transition-colors">
+                  <div className="text-xs font-medium text-text-primary mb-4 line-clamp-2">{session.name}</div>
+                  <div className="text-[10px] text-text-tertiary">{formatTimeAgo(session.updatedAt)}</div>
                 </div>
               ))}
             </div>
           </div>
         ) : (
           <div className="flex flex-col p-4 gap-1">
-            {sessions.map(session => (
-              <div key={session.id} onClick={() => onSelectSession(session.id)} className="group flex items-center py-2 px-4 hover:bg-[#121212] rounded-md cursor-pointer transition-colors">
-                <Share2 size={14} className="text-white mr-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="text-xs font-semibold text-white min-w-[200px] max-w-[300px] truncate pr-4 flex items-center gap-2">
-                  {session.name} <span className="text-[#9CA3AF] font-normal text-[11px]">Devin Local</span>
+            {filteredSessions.length === 0 && (
+              <div className="text-text-tertiary text-xs text-center py-8">No sessions found matching your criteria.</div>
+            )}
+            {filteredSessions.map(session => (
+              <div key={session.id} onClick={() => onSelectSession(session.id)} className="group flex items-center py-2 px-4 hover:bg-bg-tertiary rounded-md cursor-pointer transition-colors">
+                <Share2 size={14} className="text-text-primary mr-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="text-xs font-semibold text-text-primary min-w-[200px] max-w-[300px] truncate pr-4 flex items-center gap-2">
+                  {session.name} <span className="text-text-secondary font-normal text-[11px]">Devin Local</span>
                 </div>
-                <div className="text-xs text-[#9CA3AF] flex items-center gap-1.5 flex-1 truncate pr-4">
+                <div className="text-xs text-text-secondary flex items-center gap-1.5 flex-1 truncate pr-4">
                   {session.workspace ? `My current workspace directory is \`${session.workspace}\`` : 'Local Workspace'}
                 </div>
-                <div className="text-xs text-[#6B7280] whitespace-nowrap">
+                <div className="text-xs text-text-tertiary whitespace-nowrap">
                   {formatTimeAgo(session.updatedAt)}
                 </div>
               </div>

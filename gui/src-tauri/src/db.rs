@@ -27,6 +27,15 @@ pub fn init_db() -> Result<DbState> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            current_value TEXT,
+            default_value TEXT
+        )",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS session_spaces (
             session_id TEXT PRIMARY KEY,
             space_id TEXT NOT NULL,
@@ -73,6 +82,36 @@ impl DbState {
         }
         
         Ok(spaces)
+    }
+
+    pub fn remove_session_from_space(&self, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM session_spaces WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT current_value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query(params![key])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_setting(&self, key: &str, current_value: &str, default_value: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, current_value, default_value) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET current_value = excluded.current_value",
+            params![key, current_value, default_value],
+        )?;
+        Ok(())
     }
 
     pub fn move_session_to_space(&self, session_id: &str, space_id: &str) -> Result<()> {

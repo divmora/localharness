@@ -7,6 +7,7 @@ import { WorkspacePanel } from './components/WorkspacePanel';
 import { CustomizationsPage } from './components/CustomizationsPage';
 import { ConnectSSHModal } from './components/ConnectSSHModal';
 import { SessionsManager } from './components/SessionsManager';
+import { CommandPalette } from './components/CommandPalette';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
@@ -172,7 +173,8 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
+      <CommandPalette />
       <ConnectSSHModal
         isOpen={sshModalOpen}
         onClose={() => setSshModalOpen(false)}
@@ -212,7 +214,7 @@ function App() {
           onSelectWorkspace={setWorkspace}
         />
       ) : (
-        <PanelGroup orientation="horizontal" className="flex-1 border-l border-[#0A0A0A]">
+        <PanelGroup orientation="horizontal" className="flex-1 border-l border-border-primary">
           {/* Center Pane: ChatPanel */}
           <Panel defaultSize={75} minSize={30}>
             <ChatPanel 
@@ -225,7 +227,7 @@ function App() {
             />
           </Panel>
 
-          <PanelResizeHandle className="w-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors" />
+          <PanelResizeHandle className="w-1 bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
 
           {/* Right Pane: Workspace */}
           <Panel defaultSize={45} minSize={20}>

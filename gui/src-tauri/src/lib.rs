@@ -129,6 +129,24 @@ fn get_session_spaces(
 }
 
 #[tauri::command]
+fn get_setting(
+    state: tauri::State<db::DbState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    state.get_setting(&key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_setting(
+    state: tauri::State<db::DbState>,
+    key: String,
+    current_value: String,
+    default_value: String,
+) -> Result<(), String> {
+    state.set_setting(&key, &current_value, &default_value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_files(dir: Option<String>) -> Result<Vec<String>, String> {
     let mut target = dir.unwrap_or_else(|| ".".to_string());
     if target.starts_with("~/") {
@@ -790,6 +808,7 @@ async fn setup_ssh_tunnel(app: &tauri::AppHandle, target: &ConnectionTarget, rem
 }
 use std::sync::Mutex;
 use tauri_plugin_shell::process::CommandChild;
+use tauri::{menu::{Menu, Submenu, MenuItem}, Emitter};
 
 struct AppState {
     children: Mutex<Vec<CommandChild>>,
@@ -803,6 +822,26 @@ pub fn run() {
         .manage(AppState {
             children: Mutex::new(Vec::new()),
         })
+        .setup(|app| {
+            let handle = app.handle();
+            let mut menu = Menu::default(handle)?;
+            
+            let prefs_menu = Submenu::new(handle, "Preferences", true)?;
+            let theme_i = MenuItem::new(handle, "Color Theme [⌘K ⌘T]", true, None::<&str>)?;
+            prefs_menu.append(&theme_i)?;
+            
+            menu.append(&prefs_menu)?;
+            app.set_menu(menu)?;
+            
+            let theme_id = theme_i.id().clone();
+            app.on_menu_event(move |app_handle, event| {
+                if event.id() == &theme_id {
+                    let _ = app_handle.emit("open-theme-palette", ());
+                }
+            });
+            
+            Ok(())
+        })
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
@@ -810,7 +849,7 @@ pub fn run() {
             start_harness, list_sessions, list_files, read_file, write_file, 
             read_target_file, write_target_file, list_target_files,
             create_space, get_spaces, move_session_to_space, get_session_spaces,
-            get_installation_id
+            get_installation_id, get_setting, set_setting
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
