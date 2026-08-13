@@ -29,7 +29,7 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
   const [llmError, setLlmError] = useState('');
 
   // Form states
-  const [formEndpoint, setFormEndpoint] = useState('pixelvide-cloud');
+  const [formEndpoint, setFormEndpoint] = useState('divmora');
   const [formBaseUrl, setFormBaseUrl] = useState('');
   const [formApiKey, setFormApiKey] = useState('');
   const [formDefaultModel, setFormDefaultModel] = useState('');
@@ -61,16 +61,16 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
           }
         } catch (e) {
           setLlmConfig({
-            defaultEndpoint: 'pixelvide-cloud',
+            defaultEndpoint: 'divmora',
             endpoints: {
-              'pixelvide-cloud': {
+              'divmora': {
                 baseUrl: '',
                 apiKey: '',
                 defaultModel: ''
               }
             }
           });
-          setFormEndpoint('pixelvide-cloud');
+          setFormEndpoint('divmora');
         } finally {
           setLlmLoading(false);
         }
