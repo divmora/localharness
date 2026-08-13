@@ -1,50 +1,36 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Sidebar } from './components/Sidebar';
+import { ChatPanel } from './components/ChatPanel';
+import { EditorPanel } from './components/EditorPanel';
+import { TerminalPanel } from './components/TerminalPanel';
+import './App.css';
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
-
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
+      <Sidebar />
+      <PanelGroup direction="horizontal" className="flex-1">
+        <Panel defaultSize={25} minSize={20}>
+          <ChatPanel />
+        </Panel>
+        
+        <PanelResizeHandle className="w-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
+        
+        <Panel defaultSize={75} minSize={30}>
+          <PanelGroup direction="vertical">
+            <Panel defaultSize={70}>
+              <EditorPanel />
+            </Panel>
+            
+            <PanelResizeHandle className="h-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
+            
+            <Panel defaultSize={30} minSize={10}>
+              <TerminalPanel />
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
+    </div>
   );
 }
 

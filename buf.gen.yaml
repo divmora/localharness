@@ -8,3 +8,6 @@ plugins:
   - remote: buf.build/protocolbuffers/go
     out: gen/go
     opt: paths=source_relative
+  - remote: buf.build/bufbuild/es
+    out: gui/src/gen
+    opt: target=ts
