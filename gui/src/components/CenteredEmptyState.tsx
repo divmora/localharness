@@ -9,12 +9,13 @@ interface CenteredEmptyStateProps {
   sessions: ProtoSessionInfo[];
   onSubmitPrompt: (prompt: string) => void;
   onOpenSSHModal: () => void;
+  onOpenSessionsManager: () => void;
   connectionTarget?: ConnectionTarget | null;
   workspace: string | null;
   onSelectWorkspace: (path: string) => void;
 }
 
-export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal, connectionTarget, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
+export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal, onOpenSessionsManager, connectionTarget, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
   const [prompt, setPrompt] = useState("");
 
   const handleSubmit = () => {
@@ -114,7 +115,10 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
                 <FolderOpen size={14} /> {workspace ? workspace : 'Select a directory...'}
               </div>
             </div>
-            <div className="cursor-pointer hover:text-[#F9FAFB] transition-colors flex items-center gap-1">
+            <div 
+              className="cursor-pointer hover:text-[#F9FAFB] transition-colors flex items-center gap-1"
+              onClick={onOpenSessionsManager}
+            >
               Go to agent manager <ArrowUp size={12} className="transform rotate-45" />
             </div>
           </div>

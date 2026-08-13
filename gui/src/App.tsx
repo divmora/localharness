@@ -6,6 +6,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { WorkspacePanel } from './components/WorkspacePanel';
 import { CustomizationsPage } from './components/CustomizationsPage';
 import { ConnectSSHModal } from './components/ConnectSSHModal';
+import { SessionsManager } from './components/SessionsManager';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
@@ -42,7 +43,7 @@ function App() {
   });
 
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
-  const [currentView, setCurrentView] = useState<'main' | 'customizations'>('main');
+  const [currentView, setCurrentView] = useState<'main' | 'customizations' | 'sessions'>('main');
   const [sshModalOpen, setSshModalOpen] = useState(false);
   const [workspace, setWorkspace] = useState<string | null>(null);
   
@@ -180,6 +181,7 @@ function App() {
         onCreateSpace={handleCreateSpace}
         onMoveSessionToSpace={handleMoveSessionToSpace}
         onOpenCustomizations={() => setCurrentView('customizations')}
+        onOpenSessionsManager={() => setCurrentView('sessions')}
         sessions={sessions}
         spaces={spaces}
         sessionSpaces={sessionSpaces}
@@ -191,12 +193,15 @@ function App() {
           onClose={() => setCurrentView('main')} 
           connectionTarget={connectionTarget}
         />
+      ) : currentView === 'sessions' ? (
+        <SessionsManager sessions={sessions} />
       ) : !activeSessionId ? (
         <CenteredEmptyState 
           sessions={sessions} 
           onSelectSession={setActiveSessionId} 
           onSubmitPrompt={handleStartPromptSession}
           onOpenSSHModal={() => setSshModalOpen(true)}
+          onOpenSessionsManager={() => setCurrentView('sessions')}
           connectionTarget={connectionTarget}
           workspace={workspace}
           onSelectWorkspace={setWorkspace}

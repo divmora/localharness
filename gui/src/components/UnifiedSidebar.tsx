@@ -11,6 +11,7 @@ interface UnifiedSidebarProps {
   onCreateSpace?: () => void;
   onMoveSessionToSpace?: (sessionId: string, spaceId: string) => void;
   onOpenCustomizations: () => void;
+  onOpenSessionsManager: () => void;
   sessions: ProtoSessionInfo[];
   spaces?: Space[];
   sessionSpaces?: Record<string, string>;
@@ -24,6 +25,7 @@ export function UnifiedSidebar({
   onCreateSpace,
   onMoveSessionToSpace,
   onOpenCustomizations,
+  onOpenSessionsManager,
   sessions,
   spaces = [],
   sessionSpaces = {},
@@ -72,10 +74,13 @@ export function UnifiedSidebar({
 
       {/* Main Nav */}
       <div className="px-2">
-        <button className="w-full flex items-center gap-2 px-2 py-1.5 text-sm font-medium text-[#F9FAFB] hover:bg-[#0A0A0A] rounded-md transition-colors">
-          <MessageSquare size={16} className="text-[#9CA3AF]" />
-          Sessions
-        </button>
+        <div 
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-white bg-[#1A1A1A] cursor-pointer hover:bg-[#262626] transition-colors rounded-sm"
+          onClick={onOpenSessionsManager}
+        >
+          <MessageSquare size={14} />
+          <span>Sessions</span>
+        </div>
       </div>
 
       {/* Spaces Header */}
