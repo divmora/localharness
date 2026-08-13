@@ -64,6 +64,21 @@ async fn read_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn write_file(path: String, content: String) -> Result<(), String> {
+    let mut target = path;
+    if target.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            target = target.replacen("~/", &format!("{}/", home.display()), 1);
+        }
+    }
+    // Ensure the parent directory exists
+    if let Some(parent) = std::path::Path::new(&target).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(target, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_sessions() -> Result<Vec<u8>, String> {
     let mut sessions = Vec::new();
     
@@ -344,7 +359,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file])
+        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file, write_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

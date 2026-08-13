@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { X, Terminal } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Terminal, Server, FileText, Check, ChevronRight } from 'lucide-react';
 import { ConnectionTarget } from '../hooks/useHarness';
+import { invoke } from '@tauri-apps/api/core';
 
 interface ConnectSSHModalProps {
   isOpen: boolean;
@@ -9,29 +10,82 @@ interface ConnectSSHModalProps {
 }
 
 export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalProps) {
-  const [host, setHost] = useState('');
-  const [user, setUser] = useState('');
-  const [port, setPort] = useState('22');
-  const [keyPath, setKeyPath] = useState('');
+  const [mode, setMode] = useState<'select' | 'edit'>('select');
+  const [configContent, setConfigContent] = useState('');
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (isOpen) {
+      loadConfig();
+      setMode('select');
+    }
+  }, [isOpen]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const loadConfig = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const content = await invoke<string>('read_file', { path: "~/.ssh/config" });
+      setConfigContent(content);
+      parseHosts(content);
+    } catch (e: any) {
+      // If file doesn't exist, it's fine, we start with empty
+      setConfigContent('');
+      setHosts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const parseHosts = (content: string) => {
+    const lines = content.split('\n');
+    const parsedHosts: string[] = [];
+    for (const line of lines) {
+      const match = line.trim().match(/^Host\s+(.+)$/i);
+      if (match) {
+        const hostNames = match[1].split(/\s+/);
+        for (const hostName of hostNames) {
+          if (!hostName.includes('*') && !hostName.includes('?')) {
+            parsedHosts.push(hostName);
+          }
+        }
+      }
+    }
+    // Deduplicate
+    setHosts(Array.from(new Set(parsedHosts)));
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await invoke('write_file', { path: "~/.ssh/config", content: configContent });
+      parseHosts(configContent);
+      setMode('select');
+    } catch (e: any) {
+      setError(e.toString());
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleConnect = (hostName: string) => {
     onConnect({
       kind: "ssh",
-      host,
-      user: user || undefined,
-      port: port ? parseInt(port, 10) : undefined,
-      key_path: keyPath || undefined
+      host: hostName
     });
     onClose();
   };
 
+  if (!isOpen) return null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-[450px] rounded-lg border border-[#222222] bg-[#0A0A0A] p-6 text-white shadow-2xl">
-        <div className="mb-6 flex items-center justify-between">
+      <div className="w-[500px] h-[550px] flex flex-col rounded-xl border border-[#222222] bg-[#0A0A0A] text-white shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[#222] p-4 bg-[#111]">
           <div className="flex items-center gap-2 text-lg font-semibold">
             <Terminal size={20} className="text-blue-400" />
             Connect via SSH
@@ -41,70 +95,98 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label className="mb-1 block text-sm text-neutral-400">Host (IP or domain)</label>
-            <input 
-              type="text" 
-              required
-              placeholder="e.g. 192.168.1.100 or 'myserver' from ~/.ssh/config"
-              className="w-full rounded border border-[#222] bg-[#111] p-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-            />
-          </div>
+        {/* Tabs */}
+        <div className="flex px-4 pt-3 border-b border-[#222] gap-4">
+          <button
+            onClick={() => setMode('select')}
+            className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+              mode === 'select' ? 'border-blue-500 text-white' : 'border-transparent text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            Select Host
+          </button>
+          <button
+            onClick={() => setMode('edit')}
+            className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+              mode === 'edit' ? 'border-blue-500 text-white' : 'border-transparent text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            Edit ~/.ssh/config
+          </button>
+        </div>
 
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <label className="mb-1 block text-sm text-neutral-400">Username (Optional)</label>
-              <input 
-                type="text" 
-                placeholder="e.g. root"
-                className="w-full rounded border border-[#222] bg-[#111] p-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-                value={user}
-                onChange={(e) => setUser(e.target.value)}
-              />
+        {/* Content */}
+        <div className="flex-1 overflow-hidden flex flex-col p-4 bg-[#0A0A0A]">
+          {isLoading ? (
+            <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm">
+              Loading...
             </div>
-            <div className="w-24">
-              <label className="mb-1 block text-sm text-neutral-400">Port</label>
-              <input 
-                type="number" 
-                placeholder="22"
-                className="w-full rounded border border-[#222] bg-[#111] p-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-              />
+          ) : mode === 'select' ? (
+            <div className="flex flex-col h-full">
+              {hosts.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-center">
+                  <Server size={48} className="text-neutral-800 mb-4" />
+                  <h3 className="text-neutral-300 font-medium mb-1">No SSH hosts configured</h3>
+                  <p className="text-neutral-500 text-sm mb-4">Add a host to your SSH config to get started.</p>
+                  <button
+                    onClick={() => {
+                      if (!configContent) {
+                        setConfigContent('# Example config:\n# Host myserver\n#   HostName 192.168.1.100\n#   User root\n#   IdentityFile ~/.ssh/id_rsa\n');
+                      }
+                      setMode('edit');
+                    }}
+                    className="flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                  >
+                    <FileText size={16} />
+                    Open Configuration File
+                  </button>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  <div className="text-xs font-semibold tracking-wider text-neutral-500 mb-3 px-2">AVAILABLE HOSTS</div>
+                  {hosts.map(host => (
+                    <button
+                      key={host}
+                      onClick={() => handleConnect(host)}
+                      className="w-full flex items-center justify-between p-3 rounded-lg border border-[#222] bg-[#111] hover:bg-[#1A1A1A] hover:border-[#333] transition-all group text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded bg-[#222] flex items-center justify-center text-neutral-400 group-hover:text-blue-400 transition-colors">
+                          <Server size={16} />
+                        </div>
+                        <span className="font-medium text-neutral-200 group-hover:text-white">{host}</span>
+                      </div>
+                      <ChevronRight size={18} className="text-neutral-600 group-hover:text-blue-400 transition-colors" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm text-neutral-400">SSH Key Path (Optional)</label>
-            <input 
-              type="text" 
-              placeholder="~/.ssh/id_rsa"
-              className="w-full rounded border border-[#222] bg-[#111] p-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-              value={keyPath}
-              onChange={(e) => setKeyPath(e.target.value)}
-            />
-            <p className="mt-1 text-xs text-neutral-500">If blank, standard SSH config agents/keys are used.</p>
-          </div>
-
-          <div className="mt-4 flex justify-end gap-3">
-            <button 
-              type="button" 
-              onClick={onClose}
-              className="rounded px-4 py-2 text-sm text-neutral-300 hover:bg-[#222] transition-colors"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit" 
-              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
-            >
-              Connect
-            </button>
-          </div>
-        </form>
+          ) : (
+            <div className="flex flex-col h-full gap-3">
+              <div className="text-xs text-neutral-500">
+                Editing your native <code className="bg-[#222] px-1 py-0.5 rounded text-neutral-300">~/.ssh/config</code>. Changes will be saved to your system.
+              </div>
+              <textarea
+                value={configContent}
+                onChange={e => setConfigContent(e.target.value)}
+                className="flex-1 w-full rounded-lg border border-[#333] bg-[#000] p-4 text-sm text-neutral-300 font-mono focus:border-blue-500 focus:outline-none resize-none"
+                spellCheck={false}
+              />
+              {error && <div className="text-xs text-red-400">{error}</div>}
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+                >
+                  <Check size={16} />
+                  {isSaving ? 'Saving...' : 'Save & Refresh'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
