@@ -79,6 +79,99 @@ async fn write_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn read_target_file(target: Option<ConnectionTarget>, path: String) -> Result<String, String> {
+    if let Some(t) = target {
+        if t.kind == "ssh" {
+            let host = t.host.as_ref().ok_or("SSH host required")?;
+            let mut args = vec![];
+            if let Some(port) = t.port {
+                args.push("-p".to_string());
+                args.push(port.to_string());
+            }
+            if let Some(key) = t.key_path.as_ref() {
+                if !key.is_empty() {
+                    args.push("-i".to_string());
+                    args.push(key.clone());
+                }
+            }
+            if let Some(user) = t.user.as_ref() {
+                if !user.is_empty() {
+                    args.push(format!("{}@{}", user, host));
+                } else {
+                    args.push(host.clone());
+                }
+            } else {
+                args.push(host.clone());
+            }
+            args.push(format!("cat {}", path));
+            
+            let output = std::process::Command::new("ssh")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+                
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+            } else {
+                return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+            }
+        }
+    }
+    // Fallback local
+    read_file(path).await
+}
+
+#[tauri::command]
+async fn write_target_file(target: Option<ConnectionTarget>, path: String, content: String) -> Result<(), String> {
+    if let Some(t) = target {
+        if t.kind == "ssh" {
+            let host = t.host.as_ref().ok_or("SSH host required")?;
+            let mut args = vec![];
+            if let Some(port) = t.port {
+                args.push("-p".to_string());
+                args.push(port.to_string());
+            }
+            if let Some(key) = t.key_path.as_ref() {
+                if !key.is_empty() {
+                    args.push("-i".to_string());
+                    args.push(key.clone());
+                }
+            }
+            if let Some(user) = t.user.as_ref() {
+                if !user.is_empty() {
+                    args.push(format!("{}@{}", user, host));
+                } else {
+                    args.push(host.clone());
+                }
+            } else {
+                args.push(host.clone());
+            }
+            let script = format!("mkdir -p $(dirname {}) && cat > {}", path, path);
+            args.push(script);
+            
+            let mut child = std::process::Command::new("ssh")
+                .args(&args)
+                .stdin(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+                
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+            }
+            
+            let output = child.wait_with_output().map_err(|e| e.to_string())?;
+            if output.status.success() {
+                return Ok(());
+            } else {
+                return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+            }
+        }
+    }
+    write_file(path, content).await
+}
+
+#[tauri::command]
 async fn list_sessions() -> Result<Vec<u8>, String> {
     let mut sessions = Vec::new();
     
@@ -359,7 +452,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file, write_file])
+        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file, write_file, read_target_file, write_target_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

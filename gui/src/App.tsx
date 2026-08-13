@@ -102,6 +102,7 @@ function App() {
       <CustomizationsModal 
         isOpen={customizationsOpen} 
         onClose={() => setCustomizationsOpen(false)} 
+        connectionTarget={connectionTarget}
       />
       <ConnectSSHModal
         isOpen={sshModalOpen}
