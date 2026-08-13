@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/divmora/localharness/internal/util"
@@ -172,8 +171,8 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 		return "", "", fmt.Errorf("task_manager: stdin pipe: %w", pipeErr)
 	}
 
-	// Use process group so we can kill the entire tree
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Use process group so we can kill the entire tree (on supported platforms)
+	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -343,9 +342,9 @@ func (tm *TaskManager) KillTask(taskID string) error {
 
 	tm.logger.Info("killing background task", "task_id", taskID)
 
-	// Try SIGTERM to the process group first
+	// Try SIGTERM to the process group first (or Kill on Windows)
 	if task.cmd.Process != nil {
-		_ = syscall.Kill(-task.cmd.Process.Pid, syscall.SIGTERM)
+		_ = terminateProcessGroup(task.cmd.Process.Pid)
 	}
 
 	// Wait for graceful exit
@@ -360,7 +359,7 @@ func (tm *TaskManager) KillTask(taskID string) error {
 
 	// Force kill
 	if task.cmd.Process != nil {
-		_ = syscall.Kill(-task.cmd.Process.Pid, syscall.SIGKILL)
+		_ = killProcessGroup(task.cmd.Process.Pid)
 	}
 	task.cancel()
 
@@ -485,7 +484,7 @@ func (tm *TaskManager) createTerminal(cwd string, env map[string]string) (*Persi
 		return nil, fmt.Errorf("task_manager: terminal stdin: %w", err)
 	}
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -684,7 +683,7 @@ func (tm *TaskManager) Shutdown() {
 	for _, task := range tm.tasks {
 		if task.Status == TaskRunning {
 			if task.cmd.Process != nil {
-				_ = syscall.Kill(-task.cmd.Process.Pid, syscall.SIGKILL)
+				_ = killProcessGroup(task.cmd.Process.Pid)
 			}
 			task.cancel()
 		}
@@ -693,7 +692,7 @@ func (tm *TaskManager) Shutdown() {
 	// Kill all terminals
 	for _, term := range tm.terminals {
 		if term.cmd.Process != nil {
-			_ = syscall.Kill(-term.cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcessGroup(term.cmd.Process.Pid)
 		}
 		term.cancel()
 	}
