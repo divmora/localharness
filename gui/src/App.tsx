@@ -88,6 +88,11 @@ function App() {
     setActiveSessionId(null);
   };
 
+  const handleSelectSession = (id: string) => {
+    setActiveSessionId(id);
+    setCurrentView('main');
+  };
+
   const handleStartPromptSession = (prompt: string) => {
     const newId = crypto.randomUUID();
     setActiveSessionId(newId);
@@ -176,7 +181,7 @@ function App() {
 
       <UnifiedSidebar 
         activeSessionId={activeSessionId} 
-        onSelectSession={setActiveSessionId} 
+        onSelectSession={handleSelectSession} 
         onNewSession={handleNewSession}
         onCreateSpace={handleCreateSpace}
         onMoveSessionToSpace={handleMoveSessionToSpace}
@@ -194,11 +199,11 @@ function App() {
           connectionTarget={connectionTarget}
         />
       ) : currentView === 'sessions' ? (
-        <SessionsManager sessions={sessions} />
+        <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
       ) : !activeSessionId ? (
         <CenteredEmptyState 
           sessions={sessions} 
-          onSelectSession={setActiveSessionId} 
+          onSelectSession={handleSelectSession} 
           onSubmitPrompt={handleStartPromptSession}
           onOpenSSHModal={() => setSshModalOpen(true)}
           onOpenSessionsManager={() => setCurrentView('sessions')}

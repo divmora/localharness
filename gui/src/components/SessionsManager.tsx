@@ -4,9 +4,10 @@ import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Load
 
 interface SessionsManagerProps {
   sessions: ProtoSessionInfo[];
+  onSelectSession: (id: string) => void;
 }
 
-export function SessionsManager({ sessions }: SessionsManagerProps) {
+export function SessionsManager({ sessions, onSelectSession }: SessionsManagerProps) {
   const [viewType, setViewType] = useState<'board' | 'list'>('board');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -89,7 +90,7 @@ export function SessionsManager({ sessions }: SessionsManagerProps) {
                 <span className="text-xs text-[#6B7280]">{runningSessions.length}</span>
               </div>
               {runningSessions.map(session => (
-                <div key={session.id} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
+                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
                   <div className="text-xs font-medium text-white mb-4 line-clamp-2">{session.name}</div>
                   <div className="text-[10px] text-[#6B7280]">{formatTimeAgo(session.updatedAt)}</div>
                 </div>
@@ -104,7 +105,7 @@ export function SessionsManager({ sessions }: SessionsManagerProps) {
                 <span className="text-xs text-[#6B7280]">{blockedSessions.length}</span>
               </div>
               {blockedSessions.map(session => (
-                <div key={session.id} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
+                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
                   <div className="text-xs font-medium text-white mb-4 line-clamp-2">{session.name}</div>
                   <div className="text-[10px] text-[#6B7280]">{formatTimeAgo(session.updatedAt)}</div>
                 </div>
@@ -119,7 +120,7 @@ export function SessionsManager({ sessions }: SessionsManagerProps) {
                 <span className="text-xs text-[#6B7280]">{readySessions.length}</span>
               </div>
               {readySessions.map(session => (
-                <div key={session.id} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
+                <div key={session.id} onClick={() => onSelectSession(session.id)} className="bg-[#121212] border border-[#262626] rounded-md p-3 hover:border-[#333333] cursor-pointer transition-colors">
                   <div className="text-xs font-medium text-white mb-4 line-clamp-2">{session.name}</div>
                   <div className="text-[10px] text-[#6B7280]">{formatTimeAgo(session.updatedAt)}</div>
                 </div>
@@ -129,7 +130,7 @@ export function SessionsManager({ sessions }: SessionsManagerProps) {
         ) : (
           <div className="flex flex-col p-4 gap-1">
             {sessions.map(session => (
-              <div key={session.id} className="group flex items-center py-2 px-4 hover:bg-[#121212] rounded-md cursor-pointer transition-colors">
+              <div key={session.id} onClick={() => onSelectSession(session.id)} className="group flex items-center py-2 px-4 hover:bg-[#121212] rounded-md cursor-pointer transition-colors">
                 <Share2 size={14} className="text-white mr-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                 <div className="text-xs font-semibold text-white min-w-[200px] max-w-[300px] truncate pr-4 flex items-center gap-2">
                   {session.name} <span className="text-[#9CA3AF] font-normal text-[11px]">Devin Local</span>
