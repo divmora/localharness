@@ -34,6 +34,7 @@ async fn list_sessions() -> Result<Vec<u8>, String> {
                     .unwrap_or(0);
                 
                 let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
+                let mut status = localharness::v1::SessionStatus::Ready;
                 
                 if let Ok(buf) = std::fs::read(&path) {
                     if let Ok(state) = ConversationState::decode(buf.as_slice()) {
@@ -51,6 +52,19 @@ async fn list_sessions() -> Result<Vec<u8>, String> {
                                 name = title;
                             }
                         }
+                        
+                        // Check last message for status
+                        if let Some(last_msg) = state.messages.last() {
+                            if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
+                                // Model made tool calls but no response yet
+                                let has_question = last_msg.tool_calls.iter().any(|t| t.name == "ask_question");
+                                if has_question {
+                                    status = localharness::v1::SessionStatus::Blocked;
+                                } else {
+                                    status = localharness::v1::SessionStatus::Running;
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -58,6 +72,7 @@ async fn list_sessions() -> Result<Vec<u8>, String> {
                     id: id.clone(),
                     name,
                     updated_at,
+                    status: status.into(),
                 });
             }
         }

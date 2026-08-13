@@ -1,8 +1,5 @@
 import { MoreHorizontal, Plus, Search, Filter, Clock } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { fromBinary } from '@bufbuild/protobuf';
-import { SessionListSchema, SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
+import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
 
 interface SessionsPanelProps {
   activeSessionId: string | null;
@@ -11,7 +8,6 @@ interface SessionsPanelProps {
 }
 
 export function SessionsPanel({ activeSessionId, onSelectSession, sessions }: SessionsPanelProps) {
-  const [loading, setLoading] = useState(false); // Can remove later if not needed
 
   return (
     <div className="h-full bg-[#11111b] border-r border-[#181825] flex flex-col text-[#cdd6f4]">
@@ -45,13 +41,13 @@ export function SessionsPanel({ activeSessionId, onSelectSession, sessions }: Se
       </div>
 
       {/* Sessions list */}
-      <div className="flex-1 overflow-y-auto p-2">
-        {loading ? (
-          <div className="text-xs text-[#6c7086] px-2 py-4">Loading sessions...</div>
-        ) : sessions.length === 0 ? (
-          <div className="text-xs text-[#6c7086] px-2 py-4">No sessions found.</div>
+      <div className="flex-1 overflow-y-auto">
+        {sessions.length === 0 ? (
+          <div className="p-4 text-center text-xs text-[#a6adc8] opacity-70">
+            No active sessions found.
+          </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1 p-2">
             {sessions.map((session) => (
               <div 
                 key={session.id}

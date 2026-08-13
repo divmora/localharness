@@ -9,6 +9,7 @@ import {
     StepUpdate,
     InitRequestSchema,
     HarnessConfigSchema,
+    QuestionResponseSchema,
     PermissionResponseSchema
 } from '../gen/localharness/v1/localharness_pb';
 
