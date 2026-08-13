@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::io::Write;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
+mod db;
 mod localharness;
 mod resolver;
 use localharness::v1::{InputConfig, OutputConfig, ConversationState, SessionInfo, SessionList};
@@ -11,6 +12,120 @@ use localharness::v1::{InputConfig, OutputConfig, ConversationState, SessionInfo
 pub struct HarnessConnection {
     pub port: i32,
     pub api_key: String,
+}
+
+#[tauri::command]
+async fn get_installation_id(
+    target: Option<serde_json::Value>,
+) -> Result<String, String> {
+    let mut connection_target: Option<ConnectionTarget> = None;
+    if let Some(v) = target {
+        connection_target = Some(serde_json::from_value(v).map_err(|e| e.to_string())?);
+    }
+    
+    if let Some(ct) = connection_target {
+        if ct.kind == "ssh" {
+            let host = ct.host.as_deref().unwrap_or("localhost");
+            let user = ct.user.as_deref().unwrap_or("root");
+            
+            // SSH script to check and create installation_id
+            let script = r#"
+file="$HOME/.divmora/localharness/installation_id"
+if [ ! -f "$file" ]; then
+    mkdir -p "$HOME/.divmora/localharness"
+    if command -v uuidgen > /dev/null; then
+        uuidgen > "$file"
+    elif [ -f /proc/sys/kernel/random/uuid ]; then
+        cat /proc/sys/kernel/random/uuid > "$file"
+    else
+        echo "$(date +%s%N)" > "$file"
+    fi
+fi
+cat "$file"
+"#;
+            let mut args = vec![];
+            if let Some(port) = ct.port {
+                args.push("-p".to_string());
+                args.push(port.to_string());
+            }
+            if let Some(key) = ct.key_path.as_deref() {
+                if !key.is_empty() {
+                    args.push("-i".to_string());
+                    args.push(key.to_string());
+                }
+            }
+            if let Some(user) = ct.user.as_deref() {
+                if !user.is_empty() {
+                    args.push(format!("{}@{}", user, host));
+                } else {
+                    args.push(host.to_string());
+                }
+            } else {
+                args.push(host.to_string());
+            }
+            args.push(script.to_string());
+
+            let output = std::process::Command::new("ssh")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+                
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+            } else {
+                return Err(format!("Failed to get remote installation_id: {}", String::from_utf8_lossy(&output.stderr)));
+            }
+        }
+    }
+    
+    // Local
+    let mut path = dirs::home_dir().ok_or("No home dir")?;
+    path.push(".divmora/localharness");
+    std::fs::create_dir_all(&path).ok();
+    path.push("installation_id");
+    
+    if !path.exists() {
+        let new_id = uuid::Uuid::new_v4().to_string();
+        std::fs::write(&path, &new_id).map_err(|e| e.to_string())?;
+        return Ok(new_id);
+    }
+    
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content.trim().to_string())
+}
+
+#[tauri::command]
+fn create_space(
+    state: tauri::State<db::DbState>,
+    id: String,
+    name: String,
+    installation_id: String,
+) -> Result<(), String> {
+    state.create_space(&id, &name, &installation_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_spaces(
+    state: tauri::State<db::DbState>,
+    installation_id: String,
+) -> Result<Vec<db::Space>, String> {
+    state.get_spaces(&installation_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn move_session_to_space(
+    state: tauri::State<db::DbState>,
+    session_id: String,
+    space_id: String,
+) -> Result<(), String> {
+    state.move_session_to_space(&session_id, &space_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_session_spaces(
+    state: tauri::State<db::DbState>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    state.get_session_spaces().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -240,7 +355,7 @@ async fn list_target_files(target: Option<ConnectionTarget>, dir: Option<String>
 }
 
 #[tauri::command]
-async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) -> Result<Vec<u8>, String> {
+async fn list_sessions(app: tauri::AppHandle, state: tauri::State<'_, db::DbState>, target: Option<ConnectionTarget>) -> Result<Vec<u8>, String> {
     let mut sessions = Vec::new();
     
     let is_ssh = target.as_ref().map(|t| t.kind == "ssh").unwrap_or(false);
@@ -305,16 +420,25 @@ async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                         let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
                         let mut status = localharness::v1::SessionStatus::Ready;
                         let mut updated_at = 0;
+                        let mut workspace = String::new();
+                        let mut client_source = String::new();
                         
-                        if let Ok(state) = ConversationState::decode(decoded.as_slice()) {
+                        if let Ok(conv_state) = ConversationState::decode(decoded.as_slice()) {
+                            if let Some(config) = &conv_state.config {
+                                client_source = config.client_source.clone();
+                                if !config.workspaces.is_empty() {
+                                    workspace = config.workspaces[0].directory.clone();
+                                }
+                            }
+                            
                             // Find last message timestamp
-                            if let Some(last) = state.messages.last() {
+                            if let Some(last) = conv_state.messages.last() {
                                 if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&last.timestamp) {
                                     updated_at = dt.timestamp();
                                 }
                             }
                             
-                            if let Some(first_msg) = state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
+                            if let Some(first_msg) = conv_state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
                                 let content = first_msg.content.trim();
                                 let first_line = content.lines().next().unwrap_or("").trim();
                                 
@@ -330,7 +454,7 @@ async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                             }
                             
                             // Check last message for status
-                            if let Some(last_msg) = state.messages.last() {
+                            if let Some(last_msg) = conv_state.messages.last() {
                                 if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
                                     let has_question = last_msg.tool_calls.iter().any(|t| t.name == "ask_question");
                                     if has_question {
@@ -343,10 +467,12 @@ async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                         }
                         
                         sessions.push(SessionInfo {
-                            id,
+                            id: id.clone(),
                             name,
                             updated_at: updated_at as i64,
                             status: status.into(),
+                            workspace,
+                            client_source,
                         });
                     }
                 } else if in_file {
@@ -373,17 +499,26 @@ async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                     
                     let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
                     let mut status = localharness::v1::SessionStatus::Ready;
+                    let mut workspace = String::new();
+                    let mut client_source = String::new();
                     
                     if let Ok(buf) = std::fs::read(&path) {
-                        if let Ok(state) = ConversationState::decode(buf.as_slice()) {
+                        if let Ok(conv_state) = ConversationState::decode(buf.as_slice()) {
+                            if let Some(config) = &conv_state.config {
+                                client_source = config.client_source.clone();
+                                if !config.workspaces.is_empty() {
+                                    workspace = config.workspaces[0].directory.clone();
+                                }
+                            }
+                            
                             // Find last message timestamp to override file mtime if present
-                            if let Some(last) = state.messages.last() {
+                            if let Some(last) = conv_state.messages.last() {
                                 if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&last.timestamp) {
                                     updated_at = dt.timestamp() as i64;
                                 }
                             }
                             
-                            if let Some(first_msg) = state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
+                            if let Some(first_msg) = conv_state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
                                 let content = first_msg.content.trim();
                                 let first_line = content.lines().next().unwrap_or("").trim();
                                 
@@ -399,7 +534,7 @@ async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                             }
                             
                             // Check last message for status
-                            if let Some(last_msg) = state.messages.last() {
+                            if let Some(last_msg) = conv_state.messages.last() {
                                 if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
                                     // Model made tool calls but no response yet
                                     let has_question = last_msg.tool_calls.iter().any(|t| t.name == "ask_question");
@@ -418,6 +553,8 @@ async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                     name,
                     updated_at,
                     status: status.into(),
+                    workspace,
+                    client_source,
                 });
             }
         }
@@ -660,14 +797,21 @@ struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let db = db::init_db().expect("Failed to initialize database");
     tauri::Builder::default()
+        .manage(db)
         .manage(AppState {
             children: Mutex::new(Vec::new()),
         })
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file, write_file, read_target_file, write_target_file, list_target_files])
+        .invoke_handler(tauri::generate_handler![
+            start_harness, list_sessions, list_files, read_file, write_file, 
+            read_target_file, write_target_file, list_target_files,
+            create_space, get_spaces, move_session_to_space, get_session_spaces,
+            get_installation_id
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

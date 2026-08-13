@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/google/uuid"
 )
 
 // ServerConfig holds the server-level configuration from CLI flags
@@ -76,6 +77,8 @@ func ParseFlags() *ServerConfig {
 		cfg.AppDataDir = abs
 	}
 
+	EnsureInstallationID(cfg.AppDataDir)
+
 	return cfg
 }
 
@@ -93,5 +96,16 @@ func DefaultBuiltinTools() *pb.BuiltinToolsConfig {
 		Finish:     true,
 		WebSearch:  true,
 		WebFetch:   true,
+	}
+}
+
+// EnsureInstallationID checks for installation_id in the app data directory
+// and creates one with a new UUIDv4 if it doesn't exist.
+func EnsureInstallationID(appDataDir string) {
+	idPath := filepath.Join(appDataDir, "installation_id")
+	if _, err := os.Stat(idPath); os.IsNotExist(err) {
+		os.MkdirAll(appDataDir, 0755)
+		newID := uuid.New().String()
+		os.WriteFile(idPath, []byte(newID), 0644)
 	}
 }

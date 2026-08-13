@@ -13,6 +13,13 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
+export interface Space {
+  id: string;
+  name: string;
+  target_kind: string;
+  target_host: string | null;
+}
+
 function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -37,15 +44,31 @@ function App() {
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [currentView, setCurrentView] = useState<'main' | 'customizations'>('main');
   const [sshModalOpen, setSshModalOpen] = useState(false);
+  const [workspace, setWorkspace] = useState<string | null>(null);
   
-  const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [sessionSpaces, setSessionSpaces] = useState<Record<string, string>>({});
+  const [installationId, setInstallationId] = useState<string | null>(null);
+  
+  const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget, workspace);
 
   useEffect(() => {
     async function loadSessions() {
       try {
-        const result = await invoke<number[]>('list_sessions', { target: connectionTarget });
+        const iid = await invoke<string>('get_installation_id', { target: connectionTarget });
+        setInstallationId(iid);
+
+        const [result, spacesList, sessionMap] = await Promise.all([
+          invoke<number[]>('list_sessions', { target: connectionTarget }),
+          invoke<Space[]>('get_spaces', { 
+            installationId: iid
+          }),
+          invoke<Record<string, string>>('get_session_spaces')
+        ]);
         const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
         setSessions(sessionList.sessions);
+        setSpaces(spacesList);
+        setSessionSpaces(sessionMap);
       } catch (err) {
         console.error("Failed to list sessions:", err);
       }
@@ -97,6 +120,51 @@ function App() {
     }
   };
 
+  const handleCreateSpace = async () => {
+    if (!installationId) return;
+    const spaceName = window.prompt("Enter new Space name:");
+    if (!spaceName || spaceName.trim() === "") return;
+    try {
+      await invoke('create_space', {
+        id: crypto.randomUUID(),
+        name: spaceName.trim(),
+        installationId: installationId
+      });
+      // Force reload to get the new space
+      if (!activeSessionId) {
+        // Just trigger a state update or we can just reload directly
+        setActiveSessionId(null);
+      }
+      // Re-run the loadSessions effect
+      const [spacesList] = await Promise.all([
+        invoke<Space[]>('get_spaces', { 
+          installationId: installationId
+        })
+      ]);
+      setSpaces(spacesList);
+    } catch (err) {
+      console.error("Failed to create space:", err);
+      alert("Failed to create space: " + err);
+    }
+  };
+
+  const handleMoveSessionToSpace = async (sessionId: string, spaceId: string) => {
+    try {
+      await invoke('move_session_to_space', {
+        sessionId,
+        spaceId
+      });
+      // Re-run the loadSessions effect
+      const [sessionMap] = await Promise.all([
+        invoke<Record<string, string>>('get_session_spaces')
+      ]);
+      setSessionSpaces(sessionMap);
+    } catch (err) {
+      console.error("Failed to move session:", err);
+      alert("Failed to move session: " + err);
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
       <ConnectSSHModal
@@ -106,17 +174,15 @@ function App() {
       />
 
       <UnifiedSidebar 
-        activeSessionId={activeSessionId}
-        onSelectSession={(id) => {
-          setActiveSessionId(id);
-          setCurrentView('main');
-        }}
-        onNewSession={() => {
-          handleNewSession();
-          setCurrentView('main');
-        }}
+        activeSessionId={activeSessionId} 
+        onSelectSession={setActiveSessionId} 
+        onNewSession={handleNewSession}
+        onCreateSpace={handleCreateSpace}
+        onMoveSessionToSpace={handleMoveSessionToSpace}
         onOpenCustomizations={() => setCurrentView('customizations')}
         sessions={sessions}
+        spaces={spaces}
+        sessionSpaces={sessionSpaces}
         mcpServerCount={0}
       />
 
@@ -127,11 +193,13 @@ function App() {
         />
       ) : !activeSessionId ? (
         <CenteredEmptyState 
-          onSelectSession={setActiveSessionId}
-          sessions={sessions}
+          sessions={sessions} 
+          onSelectSession={setActiveSessionId} 
           onSubmitPrompt={handleStartPromptSession}
           onOpenSSHModal={() => setSshModalOpen(true)}
           connectionTarget={connectionTarget}
+          workspace={workspace}
+          onSelectWorkspace={setWorkspace}
         />
       ) : (
         <PanelGroup orientation="horizontal" className="flex-1 border-l border-[#0A0A0A]">

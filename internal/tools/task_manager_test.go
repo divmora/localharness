@@ -23,7 +23,7 @@ func TestTaskManagerStartBackground(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, err := tm.StartBackground(ctx, "echo hello && sleep 0.1", "", nil, 0)
+	taskID, _, err := tm.StartBackground(ctx, "echo hello && sleep 0.1", "", nil, 0, nil)
 	if err != nil {
 		t.Fatalf("StartBackground failed: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestTaskManagerStartBackgroundWithWait(t *testing.T) {
 
 	ctx := context.Background()
 	// Start a command that outputs quickly then sleeps
-	taskID, output, err := tm.StartBackground(ctx, "echo immediate-output && sleep 5", "", nil, 500)
+	taskID, output, err := tm.StartBackground(ctx, "echo immediate-output && sleep 5", "", nil, 500, nil)
 	if err != nil {
 		t.Fatalf("StartBackground failed: %v", err)
 	}
@@ -83,8 +83,8 @@ func TestTaskManagerListTasks(t *testing.T) {
 	ctx := context.Background()
 
 	// Start multiple tasks
-	id1, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0)
-	id2, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0)
+	id1, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0, nil)
+	id2, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0, nil)
 
 	tasks := tm.ListTasks()
 	if len(tasks) != 2 {
@@ -105,7 +105,7 @@ func TestTaskManagerKillTask(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, _ := tm.StartBackground(ctx, "sleep 30", "", nil, 0)
+	taskID, _, _ := tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 
 	// Give it a moment to start
 	time.Sleep(100 * time.Millisecond)
@@ -137,7 +137,7 @@ func TestTaskManagerSendInput(t *testing.T) {
 
 	ctx := context.Background()
 	// Start cat which reads from stdin
-	taskID, _, _ := tm.StartBackground(ctx, "cat", "", nil, 0)
+	taskID, _, _ := tm.StartBackground(ctx, "cat", "", nil, 0, nil)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -170,10 +170,10 @@ func TestTaskManagerMaxTasks(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	tm.StartBackground(ctx, "sleep 30", "", nil, 0)
-	tm.StartBackground(ctx, "sleep 30", "", nil, 0)
+	tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 
-	_, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 0)
+	_, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 	if err == nil {
 		t.Error("expected error when max tasks exceeded")
 	}
@@ -183,8 +183,8 @@ func TestTaskManagerShutdown(t *testing.T) {
 	tm := NewTaskManager(testLogger(), 5)
 
 	ctx := context.Background()
-	tm.StartBackground(ctx, "sleep 30", "", nil, 0)
-	tm.StartBackground(ctx, "sleep 30", "", nil, 0)
+	tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 
 	if tm.RunningTaskCount() != 2 {
 		t.Errorf("expected 2 running tasks, got %d", tm.RunningTaskCount())
@@ -202,7 +202,7 @@ func TestTaskManagerNonZeroExit(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, _ := tm.StartBackground(ctx, "exit 42", "", nil, 0)
+	taskID, _, _ := tm.StartBackground(ctx, "exit 42", "", nil, 0, nil)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -222,7 +222,7 @@ func TestPersistentTerminalBasic(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	termID, stdout, exitCode, err := tm.RunInTerminal(ctx, "echo hello-from-terminal", "", "", nil, 5000)
+	termID, stdout, exitCode, err := tm.RunInTerminal(ctx, "echo hello-from-terminal", "", "", nil, 5000, nil)
 	if err != nil {
 		t.Fatalf("RunInTerminal failed: %v", err)
 	}
@@ -247,13 +247,13 @@ func TestPersistentTerminalReuse(t *testing.T) {
 	ctx := context.Background()
 
 	// Create terminal and set an env var
-	termID, _, _, err := tm.RunInTerminal(ctx, "export MY_VAR=test_value_123", "", "", nil, 5000)
+	termID, _, _, err := tm.RunInTerminal(ctx, "export MY_VAR=test_value_123", "", "", nil, 5000, nil)
 	if err != nil {
 		t.Fatalf("first command failed: %v", err)
 	}
 
 	// Reuse the terminal and read the env var
-	termID2, stdout, exitCode, err := tm.RunInTerminal(ctx, "echo $MY_VAR", "", termID, nil, 5000)
+	termID2, stdout, exitCode, err := tm.RunInTerminal(ctx, "echo $MY_VAR", "", termID, nil, 5000, nil)
 	if err != nil {
 		t.Fatalf("second command failed: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestPersistentTerminalUnknown(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	_, _, _, err := tm.RunInTerminal(ctx, "echo test", "", "nonexistent", nil, 5000)
+	_, _, _, err := tm.RunInTerminal(ctx, "echo test", "", "nonexistent", nil, 5000, nil)
 	if err == nil {
 		t.Error("expected error for unknown terminal")
 	}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import WebSocket from '@tauri-apps/plugin-websocket';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
+import { homeDir } from '@tauri-apps/api/path';
 import { 
     ClientMessageSchema,
     ServerMessageSchema,
@@ -26,7 +27,7 @@ interface HarnessConnection {
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null, connectionTarget: ConnectionTarget | null = null) {
+export function useHarness(activeSessionId: string | null, connectionTarget: ConnectionTarget | null = null, workspacePath?: string | null) {
     const [connected, setConnected] = useState(false);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [socket, setSocket] = useState<WebSocket | null>(null);
@@ -63,6 +64,13 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 const initReq = create(InitRequestSchema, {
                     config: create(HarnessConfigSchema, {
                         conversationId: activeSessionId || "",
+                        workspaces: [
+                            {
+                                directory: workspacePath || await homeDir(),
+                                name: "Project",
+                                corpusName: ""
+                            }
+                        ],
                         builtinTools: {
                             viewFile: true,
                             createFile: true,
@@ -73,7 +81,8 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                             runCommand: true,
                             finish: true,
                             schedule: true,
-                        }
+                        },
+                        clientSource: "GUI"
                     })
                 });
                 

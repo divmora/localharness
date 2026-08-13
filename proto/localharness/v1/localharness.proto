@@ -127,6 +127,8 @@ message SessionInfo {
   string name = 2;
   int64 updated_at = 3;
   SessionStatus status = 4;
+  string workspace = 5;
+  string client_source = 6;
 }
 
 message SessionList {
@@ -652,6 +654,7 @@ message HarnessConfig {
   int32 keep_recent_messages = 13;  // Messages to preserve during compaction (default: 10, 0 = use default)
   int32 max_subagent_depth = 14;    // Max nesting depth (default: 3, 0 = disabled)
   int32 max_concurrent_subagents = 15; // Max concurrent children (default: 5)
+  string client_source = 27;
 
   // Per-tool configuration (Phase 2)
   ToolConfigs tool_configs = 12;

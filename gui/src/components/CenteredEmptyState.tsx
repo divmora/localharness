@@ -2,6 +2,7 @@ import { Plus, MessageSquare, Terminal, FolderOpen, Cloud, TerminalSquare, Arrow
 import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
 import { useState } from 'react';
 import { ConnectionTarget } from '../hooks/useHarness';
+import { open } from '@tauri-apps/plugin-dialog';
 
 interface CenteredEmptyStateProps {
   onSelectSession: (id: string) => void;
@@ -9,9 +10,11 @@ interface CenteredEmptyStateProps {
   onSubmitPrompt: (prompt: string) => void;
   onOpenSSHModal: () => void;
   connectionTarget?: ConnectionTarget | null;
+  workspace: string | null;
+  onSelectWorkspace: (path: string) => void;
 }
 
-export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal, connectionTarget }: CenteredEmptyStateProps) {
+export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal, connectionTarget, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
   const [prompt, setPrompt] = useState("");
 
   const handleSubmit = () => {
@@ -24,6 +27,19 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
+    }
+  };
+  const handleSelectDirectory = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+      });
+      if (selected && typeof selected === 'string') {
+        onSelectWorkspace(selected);
+      }
+    } catch (err) {
+      console.error("Failed to open dialog:", err);
     }
   };
 
@@ -94,8 +110,8 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
               <div className="flex items-center gap-1.5">
                 <TerminalSquare size={14} /> {connectionTarget?.kind === 'ssh' ? `SSH: ${connectionTarget.host}` : 'Local'}
               </div>
-              <div className="flex items-center gap-1.5 cursor-pointer hover:text-[#F9FAFB] transition-colors">
-                <FolderOpen size={14} /> Select a directory...
+              <div className="flex items-center gap-1.5 cursor-pointer hover:text-[#F9FAFB] transition-colors" onClick={handleSelectDirectory}>
+                <FolderOpen size={14} /> {workspace ? workspace : 'Select a directory...'}
               </div>
             </div>
             <div className="cursor-pointer hover:text-[#F9FAFB] transition-colors flex items-center gap-1">
