@@ -53,8 +53,16 @@ build-zenith:
 	go build -o $(BIN_DIR)/zenith ./agents/zenith
 	@echo "==> Built $(BIN_DIR)/zenith"
 
+# Build GUI and sidecar
+build-gui: build
+	@echo "==> Preparing sidecar for Tauri..."
+	@mkdir -p gui/src-tauri/bin
+	$(eval TAURI_TARGET := $(shell rustc -vV | grep host | cut -f2 -d' '))
+	@cp $(BIN_DIR)/$(BINARY) gui/src-tauri/bin/$(BINARY)-$(TAURI_TARGET)
+	@echo "==> Sidecar ready for $(TAURI_TARGET). Run 'npm run tauri dev' in gui/ to start."
+
 # Full build: proto + binary + tools + agents
-all: proto build test-client build-lhctl build-zenith
+all: proto build test-client build-lhctl build-zenith build-gui
 	@echo "==> Full build complete."
 
 # Cross-compile for all supported platforms
