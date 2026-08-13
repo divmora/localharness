@@ -38,7 +38,7 @@ function App() {
   }, [activeSessionId]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
       <Sidebar />
       <PanelGroup orientation="horizontal" className="flex-1">
         
@@ -51,7 +51,7 @@ function App() {
           />
         </Panel>
         
-        <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
+        <PanelResizeHandle className="w-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors" />
         
         {/* Center Pane: SessionBoard OR ChatPanel */}
         <Panel defaultSize={55} minSize={40}>
@@ -71,7 +71,7 @@ function App() {
           )}
         </Panel>
 
-        <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
+        <PanelResizeHandle className="w-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors" />
 
         {/* Right Pane: Workspace */}
         <Panel defaultSize={25} minSize={20}>

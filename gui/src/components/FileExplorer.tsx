@@ -77,27 +77,27 @@ export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProp
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
             transition={{ duration: 0.15 }}
-            className="w-full max-w-2xl bg-[#1e1e2e] border border-[#313244] rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-2xl bg-[#121212] border border-[#262626] rounded-xl shadow-2xl overflow-hidden flex flex-col"
           >
             {/* Search Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-[#313244] bg-[#11111b]">
-              <Search size={18} className="text-[#a6adc8]" />
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-[#262626] bg-[#000000]">
+              <Search size={18} className="text-[#9CA3AF]" />
               <input 
                 autoFocus
                 type="text" 
                 placeholder="Search files by name..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="flex-1 bg-transparent text-[#cdd6f4] outline-none text-sm placeholder:text-[#6c7086]"
+                className="flex-1 bg-transparent text-[#F9FAFB] outline-none text-sm placeholder:text-[#6c7086]"
               />
-              <button onClick={onClose} className="p-1 hover:bg-[#313244] rounded text-[#a6adc8]">
+              <button onClick={onClose} className="p-1 hover:bg-[#262626] rounded text-[#9CA3AF]">
                 <X size={16} />
               </button>
             </div>
 
             {/* Path Breadcrumbs */}
-            <div className="px-4 py-2 bg-[#181825] border-b border-[#313244] text-xs font-mono text-[#a6adc8] flex items-center gap-2">
-              <span className="text-[#89b4fa]">Workspace</span>
+            <div className="px-4 py-2 bg-[#0A0A0A] border-b border-[#262626] text-xs font-mono text-[#9CA3AF] flex items-center gap-2">
+              <span className="text-[#3B82F6]">Workspace</span>
               {currentPath !== '.' && (
                 <>
                   <span className="text-[#6c7086]">/</span>
@@ -115,9 +115,9 @@ export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProp
                   {currentPath !== '.' && !search && (
                     <button 
                       onClick={handleBack}
-                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#313244]/50 text-[#cdd6f4] text-sm transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#262626]/50 text-[#F9FAFB] text-sm transition-colors text-left"
                     >
-                      <Folder size={16} className="text-[#89b4fa]" />
+                      <Folder size={16} className="text-[#3B82F6]" />
                       <span>..</span>
                     </button>
                   )}
@@ -133,12 +133,12 @@ export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProp
                         <button 
                           key={i}
                           onClick={() => handleSelect(file)}
-                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#313244]/50 text-[#cdd6f4] text-sm transition-colors text-left group"
+                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#262626]/50 text-[#F9FAFB] text-sm transition-colors text-left group"
                         >
                           {isDir ? (
-                            <Folder size={16} className="text-[#89b4fa]" />
+                            <Folder size={16} className="text-[#3B82F6]" />
                           ) : (
-                            <File size={16} className="text-[#a6adc8] group-hover:text-[#cdd6f4]" />
+                            <File size={16} className="text-[#9CA3AF] group-hover:text-[#F9FAFB]" />
                           )}
                           <span>{name}</span>
                         </button>

@@ -81,7 +81,7 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
   const showEditor = openFiles.length > 0 || hasAgentActions;
 
   return (
-    <div className="flex flex-col h-full bg-[#11111b] border-l border-[#181825]">
+    <div className="flex flex-col h-full bg-[#000000] border-l border-[#0A0A0A]">
       <FileExplorer 
         isOpen={explorerOpen} 
         onClose={() => setExplorerOpen(false)} 
@@ -93,11 +93,11 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
       />
 
       {/* Workspace Header & Tabs */}
-      <div className="border-b border-[#181825] flex flex-col shadow-sm z-10 bg-[#11111b]">
+      <div className="border-b border-[#0A0A0A] flex flex-col shadow-sm z-10 bg-[#000000]">
         <div className="p-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileCode2 size={16} className="text-[#89b4fa]" />
-            <span className="font-semibold text-xs tracking-wide text-[#cdd6f4]">Workspace</span>
+            <FileCode2 size={16} className="text-[#3B82F6]" />
+            <span className="font-semibold text-xs tracking-wide text-[#F9FAFB]">Workspace</span>
           </div>
         </div>
         
@@ -111,10 +111,10 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
                 <div 
                   key={file.path}
                   onClick={() => setActiveFilePath(file.path)}
-                  className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md cursor-pointer border-t border-l border-r border-transparent ${isActive ? 'bg-[#1e1e2e] text-[#89b4fa] border-[#313244]' : 'text-[#a6adc8] hover:bg-[#181825]'}`}
+                  className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md cursor-pointer border-t border-l border-r border-transparent ${isActive ? 'bg-[#121212] text-[#3B82F6] border-[#262626]' : 'text-[#9CA3AF] hover:bg-[#0A0A0A]'}`}
                 >
                   <span className="truncate max-w-[120px]">{name}</span>
-                  <button onClick={(e) => closeFile(file.path, e)} className={`p-0.5 rounded-sm hover:bg-[#313244] ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  <button onClick={(e) => closeFile(file.path, e)} className={`p-0.5 rounded-sm hover:bg-[#262626] ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     <X size={12} />
                   </button>
                 </div>
@@ -134,7 +134,7 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
           />
         ) : (
           <PanelGroup orientation="vertical">
-            <Panel defaultSize={70} className="relative bg-[#1e1e2e]">
+            <Panel defaultSize={70} className="relative bg-[#121212]">
               <EditorPanel 
                 steps={steps} 
                 userActiveFile={activeFilePath} 
@@ -142,12 +142,12 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
               />
             </Panel>
             
-            <PanelResizeHandle className="h-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors z-10" />
+            <PanelResizeHandle className="h-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors z-10" />
             
-            <Panel defaultSize={30} minSize={10} className="relative bg-[#181825]">
-              <div className="absolute top-0 left-0 right-0 bg-[#11111b] px-3 py-1.5 border-b border-[#313244] z-10 flex items-center gap-2">
-                 <TerminalIcon size={12} className="text-[#a6adc8]" />
-                 <span className="text-[10px] font-semibold text-[#a6adc8] uppercase tracking-wider">Terminal Output</span>
+            <Panel defaultSize={30} minSize={10} className="relative bg-[#0A0A0A]">
+              <div className="absolute top-0 left-0 right-0 bg-[#000000] px-3 py-1.5 border-b border-[#262626] z-10 flex items-center gap-2">
+                 <TerminalIcon size={12} className="text-[#9CA3AF]" />
+                 <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">Terminal Output</span>
               </div>
               <div className="pt-8 h-full">
                 <TerminalPanel steps={steps} />

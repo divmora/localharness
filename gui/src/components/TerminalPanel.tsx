@@ -19,8 +19,8 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
     
     const term = new Terminal({
       theme: { 
-        background: '#11111b', 
-        foreground: '#cdd6f4',
+        background: '#000000', 
+        foreground: '#F9FAFB',
         cursor: '#f5e0dc',
         selectionBackground: '#585b70'
       },
@@ -97,8 +97,8 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
   }, [steps]);
 
   return (
-    <div className="h-full flex flex-col bg-[#11111b] border-t border-[#313244] overflow-hidden">
-      <div className="h-9 flex items-center justify-between px-4 text-xs bg-[#181825] border-b border-[#313244]">
+    <div className="h-full flex flex-col bg-[#000000] border-t border-[#262626] overflow-hidden">
+      <div className="h-9 flex items-center justify-between px-4 text-xs bg-[#0A0A0A] border-b border-[#262626]">
         <div className="flex gap-4 h-full">
           {(['problems', 'output', 'debug', 'terminal', 'ports'] as const).map((tab) => (
             <button
@@ -106,8 +106,8 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
               onClick={() => setActiveTab(tab)}
               className={`h-full uppercase tracking-wider font-semibold transition-colors border-b-2 ${
                 activeTab === tab 
-                  ? 'text-[#cdd6f4] border-blue-400' 
-                  : 'text-[#6c7086] border-transparent hover:text-[#a6adc8]'
+                  ? 'text-[#F9FAFB] border-blue-400' 
+                  : 'text-[#6c7086] border-transparent hover:text-[#9CA3AF]'
               }`}
             >
               {tab === 'debug' ? 'Debug Console' : tab}
@@ -125,7 +125,7 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
         {activeTab === 'terminal' ? (
           <div className="absolute inset-0 p-2 overflow-hidden" ref={terminalRef} />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-[#7f849c] text-sm">
+          <div className="absolute inset-0 flex items-center justify-center text-[#6B7280] text-sm">
             No {activeTab} available.
           </div>
         )}

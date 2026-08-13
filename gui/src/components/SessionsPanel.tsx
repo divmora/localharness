@@ -10,40 +10,40 @@ interface SessionsPanelProps {
 export function SessionsPanel({ activeSessionId, onSelectSession, sessions }: SessionsPanelProps) {
 
   return (
-    <div className="h-full bg-[#11111b] border-r border-[#181825] flex flex-col text-[#cdd6f4]">
+    <div className="h-full bg-[#000000] border-r border-[#0A0A0A] flex flex-col text-[#F9FAFB]">
       {/* Header section */}
-      <div className="p-4 flex items-center justify-between border-b border-[#181825]">
+      <div className="p-4 flex items-center justify-between border-b border-[#0A0A0A]">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-[#b4befe] rounded-sm opacity-80" />
-          <span className="font-semibold text-[13px] tracking-wide text-[#b4befe]">Sessions</span>
+          <div className="w-4 h-4 bg-[#60A5FA] rounded-sm opacity-80" />
+          <span className="font-semibold text-[13px] tracking-wide text-[#60A5FA]">Sessions</span>
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-1 hover:bg-[#313244] rounded text-[#a6adc8] transition-colors">
+          <button className="p-1 hover:bg-[#262626] rounded text-[#9CA3AF] transition-colors">
             <MoreHorizontal size={16} />
           </button>
-          <button className="flex items-center gap-1 bg-[#89b4fa] hover:bg-[#b4befe] text-[#11111b] px-2 py-1 rounded text-[13px] font-medium transition-colors">
+          <button className="flex items-center gap-1 bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] px-2 py-1 rounded text-[13px] font-medium transition-colors">
             <Plus size={14} /> New
           </button>
         </div>
       </div>
 
       {/* Search section */}
-      <div className="p-3 border-b border-[#181825]">
+      <div className="p-3 border-b border-[#0A0A0A]">
         <div className="relative flex items-center">
           <Search size={14} className="absolute left-2.5 text-[#6c7086]" />
           <input 
             type="text" 
             placeholder="Search sessions..." 
-            className="w-full bg-[#181825] text-[#cdd6f4] placeholder-[#6c7086] text-[13px] py-1.5 pl-8 pr-8 rounded border border-[#313244] focus:outline-none focus:border-[#89b4fa] transition-colors"
+            className="w-full bg-[#0A0A0A] text-[#F9FAFB] placeholder-[#6c7086] text-[13px] py-1.5 pl-8 pr-8 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] transition-colors"
           />
-          <Filter size={14} className="absolute right-2.5 text-[#6c7086] cursor-pointer hover:text-[#cdd6f4]" />
+          <Filter size={14} className="absolute right-2.5 text-[#6c7086] cursor-pointer hover:text-[#F9FAFB]" />
         </div>
       </div>
 
       {/* Sessions list */}
       <div className="flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
-          <div className="p-4 text-center text-xs text-[#a6adc8] opacity-70">
+          <div className="p-4 text-center text-xs text-[#9CA3AF] opacity-70">
             No active sessions found.
           </div>
         ) : (
@@ -54,12 +54,12 @@ export function SessionsPanel({ activeSessionId, onSelectSession, sessions }: Se
                 onClick={() => onSelectSession(session.id)}
                 className={`p-3 rounded-lg cursor-pointer transition-all group ${
                   activeSessionId === session.id 
-                    ? 'bg-[#313244]/40 border border-[#45475a]' 
-                    : 'hover:bg-[#181825] border border-transparent hover:border-[#313244]'
+                    ? 'bg-[#262626]/40 border border-[#333333]' 
+                    : 'hover:bg-[#0A0A0A] border border-transparent hover:border-[#262626]'
                 }`}
               >
-                <div className="text-[10px] uppercase font-bold text-[#f38ba8] mb-1">LOCAL-HARNESS</div>
-                <div className="text-[13px] font-medium text-[#cdd6f4] truncate mb-1">
+                <div className="text-[10px] uppercase font-bold text-[#EF4444] mb-1">LOCAL-HARNESS</div>
+                <div className="text-[13px] font-medium text-[#F9FAFB] truncate mb-1">
                   {session.name}
                 </div>
                 <div className="text-[11px] text-[#6c7086] flex items-center justify-between">
