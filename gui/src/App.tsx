@@ -51,7 +51,7 @@ function App() {
   const [sessionSpaces, setSessionSpaces] = useState<Record<string, string>>({});
   const [installationId, setInstallationId] = useState<string | null>(null);
   
-  const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget, workspace);
+  const { connected, connectionError, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget, workspace);
 
   useEffect(() => {
     async function loadSessions() {
@@ -214,9 +214,10 @@ function App() {
       ) : (
         <PanelGroup orientation="horizontal" className="flex-1 border-l border-[#0A0A0A]">
           {/* Center Pane: ChatPanel */}
-          <Panel defaultSize={55} minSize={40}>
+          <Panel defaultSize={75} minSize={30}>
             <ChatPanel 
               connected={connected} 
+              connectionError={connectionError}
               steps={steps} 
               onSend={sendPrompt} 
               onSubmitQuestionResponse={submitQuestionResponse} 

@@ -29,14 +29,23 @@ interface HarnessConnection {
 
 export function useHarness(activeSessionId: string | null, connectionTarget: ConnectionTarget | null = null, workspacePath?: string | null) {
     const [connected, setConnected] = useState(false);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [socket, setSocket] = useState<WebSocket | null>(null);
 
     useEffect(() => {
         let ws: WebSocket | null = null;
         
+        if (!activeSessionId) {
+            setConnected(false);
+            setConnectionError(null);
+            setSteps([]);
+            setSocket(null);
+            return;
+        }
+
         async function initHarness() {
-            // Reset steps when switching sessions
+            setConnectionError(null);
             setSteps([]);
             
             try {
@@ -50,7 +59,8 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                         console.warn("Tauri not detected, falling back to standalone localhost:4000 (web dev mode)");
                         conn = { port: 4000, api_key: "dev-key" };
                     } else {
-                        throw err;
+                        setConnectionError(err.toString());
+                        return;
                     }
                 }
                 
@@ -115,8 +125,9 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 
                 setSocket(ws);
                 
-            } catch (err) {
-                console.error("Failed to start harness:", err);
+            } catch (e: any) {
+                console.error("Failed to connect to harness:", e);
+                setConnectionError(e.toString());
             }
         }
         
@@ -196,5 +207,12 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
         });
     }, [socket]);
 
-    return { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse };
+    return { 
+        connected, 
+        connectionError,
+        steps, 
+        sendPrompt, 
+        submitQuestionResponse, 
+        submitPermissionResponse 
+    };
 }

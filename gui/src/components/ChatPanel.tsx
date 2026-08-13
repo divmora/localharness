@@ -5,6 +5,7 @@ import { StepUpdate, StepUpdate_Source, StepUpdate_State } from '../gen/localhar
 
 interface ChatPanelProps {
   connected: boolean;
+  connectionError?: string | null;
   steps: StepUpdate[];
   onSend: (text: string) => void;
   onSubmitQuestionResponse?: (requestId: string, answers: any[], skipped: boolean) => void;
@@ -99,7 +100,14 @@ function QuestionForm({ action, state, onSubmit }: { action: any, state: StepUpd
   );
 }
 
-export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse, onSubmitPermissionResponse }: ChatPanelProps) {
+export function ChatPanel({ 
+  connected, 
+  connectionError,
+  steps, 
+  onSend, 
+  onSubmitQuestionResponse, 
+  onSubmitPermissionResponse 
+}: ChatPanelProps) {
   const [input, setInput] = useState('');
 
   // Group streaming steps by stepIndex so we have one cohesive message per step
@@ -312,13 +320,27 @@ export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse, 
             </motion.div>
           );
         })}
+        {connectionError && (
+          <div className="bg-[#7f1d1d]/20 border border-[#991b1b] rounded p-4 flex flex-col gap-2 my-2">
+            <div className="flex items-center gap-2 text-red-400 font-semibold text-sm">
+              <ShieldAlert size={16} /> Connection Error
+            </div>
+            <div className="text-xs text-red-300 font-mono whitespace-pre-wrap break-all">
+              {connectionError}
+            </div>
+            {connectionError.includes("No valid LLM configuration found") && (
+              <div className="text-xs text-[#D1D5DB] mt-1 border-t border-[#991b1b]/50 pt-2">
+                Tip: Use the Customizations panel (gear icon) to configure your LLM endpoint.
+              </div>
+            )}
+          </div>
+        )}
       </div>
       
       <div className="p-4 border-t border-[#262626]">
         <div className="flex items-center bg-[#121212] rounded-md border border-[#262626] focus-within:border-blue-500 transition-colors px-3 py-2 shadow-inner">
           <input 
-            className="flex-1 bg-transparent outline-none text-sm placeholder:text-[#585b70] disabled:opacity-50" 
-            placeholder={connected ? "Ask anything..." : "Connecting..."}
+            type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -327,11 +349,13 @@ export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse, 
                 handleSend();
               }
             }}
-            disabled={!connected}
+            disabled={!connected || !!connectionError}
+            placeholder={connected ? "Ask anything..." : connectionError ? "Cannot send messages due to error" : "Connecting..."}
+            className={`flex-1 bg-transparent border-none outline-none text-sm text-[#F9FAFB] placeholder:text-[#6B7280] ${connected ? '' : 'opacity-50'}`}
           />
           <button 
             onClick={handleSend}
-            disabled={!connected || !input.trim()}
+            disabled={!connected || !input.trim() || !!connectionError}
             className="text-blue-400 hover:text-blue-300 ml-2 p-1 rounded hover:bg-[#262626] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
           >
             <Send size={16} />
