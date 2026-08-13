@@ -22,13 +22,32 @@ export function UnifiedSidebar({
   return (
     <div className="w-64 h-full bg-[#000000] border-r border-[#0A0A0A] flex flex-col text-[#F9FAFB] shrink-0">
       {/* Top action */}
-      <div className="p-3">
+      <div className="p-3 pb-2">
         <button 
           onClick={onNewSession}
           className="w-full flex items-center gap-2 bg-[#262626] hover:bg-[#333333] text-[#F9FAFB] px-3 py-2 rounded-md text-sm font-medium transition-colors border border-[#333333]"
         >
           <Plus size={16} className="text-[#9CA3AF]" /> 
           New session
+        </button>
+      </div>
+      
+      <div className="px-3 pb-3">
+        <button 
+          onClick={() => {
+            import('@tauri-apps/api/webviewWindow').then(m => {
+              new m.WebviewWindow(`local-${Date.now()}`, {
+                url: `/?new_session=true`,
+                title: `Local Workspace`,
+                width: 1200,
+                height: 800
+              });
+            }).catch(console.error);
+          }}
+          className="w-full flex items-center gap-2 bg-transparent hover:bg-[#121212] text-[#9CA3AF] px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-transparent hover:border-[#262626]"
+        >
+          <Plus size={14} className="text-[#6B7280]" /> 
+          New window
         </button>
       </div>
 
