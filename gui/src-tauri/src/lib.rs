@@ -14,9 +14,15 @@ pub struct HarnessConnection {
 
 #[tauri::command]
 async fn list_files(dir: Option<String>) -> Result<Vec<String>, String> {
-    let target = dir.unwrap_or_else(|| ".".to_string());
+    let mut target = dir.unwrap_or_else(|| ".".to_string());
+    if target.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            target = target.replacen("~/", &format!("{}/", home.display()), 1);
+        }
+    }
+    
     let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(target) {
+    if let Ok(entries) = std::fs::read_dir(&target) {
         for entry in entries.flatten() {
             if let Ok(name) = entry.file_name().into_string() {
                 if !name.starts_with('.') && name != "node_modules" && name != "target" && name != "bin" {
@@ -47,7 +53,13 @@ async fn list_files(dir: Option<String>) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 async fn read_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| e.to_string())
+    let mut target = path;
+    if target.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            target = target.replacen("~/", &format!("{}/", home.display()), 1);
+        }
+    }
+    std::fs::read_to_string(target).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

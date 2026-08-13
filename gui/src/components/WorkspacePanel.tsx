@@ -4,6 +4,7 @@ import { EditorPanel } from './EditorPanel';
 import { TerminalPanel } from './TerminalPanel';
 import { WorkspaceMenu } from './WorkspaceMenu';
 import { FileExplorer } from './FileExplorer';
+import { CustomizationsModal } from './CustomizationsModal';
 import { FileCode2, Terminal as TerminalIcon, X } from 'lucide-react';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 
@@ -41,6 +42,8 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
       // Actually we should just update it in an effect to avoid render cycle warnings
     }
   }, [steps]);
+
+  const [customizationsOpen, setCustomizationsOpen] = useState(false);
 
   // Handle it safely via effect
   useState(() => {
@@ -84,6 +87,10 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
         onClose={() => setExplorerOpen(false)} 
         onFileSelect={handleOpenFile} 
       />
+      <CustomizationsModal 
+        isOpen={customizationsOpen} 
+        onClose={() => setCustomizationsOpen(false)} 
+      />
 
       {/* Workspace Header & Tabs */}
       <div className="border-b border-[#181825] flex flex-col shadow-sm z-10 bg-[#11111b]">
@@ -122,7 +129,7 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
           <WorkspaceMenu 
             onNewSession={() => {}} 
             onOpenFile={() => setExplorerOpen(true)} 
-            onOpenCustomizations={() => {}} 
+            onOpenCustomizations={() => setCustomizationsOpen(true)} 
             onViewDiffs={() => {}} 
           />
         ) : (
