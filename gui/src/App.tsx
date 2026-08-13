@@ -1,4 +1,4 @@
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { Sidebar } from './components/Sidebar';
 import { ChatPanel } from './components/ChatPanel';
 import { EditorPanel } from './components/EditorPanel';
@@ -9,7 +9,7 @@ function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
       <Sidebar />
-      <PanelGroup direction="horizontal" className="flex-1">
+      <PanelGroup orientation="horizontal" className="flex-1">
         <Panel defaultSize={25} minSize={20}>
           <ChatPanel />
         </Panel>
@@ -17,7 +17,7 @@ function App() {
         <PanelResizeHandle className="w-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
         
         <Panel defaultSize={75} minSize={30}>
-          <PanelGroup direction="vertical">
+          <PanelGroup orientation="vertical">
             <Panel defaultSize={70}>
               <EditorPanel />
             </Panel>
