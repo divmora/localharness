@@ -11,10 +11,29 @@ import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
 import { fromBinary } from '@bufbuild/protobuf';
 import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 function App() {
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [connectionTarget, setConnectionTarget] = useState<ConnectionTarget | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("new_session") === "true" ? crypto.randomUUID() : null;
+  });
+  
+  const [connectionTarget, setConnectionTarget] = useState<ConnectionTarget | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const kind = params.get("kind");
+    if (kind === "ssh") {
+      return {
+        kind: "ssh",
+        host: params.get("host") || undefined,
+        user: params.get("user") || undefined,
+        port: params.get("port") ? parseInt(params.get("port")!, 10) : undefined,
+        key_path: params.get("key_path") || undefined,
+      };
+    }
+    return null;
+  });
+
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [customizationsOpen, setCustomizationsOpen] = useState(false);
   const [sshModalOpen, setSshModalOpen] = useState(false);
@@ -54,10 +73,28 @@ function App() {
     }, 500);
   };
 
-  const handleConnectSSH = (target: ConnectionTarget) => {
-    setConnectionTarget(target);
-    const newId = crypto.randomUUID();
-    setActiveSessionId(newId);
+  const handleConnectSSH = async (target: ConnectionTarget) => {
+    if (connectionTarget === null && !activeSessionId && sessions.length === 0) {
+      // Use current window if it's completely empty
+      setConnectionTarget(target);
+      setActiveSessionId(crypto.randomUUID());
+    } else {
+      // Spawn new window
+      const searchParams = new URLSearchParams();
+      searchParams.set("kind", target.kind);
+      if (target.host) searchParams.set("host", target.host);
+      if (target.user) searchParams.set("user", target.user);
+      if (target.port) searchParams.set("port", target.port.toString());
+      if (target.key_path) searchParams.set("key_path", target.key_path);
+      searchParams.set("new_session", "true");
+      
+      new WebviewWindow(`ssh-${Date.now()}`, {
+        url: `/?${searchParams.toString()}`,
+        title: `SSH: ${target.host}`,
+        width: 1200,
+        height: 800
+      });
+    }
   };
 
   return (
