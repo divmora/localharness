@@ -926,7 +926,7 @@ type ServerMessage struct {
 	//	*ServerMessage_InitResponse
 	//	*ServerMessage_StepUpdate
 	//	*ServerMessage_TrajectoryState
-	//	*ServerMessage_ErrorEvent
+	//	*ServerMessage_Error
 	//	*ServerMessage_TraceEvent
 	Payload       isServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -997,10 +997,10 @@ func (x *ServerMessage) GetTrajectoryState() *TrajectoryState {
 	return nil
 }
 
-func (x *ServerMessage) GetErrorEvent() *ErrorEvent {
+func (x *ServerMessage) GetError() *ErrorEvent {
 	if x != nil {
-		if x, ok := x.Payload.(*ServerMessage_ErrorEvent); ok {
-			return x.ErrorEvent
+		if x, ok := x.Payload.(*ServerMessage_Error); ok {
+			return x.Error
 		}
 	}
 	return nil
@@ -1031,8 +1031,8 @@ type ServerMessage_TrajectoryState struct {
 	TrajectoryState *TrajectoryState `protobuf:"bytes,3,opt,name=trajectory_state,json=trajectoryState,proto3,oneof"`
 }
 
-type ServerMessage_ErrorEvent struct {
-	ErrorEvent *ErrorEvent `protobuf:"bytes,4,opt,name=error_event,json=errorEvent,proto3,oneof"`
+type ServerMessage_Error struct {
+	Error *ErrorEvent `protobuf:"bytes,4,opt,name=error,proto3,oneof"`
 }
 
 type ServerMessage_TraceEvent struct {
@@ -1045,7 +1045,7 @@ func (*ServerMessage_StepUpdate) isServerMessage_Payload() {}
 
 func (*ServerMessage_TrajectoryState) isServerMessage_Payload() {}
 
-func (*ServerMessage_ErrorEvent) isServerMessage_Payload() {}
+func (*ServerMessage_Error) isServerMessage_Payload() {}
 
 func (*ServerMessage_TraceEvent) isServerMessage_Payload() {}
 
@@ -7439,14 +7439,13 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\vresult_json\x18\x03 \x01(\tR\n" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x04 \x01(\bR\aisError\"\x0f\n" +
-	"\rCancelRequest\"\xef\x02\n" +
+	"\rCancelRequest\"\xe4\x02\n" +
 	"\rServerMessage\x12D\n" +
 	"\rinit_response\x18\x01 \x01(\v2\x1d.localharness.v1.InitResponseH\x00R\finitResponse\x12>\n" +
 	"\vstep_update\x18\x02 \x01(\v2\x1b.localharness.v1.StepUpdateH\x00R\n" +
 	"stepUpdate\x12M\n" +
-	"\x10trajectory_state\x18\x03 \x01(\v2 .localharness.v1.TrajectoryStateH\x00R\x0ftrajectoryState\x12>\n" +
-	"\verror_event\x18\x04 \x01(\v2\x1b.localharness.v1.ErrorEventH\x00R\n" +
-	"errorEvent\x12>\n" +
+	"\x10trajectory_state\x18\x03 \x01(\v2 .localharness.v1.TrajectoryStateH\x00R\x0ftrajectoryState\x123\n" +
+	"\x05error\x18\x04 \x01(\v2\x1b.localharness.v1.ErrorEventH\x00R\x05error\x12>\n" +
 	"\vtrace_event\x18\x05 \x01(\v2\x1b.localharness.v1.TraceEventH\x00R\n" +
 	"traceEventB\t\n" +
 	"\apayload\"P\n" +
@@ -8187,7 +8186,7 @@ var file_localharness_v1_localharness_proto_depIdxs = []int32{
 	17,  // 12: localharness.v1.ServerMessage.init_response:type_name -> localharness.v1.InitResponse
 	19,  // 13: localharness.v1.ServerMessage.step_update:type_name -> localharness.v1.StepUpdate
 	20,  // 14: localharness.v1.ServerMessage.trajectory_state:type_name -> localharness.v1.TrajectoryState
-	18,  // 15: localharness.v1.ServerMessage.error_event:type_name -> localharness.v1.ErrorEvent
+	18,  // 15: localharness.v1.ServerMessage.error:type_name -> localharness.v1.ErrorEvent
 	83,  // 16: localharness.v1.ServerMessage.trace_event:type_name -> localharness.v1.TraceEvent
 	15,  // 17: localharness.v1.SessionList.sessions:type_name -> localharness.v1.SessionInfo
 	0,   // 18: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
@@ -8296,7 +8295,7 @@ func file_localharness_v1_localharness_proto_init() {
 		(*ServerMessage_InitResponse)(nil),
 		(*ServerMessage_StepUpdate)(nil),
 		(*ServerMessage_TrajectoryState)(nil),
-		(*ServerMessage_ErrorEvent)(nil),
+		(*ServerMessage_Error)(nil),
 		(*ServerMessage_TraceEvent)(nil),
 	}
 	file_localharness_v1_localharness_proto_msgTypes[14].OneofWrappers = []any{
