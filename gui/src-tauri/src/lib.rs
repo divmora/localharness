@@ -240,59 +240,178 @@ async fn list_target_files(target: Option<ConnectionTarget>, dir: Option<String>
 }
 
 #[tauri::command]
-async fn list_sessions() -> Result<Vec<u8>, String> {
+async fn list_sessions(app: tauri::AppHandle, target: Option<ConnectionTarget>) -> Result<Vec<u8>, String> {
     let mut sessions = Vec::new();
     
-    // We expect conversations in ~/.divmora/localharness/conversations/
-    let home = dirs::home_dir().ok_or("Could not find home dir")?;
-    let conv_dir = home.join(".divmora/localharness/conversations");
-    
-    if let Ok(entries) = std::fs::read_dir(conv_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("pb") {
-                let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-                
-                let metadata = entry.metadata().ok();
-                let updated_at = metadata.and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                
-                let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
-                let mut status = localharness::v1::SessionStatus::Ready;
-                
-                if let Ok(buf) = std::fs::read(&path) {
-                    if let Ok(state) = ConversationState::decode(buf.as_slice()) {
-                        if let Some(first_msg) = state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
-                            let content = first_msg.content.trim();
-                            let first_line = content.lines().next().unwrap_or("").trim();
+    let is_ssh = target.as_ref().map(|t| t.kind == "ssh").unwrap_or(false);
+
+    if is_ssh {
+        let t = target.as_ref().unwrap();
+        let host = t.host.as_ref().ok_or("SSH host required")?;
+        
+        let mut args = vec!["-T".to_string(), "-q".to_string()];
+        if let Some(port) = t.port {
+            args.push("-p".to_string());
+            args.push(port.to_string());
+        }
+        if let Some(key) = t.key_path.as_ref() {
+            if !key.is_empty() {
+                args.push("-i".to_string());
+                args.push(key.clone());
+            }
+        }
+        if let Some(user) = t.user.as_ref() {
+            if !user.is_empty() {
+                args.push(format!("{}@{}", user, host));
+            } else {
+                args.push(host.clone());
+            }
+        } else {
+            args.push(host.clone());
+        }
+        
+        // Fetch files using a small script that base64-encodes them with delimiters
+        let script = "cd ~/.divmora/localharness/conversations 2>/dev/null && for f in *.pb; do [ -f \"$f\" ] || continue; echo \"::FILE_START::$f\"; base64 \"$f\"; echo \"::FILE_END::\"; done";
+        args.push(script.to_string());
+        
+        use tauri_plugin_shell::ShellExt;
+        let output = app.shell()
+            .command("ssh")
+            .args(args)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+            
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            
+            let mut current_file = String::new();
+            let mut current_b64 = String::new();
+            let mut in_file = false;
+            
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("::FILE_START::") {
+                    current_file = trimmed.trim_start_matches("::FILE_START::").to_string();
+                    current_b64.clear();
+                    in_file = true;
+                } else if trimmed == "::FILE_END::" {
+                    in_file = false;
+                    
+                    if let Ok(decoded) = base64::decode(&current_b64.replace("\n", "")) {
+                        let id = std::path::Path::new(&current_file).file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                        if id.is_empty() { continue; }
+                        
+                        let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
+                        let mut status = localharness::v1::SessionStatus::Ready;
+                        let mut updated_at = 0;
+                        
+                        if let Ok(state) = ConversationState::decode(decoded.as_slice()) {
+                            // Find last message timestamp
+                            if let Some(last) = state.messages.last() {
+                                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&last.timestamp) {
+                                    updated_at = dt.timestamp();
+                                }
+                            }
                             
-                            let title = if first_line.len() > 40 {
-                                format!("{}...", &first_line[..37])
-                            } else {
-                                first_line.to_string()
-                            };
+                            if let Some(first_msg) = state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
+                                let content = first_msg.content.trim();
+                                let first_line = content.lines().next().unwrap_or("").trim();
+                                
+                                let title = if first_line.len() > 40 {
+                                    format!("{}...", &first_line[..37])
+                                } else {
+                                    first_line.to_string()
+                                };
+                                
+                                if !title.is_empty() {
+                                    name = title;
+                                }
+                            }
                             
-                            if !title.is_empty() {
-                                name = title;
+                            // Check last message for status
+                            if let Some(last_msg) = state.messages.last() {
+                                if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
+                                    let has_question = last_msg.tool_calls.iter().any(|t| t.name == "ask_question");
+                                    if has_question {
+                                        status = localharness::v1::SessionStatus::Blocked;
+                                    } else {
+                                        status = localharness::v1::SessionStatus::Running;
+                                    }
+                                }
                             }
                         }
                         
-                        // Check last message for status
-                        if let Some(last_msg) = state.messages.last() {
-                            if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
-                                // Model made tool calls but no response yet
-                                let has_question = last_msg.tool_calls.iter().any(|t| t.name == "ask_question");
-                                if has_question {
-                                    status = localharness::v1::SessionStatus::Blocked;
+                        sessions.push(SessionInfo {
+                            id,
+                            name,
+                            updated_at: updated_at as i64,
+                            status: status.into(),
+                        });
+                    }
+                } else if in_file {
+                    current_b64.push_str(trimmed);
+                }
+            }
+        }
+    } else {
+        // We expect conversations in ~/.divmora/localharness/conversations/
+        let home = dirs::home_dir().ok_or("Could not find home dir")?;
+        let conv_dir = home.join(".divmora/localharness/conversations");
+        
+        if let Ok(entries) = std::fs::read_dir(conv_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("pb") {
+                    let id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    
+                    let metadata = entry.metadata().ok();
+                    let mut updated_at = metadata.and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    
+                    let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
+                    let mut status = localharness::v1::SessionStatus::Ready;
+                    
+                    if let Ok(buf) = std::fs::read(&path) {
+                        if let Ok(state) = ConversationState::decode(buf.as_slice()) {
+                            // Find last message timestamp to override file mtime if present
+                            if let Some(last) = state.messages.last() {
+                                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&last.timestamp) {
+                                    updated_at = dt.timestamp() as i64;
+                                }
+                            }
+                            
+                            if let Some(first_msg) = state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
+                                let content = first_msg.content.trim();
+                                let first_line = content.lines().next().unwrap_or("").trim();
+                                
+                                let title = if first_line.len() > 40 {
+                                    format!("{}...", &first_line[..37])
                                 } else {
-                                    status = localharness::v1::SessionStatus::Running;
+                                    first_line.to_string()
+                                };
+                                
+                                if !title.is_empty() {
+                                    name = title;
+                                }
+                            }
+                            
+                            // Check last message for status
+                            if let Some(last_msg) = state.messages.last() {
+                                if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
+                                    // Model made tool calls but no response yet
+                                    let has_question = last_msg.tool_calls.iter().any(|t| t.name == "ask_question");
+                                    if has_question {
+                                        status = localharness::v1::SessionStatus::Blocked;
+                                    } else {
+                                        status = localharness::v1::SessionStatus::Running;
+                                    }
                                 }
                             }
                         }
                     }
-                }
                 
                 sessions.push(SessionInfo {
                     id: id.clone(),
@@ -303,6 +422,7 @@ async fn list_sessions() -> Result<Vec<u8>, String> {
             }
         }
     }
+}
     
     // Sort newest first
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));

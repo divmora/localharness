@@ -125,6 +125,7 @@ function App() {
           sessions={sessions}
           onSubmitPrompt={handleStartPromptSession}
           onOpenSSHModal={() => setSshModalOpen(true)}
+          connectionTarget={connectionTarget}
         />
       ) : (
         <PanelGroup orientation="horizontal" className="flex-1 border-l border-[#0A0A0A]">

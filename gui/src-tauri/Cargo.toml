@@ -32,4 +32,6 @@ reqwest = { version = "0.13.4", features = ["json"] }
 tar = "0.4.46"
 flate2 = "1.1.9"
 tokio = { version = "1.53.1", features = ["full"] }
+base64 = "0.23.1"
+chrono = "0.4.45"
 
