@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, Plug, Book, Lightbulb, X, CheckCircle2, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -23,16 +23,34 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
   const [knowledge, setKnowledge] = useState<string[]>([]);
   
   // LLM Config states
+  // LLM Config State
   const [llmConfig, setLlmConfig] = useState<any>(null);
-  const [llmLoading, setLlmLoading] = useState(false);
-  const [llmSaving, setLlmSaving] = useState(false);
-  const [llmError, setLlmError] = useState('');
-
-  // Form states
-  const [formEndpoint, setFormEndpoint] = useState('divmora');
+  const [activeEndpoint, setActiveEndpoint] = useState('divmora');
   const [formBaseUrl, setFormBaseUrl] = useState('');
   const [formApiKey, setFormApiKey] = useState('');
   const [formDefaultModel, setFormDefaultModel] = useState('');
+  const [llmSaving, setLlmSaving] = useState(false);
+  const [llmError, setLlmError] = useState('');
+
+  const endpointNames = useMemo(() => {
+    if (!llmConfig?.endpoints) return ['divmora'];
+    return Object.keys(llmConfig.endpoints);
+  }, [llmConfig]);
+
+  // Handle selecting an endpoint from the dropdown
+  const handleSelectEndpoint = (name: string, configContext?: any) => {
+    const configToUse = configContext || llmConfig;
+    setActiveEndpoint(name);
+    if (configToUse?.endpoints?.[name]) {
+      setFormBaseUrl(configToUse.endpoints[name].baseUrl || '');
+      setFormApiKey(configToUse.endpoints[name].apiKey || '');
+      setFormDefaultModel(configToUse.endpoints[name].defaultModel || '');
+    } else {
+      setFormBaseUrl('');
+      setFormApiKey('');
+      setFormDefaultModel('');
+    }
+  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -40,39 +58,26 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
     async function fetchData() {
       setLoading(true);
       try {
-        // Fetch LLM Config using target-aware read
-        setLlmLoading(true);
+        // Fetch LLM Config
         try {
           const llmRaw = await invoke<string>('read_target_file', { 
-            target: connectionTarget, 
+            target: connectionTarget,
             path: '~/.divmora/config/litellm.json' 
           });
-          const config = JSON.parse(llmRaw);
-          setLlmConfig(config);
+          const parsed = JSON.parse(llmRaw);
+          setLlmConfig(parsed);
           
-          if (config && config.endpoints && config.defaultEndpoint) {
-            setFormEndpoint(config.defaultEndpoint);
-            const ep = config.endpoints[config.defaultEndpoint];
-            if (ep) {
-              setFormBaseUrl(ep.baseUrl || '');
-              setFormApiKey(ep.apiKey || '');
-              setFormDefaultModel(ep.defaultModel || '');
-            }
+          let defaultName = parsed.defaultEndpoint || 'divmora';
+          if (parsed.endpoints && !parsed.endpoints[defaultName] && Object.keys(parsed.endpoints).length > 0) {
+            defaultName = Object.keys(parsed.endpoints)[0];
           }
+          
+          handleSelectEndpoint(defaultName, parsed);
         } catch (e) {
-          setLlmConfig({
-            defaultEndpoint: 'divmora',
-            endpoints: {
-              'divmora': {
-                baseUrl: '',
-                apiKey: '',
-                defaultModel: ''
-              }
-            }
-          });
-          setFormEndpoint('divmora');
-        } finally {
-          setLlmLoading(false);
+          // If file doesn't exist, set empty default
+          const defaultCfg = { endpoints: { 'divmora': { baseUrl: '', apiKey: '', defaultModel: '' } } };
+          setLlmConfig(defaultCfg);
+          handleSelectEndpoint('divmora', defaultCfg);
         }
 
         // Fetch MCP Config
@@ -156,16 +161,20 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
     try {
       const newConfig = {
         ...llmConfig,
-        defaultEndpoint: formEndpoint,
         endpoints: {
           ...(llmConfig?.endpoints || {}),
-          [formEndpoint]: {
+          [activeEndpoint]: {
             baseUrl: formBaseUrl,
             apiKey: formApiKey,
             defaultModel: formDefaultModel
           }
         }
       };
+      
+      // Keep existing defaultEndpoint unless it wasn't set, then set to active
+      if (!newConfig.defaultEndpoint) {
+        newConfig.defaultEndpoint = activeEndpoint;
+      }
 
       await invoke('write_target_file', {
         target: connectionTarget,
@@ -179,6 +188,72 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
     } finally {
       setLlmSaving(false);
     }
+  };
+
+  const handleSetDefaultEndpoint = async () => {
+    setLlmSaving(true);
+    try {
+      const newConfig = {
+        ...llmConfig,
+        defaultEndpoint: activeEndpoint
+      };
+      await invoke('write_target_file', {
+        target: connectionTarget,
+        path: '~/.divmora/config/litellm.json',
+        content: JSON.stringify(newConfig, null, 2)
+      });
+      setLlmConfig(newConfig);
+    } catch (e: any) {
+      setLlmError(e.toString());
+    } finally {
+      setLlmSaving(false);
+    }
+  };
+
+  const handleDeleteEndpoint = async () => {
+    if (!confirm(`Are you sure you want to delete the endpoint "${activeEndpoint}"?`)) return;
+    
+    setLlmSaving(true);
+    try {
+      const newEndpoints = { ...(llmConfig?.endpoints || {}) };
+      delete newEndpoints[activeEndpoint];
+      
+      const newConfig = {
+        ...llmConfig,
+        endpoints: newEndpoints
+      };
+      
+      // If we deleted the default, clear it
+      if (newConfig.defaultEndpoint === activeEndpoint) {
+        newConfig.defaultEndpoint = Object.keys(newEndpoints)[0] || '';
+      }
+
+      await invoke('write_target_file', {
+        target: connectionTarget,
+        path: '~/.divmora/config/litellm.json',
+        content: JSON.stringify(newConfig, null, 2)
+      });
+      
+      setLlmConfig(newConfig);
+      handleSelectEndpoint(newConfig.defaultEndpoint || 'divmora', newConfig);
+    } catch (e: any) {
+      setLlmError(e.toString());
+    } finally {
+      setLlmSaving(false);
+    }
+  };
+
+  const handleAddNewEndpoint = () => {
+    const name = prompt("Enter a name for the new endpoint:");
+    if (!name || name.trim() === '') return;
+    
+    const newConfig = { ...llmConfig };
+    if (!newConfig.endpoints) newConfig.endpoints = {};
+    if (!newConfig.endpoints[name]) {
+      newConfig.endpoints[name] = { baseUrl: '', apiKey: '', defaultModel: '' };
+      setLlmConfig(newConfig);
+    }
+    handleSelectEndpoint(name, newConfig);
   };
 
   const tabs = [
@@ -250,19 +325,29 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
                           </p>
                         </div>
                         
-                        {llmLoading ? (
+                        {loading ? (
                           <div className="text-center text-[#6c7086] text-sm py-8 animate-pulse">Reading config...</div>
                         ) : (
                           <div className="bg-[#0A0A0A] border border-[#262626] rounded-lg p-5 flex flex-col gap-5">
                             
                             <div className="flex flex-col gap-1.5">
-                              <label className="text-xs font-semibold text-[#9CA3AF]">Endpoint Name</label>
-                              <input
-                                type="text"
-                                className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors"
-                                value={formEndpoint}
-                                onChange={e => setFormEndpoint(e.target.value)}
-                              />
+                              <div className="flex justify-between items-end">
+                                <label className="text-xs font-semibold text-[#9CA3AF]">Select Endpoint</label>
+                                <button onClick={handleAddNewEndpoint} className="text-xs text-[#3B82F6] hover:text-[#60A5FA] flex items-center gap-1">
+                                  + New Endpoint
+                                </button>
+                              </div>
+                              <select
+                                className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors appearance-none"
+                                value={activeEndpoint}
+                                onChange={e => handleSelectEndpoint(e.target.value)}
+                              >
+                                {endpointNames.map((name: string) => (
+                                  <option key={name} value={name}>
+                                    {name} {llmConfig?.defaultEndpoint === name ? '(Default)' : ''}
+                                  </option>
+                                ))}
+                              </select>
                             </div>
                             
                             <div className="flex flex-col gap-1.5">
@@ -302,7 +387,27 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
                               <div className="text-xs text-red-400 mt-2">{llmError}</div>
                             )}
                             
-                            <div className="flex justify-end pt-2">
+                            <div className="flex justify-between pt-2 items-center">
+                              <div className="flex gap-2">
+                                {llmConfig?.defaultEndpoint !== activeEndpoint && (
+                                  <button
+                                    onClick={handleSetDefaultEndpoint}
+                                    disabled={llmSaving}
+                                    className="bg-[#262626] hover:bg-[#3f3f46] text-[#F9FAFB] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
+                                  >
+                                    Set as Default
+                                  </button>
+                                )}
+                                {endpointNames.length > 1 && (
+                                  <button
+                                    onClick={handleDeleteEndpoint}
+                                    disabled={llmSaving}
+                                    className="bg-[#7f1d1d] hover:bg-[#991b1b] text-[#F9FAFB] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
                               <button
                                 onClick={handleSaveLlmConfig}
                                 disabled={llmSaving}
