@@ -4,7 +4,7 @@ import { UnifiedSidebar } from './components/UnifiedSidebar';
 import { CenteredEmptyState } from './components/CenteredEmptyState';
 import { ChatPanel } from './components/ChatPanel';
 import { WorkspacePanel } from './components/WorkspacePanel';
-import { CustomizationsModal } from './components/CustomizationsModal';
+import { CustomizationsPage } from './components/CustomizationsPage';
 import { ConnectSSHModal } from './components/ConnectSSHModal';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
@@ -35,7 +35,7 @@ function App() {
   });
 
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
-  const [customizationsOpen, setCustomizationsOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<'main' | 'customizations'>('main');
   const [sshModalOpen, setSshModalOpen] = useState(false);
   
   const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget);
@@ -99,11 +99,6 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
-      <CustomizationsModal 
-        isOpen={customizationsOpen} 
-        onClose={() => setCustomizationsOpen(false)} 
-        connectionTarget={connectionTarget}
-      />
       <ConnectSSHModal
         isOpen={sshModalOpen}
         onClose={() => setSshModalOpen(false)}
@@ -112,14 +107,25 @@ function App() {
 
       <UnifiedSidebar 
         activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId}
-        onNewSession={handleNewSession}
-        onOpenCustomizations={() => setCustomizationsOpen(true)}
+        onSelectSession={(id) => {
+          setActiveSessionId(id);
+          setCurrentView('main');
+        }}
+        onNewSession={() => {
+          handleNewSession();
+          setCurrentView('main');
+        }}
+        onOpenCustomizations={() => setCurrentView('customizations')}
         sessions={sessions}
         mcpServerCount={0}
       />
 
-      {!activeSessionId ? (
+      {currentView === 'customizations' ? (
+        <CustomizationsPage 
+          onClose={() => setCurrentView('main')} 
+          connectionTarget={connectionTarget}
+        />
+      ) : !activeSessionId ? (
         <CenteredEmptyState 
           onSelectSession={setActiveSessionId}
           sessions={sessions}
@@ -144,7 +150,11 @@ function App() {
 
           {/* Right Pane: Workspace */}
           <Panel defaultSize={45} minSize={20}>
-            <WorkspacePanel steps={steps} onNewSession={handleNewSession} />
+            <WorkspacePanel 
+              steps={steps} 
+              onNewSession={handleNewSession} 
+              onOpenCustomizations={() => setCurrentView('customizations')}
+            />
           </Panel>
         </PanelGroup>
       )}

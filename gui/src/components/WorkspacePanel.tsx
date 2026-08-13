@@ -4,7 +4,7 @@ import { EditorPanel } from './EditorPanel';
 import { TerminalPanel } from './TerminalPanel';
 import { WorkspaceMenu } from './WorkspaceMenu';
 import { FileExplorer } from './FileExplorer';
-import { CustomizationsModal } from './CustomizationsModal';
+
 import { FileCode2, Terminal as TerminalIcon, X } from 'lucide-react';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 import { ConnectionTarget } from '../hooks/useHarness';
@@ -12,6 +12,7 @@ import { ConnectionTarget } from '../hooks/useHarness';
 interface WorkspacePanelProps {
   steps: StepUpdate[];
   onNewSession: () => void;
+  onOpenCustomizations?: () => void;
   connectionTarget?: ConnectionTarget | null;
 }
 
@@ -20,7 +21,7 @@ interface OpenFile {
   content: string;
 }
 
-export function WorkspacePanel({ steps, onNewSession, connectionTarget }: WorkspacePanelProps) {
+export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, connectionTarget }: WorkspacePanelProps) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
@@ -46,7 +47,6 @@ export function WorkspacePanel({ steps, onNewSession, connectionTarget }: Worksp
     }
   }, [steps]);
 
-  const [customizationsOpen, setCustomizationsOpen] = useState(false);
 
   // Handle it safely via effect
   useState(() => {
@@ -91,10 +91,7 @@ export function WorkspacePanel({ steps, onNewSession, connectionTarget }: Worksp
         onFileSelect={handleOpenFile} 
         connectionTarget={connectionTarget}
       />
-      <CustomizationsModal 
-        isOpen={customizationsOpen} 
-        onClose={() => setCustomizationsOpen(false)} 
-      />
+
 
       {/* Workspace Header & Tabs */}
       <div className="border-b border-[#0A0A0A] flex flex-col shadow-sm z-10 bg-[#000000]">
@@ -133,7 +130,7 @@ export function WorkspacePanel({ steps, onNewSession, connectionTarget }: Worksp
           <WorkspaceMenu 
             onNewSession={onNewSession} 
             onOpenFile={() => setExplorerOpen(true)} 
-            onOpenCustomizations={() => setCustomizationsOpen(true)} 
+            onOpenCustomizations={onOpenCustomizations || (() => {})}
             onViewDiffs={() => {}} 
           />
         ) : (

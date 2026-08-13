@@ -1,18 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Settings, Plug, Book, Lightbulb, X, CheckCircle2, Cpu } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Settings, Plug, Book, Lightbulb, CheckCircle2, Cpu, ArrowLeft } from 'lucide-react';
 import { ConnectionTarget } from '../hooks/useHarness';
 
-interface CustomizationsModalProps {
-  isOpen: boolean;
+interface CustomizationsPageProps {
   onClose: () => void;
   connectionTarget?: ConnectionTarget | null;
 }
 
 type TabId = 'llm' | 'knowledge' | 'skills' | 'mcp' | 'settings';
 
-export function CustomizationsModal({ isOpen, onClose, connectionTarget }: CustomizationsModalProps) {
+export function CustomizationsPage({ onClose, connectionTarget }: CustomizationsPageProps) {
   const [activeTab, setActiveTab] = useState<TabId>('llm');
   const [loading, setLoading] = useState(false);
 
@@ -53,8 +51,6 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
   };
 
   useEffect(() => {
-    if (!isOpen) return;
-    
     async function fetchData() {
       setLoading(true);
       try {
@@ -144,16 +140,16 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
     }
     
     fetchData();
-  }, [isOpen, connectionTarget]);
+  }, [connectionTarget]);
 
   // Handle escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [onClose]);
 
   const handleSaveLlmConfig = async () => {
     setLlmSaving(true);
@@ -265,49 +261,46 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
   ] as const;
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/60 backdrop-blur-sm">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ duration: 0.15 }}
-            className="w-full max-w-4xl h-[70vh] bg-[#121212] border border-[#262626] rounded-xl shadow-2xl overflow-hidden flex flex-col"
+    <div className="flex-1 h-full bg-[#121212] flex flex-col min-w-0">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[#262626] bg-[#000000] shrink-0">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={onClose}
+            className="p-1 hover:bg-[#262626] text-[#9CA3AF] hover:text-[#F9FAFB] rounded-md transition-colors flex items-center gap-2 text-sm mr-2"
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[#262626] bg-[#000000] shrink-0">
-              <div className="flex items-center gap-3">
-                <Settings size={20} className="text-[#9CA3AF]" />
-                <h2 className="text-sm font-semibold text-[#F9FAFB]">
-                  Customizations Manager
-                  {connectionTarget?.kind === 'ssh' && (
-                    <span className="ml-2 text-xs px-2 py-0.5 rounded bg-blue-900 text-blue-300 font-normal">
-                      Remote: {connectionTarget.host}
-                    </span>
-                  )}
-                </h2>
-              </div>
-              <button onClick={onClose} className="p-1 hover:bg-[#262626] rounded text-[#9CA3AF]">
-                <X size={18} />
-              </button>
-            </div>
+            <ArrowLeft size={16} />
+            Back
+          </button>
+          <Settings size={20} className="text-[#9CA3AF]" />
+          <h2 className="text-sm font-semibold text-[#F9FAFB]">
+            Customizations Manager
+            {connectionTarget?.kind === 'ssh' && (
+              <span className="ml-2 text-xs px-2 py-0.5 rounded bg-blue-900 text-blue-300 font-normal">
+                Remote: {connectionTarget.host}
+              </span>
+            )}
+          </h2>
+        </div>
+      </div>
 
-            {/* Content Area */}
-            <div className="flex flex-1 overflow-hidden">
-              {/* Sidebar Tabs */}
-              <div className="w-56 bg-[#0A0A0A] border-r border-[#262626] flex flex-col p-2 gap-1 shrink-0">
-                {tabs.map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as TabId)}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors text-left ${activeTab === tab.id ? 'bg-[#262626] text-[#3B82F6] font-medium shadow-sm' : 'text-[#9CA3AF] hover:bg-[#262626]/50 hover:text-[#F9FAFB]'}`}
-                  >
-                    <tab.icon size={16} />
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
+      <div className="flex flex-1 overflow-hidden min-h-0">
+        {/* Sidebar */}
+        <div className="w-56 bg-[#000000] border-r border-[#262626] flex flex-col p-3 gap-1 shrink-0">
+          <div className="text-xs font-semibold text-[#6B7280] px-3 py-2 mb-1 uppercase tracking-wider">
+            Configuration
+          </div>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as TabId)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors text-left ${activeTab === tab.id ? 'bg-[#262626] text-[#3B82F6] font-medium shadow-sm' : 'text-[#9CA3AF] hover:bg-[#262626]/50 hover:text-[#F9FAFB]'}`}
+            >
+              <tab.icon size={16} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
               {/* Main Content */}
               <div className="flex-1 overflow-y-auto p-6 bg-[#121212]">
@@ -545,11 +538,8 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
 
                   </div>
                 )}
-              </div>
-            </div>
-          </motion.div>
         </div>
-      )}
-    </AnimatePresence>
+      </div>
+    </div>
   );
 }
