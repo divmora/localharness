@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Loader, AlertCircle, CheckCircle, Share2 } from 'lucide-react';
 
