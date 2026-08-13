@@ -79,10 +79,11 @@ func main() {
 		"debug", inputCfg.Debug,
 	)
 
-	// Bind to localhost:0 atomically (OS assigns a free port)
-	ln, err := net.Listen("tcp", "localhost:0")
+	// Bind to 127.0.0.1:0 atomically to explicitly use IPv4 loopback
+	// This prevents issues where it binds to IPv6 [::1] but GUI tries to connect to 127.0.0.1
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		logger.Error("failed to bind to localhost:0", "error", err)
+		logger.Error("failed to bind to 127.0.0.1:0", "error", err)
 		os.Exit(1)
 	}
 

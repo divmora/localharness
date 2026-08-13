@@ -43,7 +43,7 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 const conn = await invoke<HarnessConnection>('start_harness', { target: connectionTarget });
                 console.log("Got sidecar port:", conn.port);
                 
-                ws = await WebSocket.connect(`ws://127.0.0.1:${conn.port}/`, {
+                ws = await WebSocket.connect(`ws://localhost:${conn.port}/`, {
                     headers: {
                         'x-localharness-api-key': conn.api_key
                     }
