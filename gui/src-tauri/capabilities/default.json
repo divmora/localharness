@@ -10,6 +10,7 @@
     "core:window:allow-create",
     "opener:default",
     "shell:default",
-    "websocket:default"
+    "websocket:default",
+    "dialog:default"
   ]
 }

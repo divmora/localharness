@@ -1,6 +1,6 @@
-import { Plus, MessageSquare, Terminal, FolderOpen, Cloud, TerminalSquare, ArrowUp, Mic } from 'lucide-react';
+import { Plus, MessageSquare, Terminal, FolderOpen, Cloud, TerminalSquare, ArrowUp, Mic, ChevronDown } from 'lucide-react';
 import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
-import { useState } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { ConnectionTarget } from '../hooks/useHarness';
 import { open } from '@tauri-apps/plugin-dialog';
 
@@ -17,6 +17,23 @@ interface CenteredEmptyStateProps {
 
 export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal, onOpenSessionsManager, connectionTarget, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
   const [prompt, setPrompt] = useState("");
+  const [isWorkspaceDropdownOpen, setIsWorkspaceDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsWorkspaceDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const recentWorkspaces = useMemo(() => {
+    const wsList = sessions.map(s => s.workspace).filter(Boolean);
+    return Array.from(new Set(wsList)).slice(0, 5); // top 5 unique workspaces
+  }, [sessions]);
 
   const handleSubmit = () => {
     if (prompt.trim()) {
@@ -38,6 +55,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
       });
       if (selected && typeof selected === 'string') {
         onSelectWorkspace(selected);
+        setIsWorkspaceDropdownOpen(false);
       }
     } catch (err) {
       console.error("Failed to open dialog:", err);
@@ -111,8 +129,47 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
               <div className="flex items-center gap-1.5">
                 <TerminalSquare size={14} /> {connectionTarget?.kind === 'ssh' ? `SSH: ${connectionTarget.host}` : 'Local'}
               </div>
-              <div className="flex items-center gap-1.5 cursor-pointer hover:text-text-primary transition-colors" onClick={handleSelectDirectory}>
-                <FolderOpen size={14} /> {workspace ? workspace : 'Select a directory...'}
+              <div className="flex items-center gap-1.5 relative" ref={dropdownRef}>
+                <div 
+                  className="flex items-center gap-1.5 cursor-pointer hover:text-text-primary transition-colors text-text-secondary" 
+                  onClick={() => setIsWorkspaceDropdownOpen(!isWorkspaceDropdownOpen)}
+                >
+                  <FolderOpen size={14} /> 
+                  <span className="truncate max-w-[200px]">{workspace ? workspace.split('/').pop() || workspace : 'Select a directory...'}</span>
+                  <ChevronDown size={14} className="ml-0.5 opacity-70" />
+                </div>
+                
+                {isWorkspaceDropdownOpen && (
+                  <div className="absolute top-full left-0 mt-2 w-72 bg-bg-primary border border-border-primary rounded-lg shadow-xl z-50 overflow-hidden flex flex-col">
+                    <div className="px-3 py-2 text-xs font-semibold text-text-secondary border-b border-border-primary bg-bg-secondary">
+                      Select a directory
+                    </div>
+                    
+                    <div className="max-h-48 overflow-y-auto">
+                      {recentWorkspaces.map((path, idx) => (
+                        <div 
+                          key={idx}
+                          className="px-3 py-2 text-xs text-text-primary hover:bg-bg-tertiary cursor-pointer flex items-center justify-between group"
+                          onClick={() => {
+                            onSelectWorkspace(path);
+                            setIsWorkspaceDropdownOpen(false);
+                          }}
+                        >
+                          <span className="font-medium truncate max-w-[120px]">{path.split('/').pop()}</span>
+                          <span className="text-[10px] text-text-tertiary truncate max-w-[120px] group-hover:text-text-secondary">{path}</span>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div 
+                      className="px-3 py-2.5 text-xs text-text-primary hover:bg-bg-tertiary cursor-pointer border-t border-border-primary flex items-center gap-2"
+                      onClick={handleSelectDirectory}
+                    >
+                      <FolderOpen size={14} className="text-text-secondary" />
+                      Browse...
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div 

@@ -845,6 +845,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             start_harness, list_sessions, list_files, read_file, write_file, 
             read_target_file, write_target_file, list_target_files,
