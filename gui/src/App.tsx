@@ -4,14 +4,17 @@ import { ChatPanel } from './components/ChatPanel';
 import { EditorPanel } from './components/EditorPanel';
 import { TerminalPanel } from './components/TerminalPanel';
 import './App.css';
+import { useHarness } from './hooks/useHarness';
 
 function App() {
+  const { connected, steps, sendPrompt } = useHarness();
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
       <Sidebar />
       <PanelGroup orientation="horizontal" className="flex-1">
         <Panel defaultSize={25} minSize={20}>
-          <ChatPanel />
+          <ChatPanel connected={connected} steps={steps} onSend={sendPrompt} />
         </Panel>
         
         <PanelResizeHandle className="w-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
