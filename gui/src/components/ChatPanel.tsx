@@ -78,7 +78,7 @@ export function ChatPanel({ connected, steps, onSend }: ChatPanelProps) {
                 {isUser ? <User size={12} /> : <Bot size={12} />}
                 {isUser ? 'You' : 'Agent'}
               </div>
-              <div className="whitespace-pre-wrap">{msg.text || (msg.action.case ? `[Tool Execution: ${msg.action.case}]` : '...')}</div>
+              <div className="whitespace-pre-wrap">{msg.text || (msg.action?.case ? `[Tool Execution: ${msg.action.case}]` : '...')}</div>
             </motion.div>
           );
         })}

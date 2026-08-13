@@ -33,7 +33,7 @@ export function useHarness(activeSessionId: string | null) {
                 const conn = await invoke<HarnessConnection>('start_harness');
                 console.log("Got sidecar port:", conn.port);
                 
-                ws = await WebSocket.connect(`ws://localhost:${conn.port}/`, {
+                ws = await WebSocket.connect(`ws://127.0.0.1:${conn.port}/`, {
                     headers: {
                         'x-localharness-api-key': conn.api_key
                     }
@@ -64,7 +64,10 @@ export function useHarness(activeSessionId: string | null) {
                     }
                 });
                 
-                await ws.send(Array.from(toBinary(ClientMessageSchema, initClientMsg)));
+                await ws.send({
+                    type: 'Binary',
+                    data: Array.from(toBinary(ClientMessageSchema, initClientMsg))
+                });
                 
                 console.log(`WebSocket connected for session: ${activeSessionId || 'new'}`);
                 setConnected(true);
@@ -111,7 +114,10 @@ export function useHarness(activeSessionId: string | null) {
         });
         
         const bytes = toBinary(ClientMessageSchema, clientMsg);
-        await socket.send(Array.from(bytes)); // tauri websocket expects number[]
+        await socket.send({
+            type: 'Binary',
+            data: Array.from(bytes)
+        });
         
     }, [socket]);
 
