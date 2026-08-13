@@ -652,10 +652,10 @@ async fn setup_ssh_tunnel(app: &tauri::AppHandle, target: &ConnectionTarget, rem
     Ok(local_port)
 }
 use std::sync::Mutex;
-use tauri_plugin_shell::process::Child;
+use tauri_plugin_shell::process::CommandChild;
 
 struct AppState {
-    children: Mutex<Vec<Child>>,
+    children: Mutex<Vec<CommandChild>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
