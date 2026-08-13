@@ -4,24 +4,25 @@ import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localhar
 interface SessionsPanelProps {
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
+  onNewSession: () => void;
   sessions: ProtoSessionInfo[];
 }
 
-export function SessionsPanel({ activeSessionId, onSelectSession, sessions }: SessionsPanelProps) {
+export function SessionsPanel({ activeSessionId, onSelectSession, onNewSession, sessions }: SessionsPanelProps) {
 
   return (
     <div className="h-full bg-[#000000] border-r border-[#0A0A0A] flex flex-col text-[#F9FAFB]">
       {/* Header section */}
       <div className="p-4 flex items-center justify-between border-b border-[#0A0A0A]">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-[#60A5FA] rounded-sm opacity-80" />
-          <span className="font-semibold text-[13px] tracking-wide text-[#60A5FA]">Sessions</span>
+          <div className="w-4 h-4 bg-[#3B82F6] rounded-sm opacity-80" />
+          <span className="font-semibold text-[13px] tracking-wide text-[#3B82F6]">Sessions</span>
         </div>
         <div className="flex items-center gap-1">
           <button className="p-1 hover:bg-[#262626] rounded text-[#9CA3AF] transition-colors">
             <MoreHorizontal size={16} />
           </button>
-          <button className="flex items-center gap-1 bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] px-2 py-1 rounded text-[13px] font-medium transition-colors">
+          <button onClick={onNewSession} className="flex items-center gap-1 bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] px-2 py-1 rounded text-[13px] font-medium transition-colors">
             <Plus size={14} /> New
           </button>
         </div>

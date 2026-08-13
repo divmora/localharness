@@ -10,6 +10,7 @@ import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 
 interface WorkspacePanelProps {
   steps: StepUpdate[];
+  onNewSession: () => void;
 }
 
 interface OpenFile {
@@ -17,7 +18,7 @@ interface OpenFile {
   content: string;
 }
 
-export function WorkspacePanel({ steps }: WorkspacePanelProps) {
+export function WorkspacePanel({ steps, onNewSession }: WorkspacePanelProps) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
@@ -127,7 +128,7 @@ export function WorkspacePanel({ steps }: WorkspacePanelProps) {
       <div className="flex-1 overflow-hidden">
         {!showEditor ? (
           <WorkspaceMenu 
-            onNewSession={() => {}} 
+            onNewSession={onNewSession} 
             onOpenFile={() => setExplorerOpen(true)} 
             onOpenCustomizations={() => setCustomizationsOpen(true)} 
             onViewDiffs={() => {}} 

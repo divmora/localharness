@@ -37,6 +37,10 @@ function App() {
     return () => clearInterval(interval);
   }, [activeSessionId]);
 
+  const handleNewSession = () => {
+    setActiveSessionId(crypto.randomUUID());
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
       <Sidebar />
@@ -47,6 +51,7 @@ function App() {
           <SessionsPanel 
             activeSessionId={activeSessionId} 
             onSelectSession={setActiveSessionId} 
+            onNewSession={handleNewSession}
             sessions={sessions}
           />
         </Panel>
@@ -67,6 +72,7 @@ function App() {
             <SessionBoard 
               sessions={sessions} 
               onSelectSession={setActiveSessionId} 
+              onNewSession={handleNewSession}
             />
           )}
         </Panel>
@@ -75,7 +81,7 @@ function App() {
 
         {/* Right Pane: Workspace */}
         <Panel defaultSize={25} minSize={20}>
-          <WorkspacePanel steps={steps} />
+          <WorkspacePanel steps={steps} onNewSession={handleNewSession} />
         </Panel>
 
       </PanelGroup>

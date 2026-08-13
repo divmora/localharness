@@ -1,12 +1,13 @@
-import { Search, Filter, Clock, Play, AlertCircle } from 'lucide-react';
+import { Search, Filter, Clock, Play, AlertCircle, Plus } from 'lucide-react';
 import { SessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 
 interface SessionBoardProps {
   sessions: SessionInfo[];
   onSelectSession: (id: string) => void;
+  onNewSession: () => void;
 }
 
-export function SessionBoard({ sessions, onSelectSession }: SessionBoardProps) {
+export function SessionBoard({ sessions, onSelectSession, onNewSession }: SessionBoardProps) {
   const runningSessions = sessions.filter(s => s.status === SessionStatus.RUNNING);
   const blockedSessions = sessions.filter(s => s.status === SessionStatus.BLOCKED);
   const readySessions = sessions.filter(s => s.status === SessionStatus.READY || s.status === SessionStatus.UNSPECIFIED);
@@ -82,6 +83,9 @@ export function SessionBoard({ sessions, onSelectSession }: SessionBoardProps) {
           </div>
           <div className="flex items-center gap-2 text-sm font-medium">
             <span className="text-[#6c7086]">Display</span>
+            <button onClick={onNewSession} className="flex items-center gap-1 bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] px-3 py-1.5 rounded text-xs font-semibold transition-colors">
+              <Plus size={14} /> New Session
+            </button>
           </div>
         </div>
       </div>
