@@ -55,9 +55,6 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Sidecar
-        run: make build-gui
-
       - name: Install Frontend Dependencies
         working-directory: ./gui
         run: npm install

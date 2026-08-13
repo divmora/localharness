@@ -59,24 +59,8 @@ build-zenith:
 	go build -o $(BIN_DIR)/zenith ./agents/zenith
 	@echo "==> Built $(BIN_DIR)/zenith"
 
-# Build GUI and sidecar
-build-gui: build
-	@echo "==> Preparing sidecar for Tauri..."
-	@mkdir -p gui/src-tauri/bin
-	$(eval TAURI_TARGET := $(shell rustc -vV | grep host | cut -f2 -d' '))
-	@if [ "$$(uname -s)" = "Darwin" ]; then \
-		echo "==> Building universal macOS sidecar..."; \
-		GOOS=darwin GOARCH=amd64 go build -ldflags="-X github.com/divmora/localharness/internal/config.HarnessVersion=$(VERSION)" -o gui/src-tauri/bin/$(BINARY)-x86_64-apple-darwin ./cmd/localharness; \
-		GOOS=darwin GOARCH=arm64 go build -ldflags="-X github.com/divmora/localharness/internal/config.HarnessVersion=$(VERSION)" -o gui/src-tauri/bin/$(BINARY)-aarch64-apple-darwin ./cmd/localharness; \
-		lipo -create -output gui/src-tauri/bin/$(BINARY)-universal-apple-darwin gui/src-tauri/bin/$(BINARY)-x86_64-apple-darwin gui/src-tauri/bin/$(BINARY)-aarch64-apple-darwin; \
-		cp gui/src-tauri/bin/$(BINARY)-$(TAURI_TARGET) $(BIN_DIR)/$(BINARY); \
-	else \
-		cp $(BIN_DIR)/$(BINARY)$(EXE_EXT) gui/src-tauri/bin/$(BINARY)-$(TAURI_TARGET)$(EXE_EXT); \
-	fi
-	@echo "==> Sidecar ready for $(TAURI_TARGET). Run 'npm run tauri dev' in gui/ to start."
-
 # Full build: proto + binary + tools + agents
-all: proto build test-client build-lhctl build-zenith build-gui
+all: proto build test-client build-lhctl build-zenith
 	@echo "==> Full build complete."
 
 # Cross-compile for all supported platforms
