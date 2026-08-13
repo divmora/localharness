@@ -9,7 +9,7 @@ import {
     StepUpdate,
     InitRequestSchema,
     HarnessConfigSchema,
-    QuestionResponseSchema
+    PermissionResponseSchema
 } from '../gen/localharness/v1/localharness_pb';
 
 interface HarnessConnection {
@@ -145,5 +145,28 @@ export function useHarness(activeSessionId: string | null) {
         });
     }, [socket]);
 
-    return { connected, steps, sendPrompt, submitQuestionResponse };
+    const submitPermissionResponse = useCallback(async (requestId: string, approved: boolean, denialReason: string = "") => {
+        if (!socket) return;
+        
+        const pResponse = create(PermissionResponseSchema, {
+            requestId: requestId,
+            approved: approved,
+            denialReason: denialReason
+        });
+        
+        const clientMsg = create(ClientMessageSchema, {
+            payload: {
+                case: "permissionResponse",
+                value: pResponse
+            }
+        });
+        
+        const bytes = toBinary(ClientMessageSchema, clientMsg);
+        await socket.send({
+            type: 'Binary',
+            data: Array.from(bytes)
+        });
+    }, [socket]);
+
+    return { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse };
 }

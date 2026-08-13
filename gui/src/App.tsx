@@ -1,16 +1,41 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { Sidebar } from './components/Sidebar';
 import { SessionsPanel } from './components/SessionsPanel';
+import { SessionBoard } from './components/SessionBoard';
 import { ChatPanel } from './components/ChatPanel';
-import { EditorPanel } from './components/EditorPanel';
-import { TerminalPanel } from './components/TerminalPanel';
+import { WorkspacePanel } from './components/WorkspacePanel';
 import './App.css';
 import { useHarness } from './hooks/useHarness';
+import { invoke } from '@tauri-apps/api/core';
+import { fromBinary } from '@bufbuild/protobuf';
+import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
 
 function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const { connected, steps, sendPrompt, submitQuestionResponse } = useHarness(activeSessionId);
+  const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
+  const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId);
+
+  useEffect(() => {
+    async function loadSessions() {
+      try {
+        const result = await invoke<number[]>('list_sessions');
+        const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
+        setSessions(sessionList.sessions);
+      } catch (err) {
+        console.error("Failed to list sessions:", err);
+      }
+    }
+    loadSessions();
+    
+    // Poll every 5 seconds when no session is active to keep board updated
+    const interval = setInterval(() => {
+      if (!activeSessionId) {
+        loadSessions();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [activeSessionId]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
@@ -19,32 +44,43 @@ function App() {
         
         {/* Left Pane: Sessions/Spaces */}
         <Panel defaultSize={20} minSize={15}>
-          <SessionsPanel activeSessionId={activeSessionId} onSelectSession={setActiveSessionId} />
+          <SessionsPanel 
+            activeSessionId={activeSessionId} 
+            onSelectSession={setActiveSessionId} 
+            sessions={sessions}
+          />
         </Panel>
         
         <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
         
-        {/* Center Pane: Editor/Dashboard + Terminal */}
-        <Panel defaultSize={55} minSize={30}>
-          <PanelGroup orientation="vertical">
-            <Panel defaultSize={70}>
-              <EditorPanel steps={steps} />
-            </Panel>
-            
-            <PanelResizeHandle className="h-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
-            
-            <Panel defaultSize={30} minSize={10}>
-              <TerminalPanel steps={steps} />
-            </Panel>
-          </PanelGroup>
+        {/* Center Pane: SessionBoard OR ChatPanel */}
+        <Panel defaultSize={55} minSize={40}>
+          {activeSessionId ? (
+            <ChatPanel 
+              connected={connected} 
+              steps={steps} 
+              onSend={sendPrompt} 
+              onSubmitQuestionResponse={submitQuestionResponse} 
+              onSubmitPermissionResponse={submitPermissionResponse}
+            />
+          ) : (
+            <SessionBoard 
+              sessions={sessions} 
+              onSelectSession={setActiveSessionId} 
+            />
+          )}
         </Panel>
 
-        <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
+        {activeSessionId && (
+          <>
+            <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
 
-        {/* Right Pane: Chat/Agent */}
-        <Panel defaultSize={25} minSize={20}>
-          <ChatPanel connected={connected} steps={steps} onSend={sendPrompt} onSubmitQuestionResponse={submitQuestionResponse} />
-        </Panel>
+            {/* Right Pane: Workspace */}
+            <Panel defaultSize={25} minSize={20}>
+              <WorkspacePanel steps={steps} />
+            </Panel>
+          </>
+        )}
 
       </PanelGroup>
     </div>

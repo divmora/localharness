@@ -7,27 +7,11 @@ import { SessionListSchema, SessionInfo as ProtoSessionInfo } from '../gen/local
 interface SessionsPanelProps {
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
+  sessions: ProtoSessionInfo[];
 }
 
-export function SessionsPanel({ activeSessionId, onSelectSession }: SessionsPanelProps) {
-  const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadSessions() {
-      try {
-        // Now returns protobuf bytes (number[])
-        const result = await invoke<number[]>('list_sessions');
-        const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
-        setSessions(sessionList.sessions);
-      } catch (err) {
-        console.error("Failed to list sessions:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadSessions();
-  }, []);
+export function SessionsPanel({ activeSessionId, onSelectSession, sessions }: SessionsPanelProps) {
+  const [loading, setLoading] = useState(false); // Can remove later if not needed
 
   return (
     <div className="h-full bg-[#11111b] border-r border-[#181825] flex flex-col text-[#cdd6f4]">

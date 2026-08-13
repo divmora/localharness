@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Send, TerminalSquare, User, Bot, Globe, Users, Check } from 'lucide-react';
+import { TerminalSquare, User, Bot, Users, Globe, FileCode, ShieldAlert, Check, X, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { StepUpdate, StepUpdate_Source, StepUpdate_State } from '../gen/localharness/v1/localharness_pb';
 
@@ -8,6 +8,7 @@ interface ChatPanelProps {
   steps: StepUpdate[];
   onSend: (text: string) => void;
   onSubmitQuestionResponse?: (requestId: string, answers: any[], skipped: boolean) => void;
+  onSubmitPermissionResponse?: (requestId: string, approved: boolean, reason?: string) => void;
 }
 
 function QuestionForm({ action, state, onSubmit }: { action: any, state: StepUpdate_State, onSubmit: (answers: any[], skipped: boolean) => void }) {
@@ -98,7 +99,7 @@ function QuestionForm({ action, state, onSubmit }: { action: any, state: StepUpd
   );
 }
 
-export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse }: ChatPanelProps) {
+export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse, onSubmitPermissionResponse }: ChatPanelProps) {
   const [input, setInput] = useState('');
 
   // Group streaming steps by stepIndex so we have one cohesive message per step
@@ -193,6 +194,59 @@ export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse }
             )}
           </div>
         );
+      case 'permissionRequest':
+        const pr = msg.action.value as any;
+        return (
+          <div className="mt-2 bg-[#f38ba8]/10 border border-[#f38ba8]/30 rounded p-3">
+            <div className="flex items-center gap-2 text-[#f38ba8] mb-2 font-semibold text-xs">
+              <ShieldAlert size={16} />
+              Permission Required: {pr.toolName}
+            </div>
+            <div className="text-[11px] text-[#cdd6f4] bg-[#11111b] p-2 rounded mb-3 font-mono">
+              {pr.argsSummary || pr.argsJson}
+            </div>
+            {msg.state !== StepUpdate_State.DONE ? (
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, true)}
+                  className="flex items-center gap-1 bg-green-600/20 hover:bg-green-600/40 text-green-400 px-3 py-1 rounded text-xs transition-colors"
+                >
+                  <Check size={12} /> Approve
+                </button>
+                <button 
+                  onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, false, "Denied by user")}
+                  className="flex items-center gap-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 px-3 py-1 rounded text-xs transition-colors"
+                >
+                  <X size={12} /> Deny
+                </button>
+              </div>
+            ) : (
+              <div className="text-[11px] text-[#a6adc8] italic">Response submitted.</div>
+            )}
+          </div>
+        );
+      case 'writeToFile':
+      case 'replaceFileContent':
+        const fileAction = msg.action.value as any;
+        const isArtifact = fileAction.isArtifact || false;
+        
+        if (isArtifact) {
+          const summary = fileAction.artifactMetadata?.summary || fileAction.description || "Updated artifact";
+          const fileName = fileAction.targetFile?.split('/').pop() || fileAction.path?.split('/').pop() || "file";
+          
+          return (
+            <div className="mt-2 flex items-center gap-3 bg-[#1e1e2e] border border-blue-400/30 p-2.5 rounded shadow-sm">
+              <div className="bg-blue-400/20 p-2 rounded text-blue-400">
+                <FileCode size={18} />
+              </div>
+              <div className="flex flex-col flex-1 overflow-hidden">
+                <span className="text-xs font-semibold text-blue-300 truncate">Artifact: {fileName}</span>
+                <span className="text-[11px] text-gray-400 truncate">{summary}</span>
+              </div>
+            </div>
+          );
+        }
+        return <div className="text-[10px] text-[#7f849c] italic mt-1 font-mono">Edited {fileAction.targetFile || fileAction.path}</div>;
       default:
         return <div className="text-xs text-[#7f849c] italic mt-1">[Tool: {msg.action.case}]</div>;
     }
@@ -238,6 +292,18 @@ export function ChatPanel({ connected, steps, onSend, onSubmitQuestionResponse }
                 {isUser ? <User size={12} /> : <Bot size={12} />}
                 {isUser ? 'You' : 'Agent'}
               </div>
+              
+              {msg.thinking && (
+                <details className="mt-1 mb-2 group">
+                  <summary className="text-[11px] font-semibold text-[#a6adc8] cursor-pointer hover:text-[#cdd6f4] transition-colors select-none flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-blue-400 opacity-50 group-hover:opacity-100 transition-opacity"></span>
+                    Thought Process
+                  </summary>
+                  <div className="mt-2 text-[11px] text-[#bac2de] bg-[#11111b]/50 p-3 rounded border border-[#313244] whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scrollbar-thin">
+                    {msg.thinking}
+                  </div>
+                </details>
+              )}
               
               {hasText && <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>}
               
