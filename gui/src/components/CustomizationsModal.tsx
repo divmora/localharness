@@ -77,7 +77,10 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
 
         // Fetch MCP Config
         try {
-          const mcpRaw = await invoke<string>('read_file', { path: '~/.divmora/config/mcp_config.json' });
+          const mcpRaw = await invoke<string>('read_target_file', { 
+            target: connectionTarget,
+            path: '~/.divmora/config/mcp_config.json' 
+          });
           setMcpConfig(JSON.parse(mcpRaw));
         } catch (e) {
           setMcpConfig({ mcpServers: {} });
@@ -85,7 +88,10 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
 
         // Fetch Settings
         try {
-          const settingsRaw = await invoke<string>('read_file', { path: '~/.divmora/config/settings.json' });
+          const settingsRaw = await invoke<string>('read_target_file', { 
+            target: connectionTarget,
+            path: '~/.divmora/config/settings.json' 
+          });
           setSettings(JSON.parse(settingsRaw));
         } catch (e) {
           setSettings({});
@@ -93,7 +99,10 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
 
         // Fetch Skills
         try {
-          const globalSkills = await invoke<string[]>('list_files', { dir: '~/.divmora/localharness/skills' });
+          const globalSkills = await invoke<string[]>('list_target_files', { 
+            target: connectionTarget,
+            dir: '~/.divmora/localharness/skills' 
+          });
           setSkills(globalSkills.filter(s => s.endsWith('/')));
         } catch (e) {
           setSkills([]);
@@ -101,12 +110,18 @@ export function CustomizationsModal({ isOpen, onClose, connectionTarget }: Custo
 
         // Fetch Knowledge Items
         try {
-          const kiDirs = await invoke<string[]>('list_files', { dir: '~/.divmora/localharness/knowledge' });
+          const kiDirs = await invoke<string[]>('list_target_files', { 
+            target: connectionTarget,
+            dir: '~/.divmora/localharness/knowledge' 
+          });
           let allKis: string[] = [];
           for (const projDir of kiDirs) {
             if (projDir.endsWith('/')) {
               try {
-                const items = await invoke<string[]>('list_files', { dir: `~/.divmora/localharness/knowledge/${projDir}` });
+                const items = await invoke<string[]>('list_target_files', { 
+                  target: connectionTarget,
+                  dir: `~/.divmora/localharness/knowledge/${projDir.slice(0, -1)}` 
+                });
                 allKis = [...allKis, ...items.filter(i => i.endsWith('/'))];
               } catch (e) {}
             }

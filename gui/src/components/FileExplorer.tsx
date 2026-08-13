@@ -2,14 +2,16 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Search, File, Folder, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ConnectionTarget } from '../hooks/useHarness';
 
 interface FileExplorerProps {
   isOpen: boolean;
   onClose: () => void;
   onFileSelect: (path: string, content: string) => void;
+  connectionTarget?: ConnectionTarget | null;
 }
 
-export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProps) {
+export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }: FileExplorerProps) {
   const [currentPath, setCurrentPath] = useState<string>('.');
   const [files, setFiles] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -21,7 +23,10 @@ export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProp
     async function fetchFiles() {
       setLoading(true);
       try {
-        const result = await invoke<string[]>('list_files', { dir: currentPath });
+        const result = await invoke<string[]>('list_target_files', { 
+          target: connectionTarget, 
+          dir: currentPath 
+        });
         setFiles(result);
       } catch (err) {
         console.error("Failed to list files:", err);
@@ -31,7 +36,7 @@ export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProp
     }
     
     fetchFiles();
-  }, [currentPath, isOpen]);
+  }, [currentPath, isOpen, connectionTarget]);
 
   // Handle escape key
   useEffect(() => {
@@ -51,7 +56,10 @@ export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProp
       // It's a file
       try {
         const path = currentPath === '.' ? item : `${currentPath}/${item}`;
-        const content = await invoke<string>('read_file', { path });
+        const content = await invoke<string>('read_target_file', { 
+          target: connectionTarget, 
+          path 
+        });
         onFileSelect(path, content);
       } catch (err) {
         console.error("Failed to read file:", err);

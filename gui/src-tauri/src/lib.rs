@@ -172,6 +172,74 @@ async fn write_target_file(target: Option<ConnectionTarget>, path: String, conte
 }
 
 #[tauri::command]
+async fn list_target_files(target: Option<ConnectionTarget>, dir: Option<String>) -> Result<Vec<String>, String> {
+    if let Some(t) = target {
+        if t.kind == "ssh" {
+            let host = t.host.as_ref().ok_or("SSH host required")?;
+            let mut args = vec![];
+            if let Some(port) = t.port {
+                args.push("-p".to_string());
+                args.push(port.to_string());
+            }
+            if let Some(key) = t.key_path.as_ref() {
+                if !key.is_empty() {
+                    args.push("-i".to_string());
+                    args.push(key.clone());
+                }
+            }
+            if let Some(user) = t.user.as_ref() {
+                if !user.is_empty() {
+                    args.push(format!("{}@{}", user, host));
+                } else {
+                    args.push(host.clone());
+                }
+            } else {
+                args.push(host.clone());
+            }
+            
+            let d = dir.clone().unwrap_or_else(|| ".".to_string());
+            args.push(format!("ls -1pA {}", d));
+            
+            let output = std::process::Command::new("ssh")
+                .args(&args)
+                .output()
+                .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+                
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut files = Vec::new();
+                for line in stdout.lines() {
+                    let name = line.trim();
+                    if name.is_empty() || name == ".git/" || name == "node_modules/" || name == "target/" || name == "bin/" {
+                        continue;
+                    }
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    files.push(name.to_string());
+                }
+                
+                files.sort_by(|a, b| {
+                    let a_is_dir = a.ends_with('/');
+                    let b_is_dir = b.ends_with('/');
+                    if a_is_dir && !b_is_dir {
+                        std::cmp::Ordering::Less
+                    } else if !a_is_dir && b_is_dir {
+                        std::cmp::Ordering::Greater
+                    } else {
+                        a.cmp(b)
+                    }
+                });
+                return Ok(files);
+            } else {
+                return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+            }
+        }
+    }
+    list_files(dir).await
+}
+
+#[tauri::command]
 async fn list_sessions() -> Result<Vec<u8>, String> {
     let mut sessions = Vec::new();
     
@@ -452,7 +520,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file, write_file, read_target_file, write_target_file])
+        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file, write_file, read_target_file, write_target_file, list_target_files])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
