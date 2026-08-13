@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { Sidebar } from './components/Sidebar';
-import { SessionsPanel } from './components/SessionsPanel';
-import { SessionBoard } from './components/SessionBoard';
+import { UnifiedSidebar } from './components/UnifiedSidebar';
+import { CenteredEmptyState } from './components/CenteredEmptyState';
 import { ChatPanel } from './components/ChatPanel';
 import { WorkspacePanel } from './components/WorkspacePanel';
+import { CustomizationsModal } from './components/CustomizationsModal';
 import './App.css';
 import { useHarness } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
@@ -14,6 +14,7 @@ import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localh
 function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
+  const [customizationsOpen, setCustomizationsOpen] = useState(false);
   const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId);
 
   useEffect(() => {
@@ -28,7 +29,6 @@ function App() {
     }
     loadSessions();
     
-    // Poll every 5 seconds when no session is active to keep board updated
     const interval = setInterval(() => {
       if (!activeSessionId) {
         loadSessions();
@@ -38,29 +38,44 @@ function App() {
   }, [activeSessionId]);
 
   const handleNewSession = () => {
-    setActiveSessionId(crypto.randomUUID());
+    setActiveSessionId(null);
+  };
+
+  const handleStartPromptSession = (prompt: string) => {
+    const newId = crypto.randomUUID();
+    setActiveSessionId(newId);
+    // Give the WebSocket a tiny moment to connect before firing off the prompt
+    setTimeout(() => {
+      sendPrompt(prompt);
+    }, 500);
   };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
-      <Sidebar />
-      <PanelGroup orientation="horizontal" className="flex-1">
-        
-        {/* Left Pane: Sessions/Spaces */}
-        <Panel defaultSize={20} minSize={15}>
-          <SessionsPanel 
-            activeSessionId={activeSessionId} 
-            onSelectSession={setActiveSessionId} 
-            onNewSession={handleNewSession}
-            sessions={sessions}
-          />
-        </Panel>
-        
-        <PanelResizeHandle className="w-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors" />
-        
-        {/* Center Pane: SessionBoard OR ChatPanel */}
-        <Panel defaultSize={55} minSize={40}>
-          {activeSessionId ? (
+      <CustomizationsModal 
+        isOpen={customizationsOpen} 
+        onClose={() => setCustomizationsOpen(false)} 
+      />
+
+      <UnifiedSidebar 
+        activeSessionId={activeSessionId}
+        onSelectSession={setActiveSessionId}
+        onNewSession={handleNewSession}
+        onOpenCustomizations={() => setCustomizationsOpen(true)}
+        sessions={sessions}
+        mcpServerCount={0}
+      />
+
+      {!activeSessionId ? (
+        <CenteredEmptyState 
+          onSelectSession={setActiveSessionId}
+          sessions={sessions}
+          onSubmitPrompt={handleStartPromptSession}
+        />
+      ) : (
+        <PanelGroup orientation="horizontal" className="flex-1 border-l border-[#0A0A0A]">
+          {/* Center Pane: ChatPanel */}
+          <Panel defaultSize={55} minSize={40}>
             <ChatPanel 
               connected={connected} 
               steps={steps} 
@@ -68,23 +83,16 @@ function App() {
               onSubmitQuestionResponse={submitQuestionResponse} 
               onSubmitPermissionResponse={submitPermissionResponse}
             />
-          ) : (
-            <SessionBoard 
-              sessions={sessions} 
-              onSelectSession={setActiveSessionId} 
-              onNewSession={handleNewSession}
-            />
-          )}
-        </Panel>
+          </Panel>
 
-        <PanelResizeHandle className="w-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors" />
+          <PanelResizeHandle className="w-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors" />
 
-        {/* Right Pane: Workspace */}
-        <Panel defaultSize={25} minSize={20}>
-          <WorkspacePanel steps={steps} onNewSession={handleNewSession} />
-        </Panel>
-
-      </PanelGroup>
+          {/* Right Pane: Workspace */}
+          <Panel defaultSize={45} minSize={20}>
+            <WorkspacePanel steps={steps} onNewSession={handleNewSession} />
+          </Panel>
+        </PanelGroup>
+      )}
     </div>
   );
 }
