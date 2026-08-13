@@ -11,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/util"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -84,6 +86,7 @@ type TaskManager struct {
 	wsMgr     interface{ ValidatePath(string) (string, error) } // workspace.Manager or nil
 	schedMgr  *ScheduleManager
 	notifyCh  chan<- SystemMessage // Optional: push task completion notifications
+	stepEmitter func(*pb.StepUpdate) // For live output streaming
 }
 
 // NewTaskManager creates a new TaskManager.
@@ -100,10 +103,17 @@ func NewTaskManager(logger *slog.Logger, maxTasks int) *TaskManager {
 	}
 }
 
+// SetStepEmitter registers the emitter for live terminal streaming.
+func (tm *TaskManager) SetStepEmitter(emitter func(*pb.StepUpdate)) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.stepEmitter = emitter
+}
+
 // SetNotifyChannel sets the channel for task completion notifications.
-// When set, task completions and failures are pushed to this channel
-// so the engine can inject them as <SYSTEM_MESSAGE> blocks.
 func (tm *TaskManager) SetNotifyChannel(ch chan<- SystemMessage) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	tm.notifyCh = ch
 }
 
@@ -125,7 +135,7 @@ func shortID() string {
 // StartBackground starts a command as a background task.
 // It returns immediately after spawning, populating task_id in the result fields.
 // If waitMs > 0, it waits that many milliseconds for initial output before returning.
-func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string, env map[string]string, waitMs int) (taskID, stdout string, err error) {
+func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string, env map[string]string, waitMs int, step *pb.StepUpdate) (taskID, stdout string, err error) {
 	tm.mu.Lock()
 
 	// Check task limit
@@ -160,8 +170,14 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 
 	// Set up output capture
 	output := NewRingBuffer(outputBufferSize)
-	cmd.Stdout = output
-	cmd.Stderr = output
+	
+	streamWriter := &taskStreamWriter{
+		buf: output,
+		step: step,
+		tm: tm,
+	}
+	cmd.Stdout = streamWriter
+	cmd.Stderr = streamWriter
 
 	// Set up stdin pipe
 	stdinPipe, pipeErr := cmd.StdinPipe()
@@ -432,7 +448,7 @@ func (tm *TaskManager) snapshotTask(task *BackgroundTask) TaskSnapshot {
 // RunInTerminal executes a command in a persistent terminal session.
 // If terminalID is empty, a new terminal is created.
 // Returns the terminal ID and command output.
-func (tm *TaskManager) RunInTerminal(ctx context.Context, command, cwd, terminalID string, env map[string]string, timeoutMs int) (assignedTerminalID, stdout string, exitCode int, err error) {
+func (tm *TaskManager) RunInTerminal(ctx context.Context, command, cwd, terminalID string, env map[string]string, timeoutMs int, step *pb.StepUpdate) (assignedTerminalID, stdout string, exitCode int, err error) {
 	if terminalID != "" {
 		// Reuse existing terminal
 		tm.mu.RLock()
@@ -442,7 +458,7 @@ func (tm *TaskManager) RunInTerminal(ctx context.Context, command, cwd, terminal
 		if !ok {
 			return "", "", -1, fmt.Errorf("unknown terminal: %s", terminalID)
 		}
-		return tm.execInTerminal(ctx, term, command, timeoutMs)
+		return tm.execInTerminal(ctx, term, command, timeoutMs, step)
 	}
 
 	// Create new terminal
@@ -450,7 +466,7 @@ func (tm *TaskManager) RunInTerminal(ctx context.Context, command, cwd, terminal
 	if err != nil {
 		return "", "", -1, err
 	}
-	return tm.execInTerminal(ctx, term, command, timeoutMs)
+	return tm.execInTerminal(ctx, term, command, timeoutMs, step)
 }
 
 // createTerminal starts a new persistent bash session.
@@ -519,7 +535,7 @@ func (tm *TaskManager) createTerminal(cwd string, env map[string]string) (*Persi
 }
 
 // execInTerminal runs a command in an existing persistent terminal and captures output.
-func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTerminal, command string, timeoutMs int) (terminalID, stdout string, exitCode int, err error) {
+func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTerminal, command string, timeoutMs int, step *pb.StepUpdate) (terminalID, stdout string, exitCode int, err error) {
 	term.mu.Lock()
 	defer term.mu.Unlock()
 
@@ -555,6 +571,8 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 	// Poll for the end marker in output
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	
+	var lastEmit time.Time
 
 	for {
 		select {
@@ -572,9 +590,20 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 			return term.ID, cmdOutput, -1, nil
 		case <-ticker.C:
 			allOutput := term.output.String()
+			cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
+			
+			if tm.stepEmitter != nil && step != nil && time.Since(lastEmit) > 200*time.Millisecond {
+				lastEmit = time.Now()
+				clonedStep := proto.Clone(step).(*pb.StepUpdate)
+				if rc, ok := clonedStep.Action.(*pb.StepUpdate_RunCommand); ok {
+					rc.RunCommand.Stdout = truncateOutput(cmdOutput, 100000)
+					clonedStep.State = pb.StepUpdate_STATE_STREAMING
+					tm.stepEmitter(clonedStep)
+				}
+			}
+
 			if endIdx := strings.Index(allOutput, endMarker); endIdx >= 0 {
 				// Found end marker — extract command output and exit code
-				cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
 				code := parseExitCodeAfterMarker(allOutput, endMarker)
 				return term.ID, cmdOutput, code, nil
 			}
@@ -736,7 +765,7 @@ func (tm *TaskManager) RunWithWait(ctx context.Context, command, cwd string, env
 	}
 
 	// Start as background, then check if it completes within waitMs
-	taskID, initialOutput, err := tm.StartBackground(ctx, command, cwd, env, waitMs)
+	taskID, initialOutput, err := tm.StartBackground(ctx, command, cwd, env, waitMs, nil)
 	if err != nil {
 		return "", "", "", -1, false, err
 	}
@@ -807,4 +836,46 @@ func (tm *TaskManager) runSync(ctx context.Context, command, cwd string, env map
 	}
 
 	return "", stdoutStr, stderrStr, 0, false, nil
+}
+
+// taskStreamWriter wraps a RingBuffer to emit streaming step updates for background tasks.
+type taskStreamWriter struct {
+	buf       *RingBuffer
+	mu        sync.Mutex
+	isStderr  bool
+	lastEmit  time.Time
+	step      *pb.StepUpdate
+	tm        *TaskManager
+}
+
+func (w *taskStreamWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	n, err = w.buf.Write(p)
+	
+	if time.Since(w.lastEmit) > 500*time.Millisecond {
+		w.doEmitLocked()
+	}
+	return
+}
+
+func (w *taskStreamWriter) doEmitLocked() {
+	if w.tm.stepEmitter == nil || w.step == nil {
+		return
+	}
+	w.lastEmit = time.Now()
+
+	clonedStep := proto.Clone(w.step).(*pb.StepUpdate)
+	rc, ok := clonedStep.Action.(*pb.StepUpdate_RunCommand)
+	if !ok {
+		return
+	}
+
+	// For background tasks, stdout and stderr are often combined in the same RingBuffer
+	// but we'll try to put it in stdout.
+	rc.RunCommand.Stdout = truncateOutput(w.buf.String(), 100000)
+	
+	clonedStep.State = pb.StepUpdate_STATE_STREAMING
+	w.tm.stepEmitter(clonedStep)
 }

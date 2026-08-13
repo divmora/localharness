@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func registerRunCommand(r *Registry) {
@@ -69,7 +71,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		}
 
 		termID, stdout, exitCode, err := r.taskMgr.RunInTerminal(
-			ctx, rc.Command, cwd, rc.TerminalId, rc.Env, int(rc.TimeoutMs),
+			ctx, rc.Command, cwd, rc.TerminalId, rc.Env, int(rc.TimeoutMs), step,
 		)
 		if err != nil {
 			return fmt.Errorf("run_command: persistent: %w", err)
@@ -88,7 +90,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		}
 
 		taskID, stdout, err := r.taskMgr.StartBackground(
-			ctx, rc.Command, cwd, rc.Env, int(rc.WaitMsBeforeAsync),
+			ctx, rc.Command, cwd, rc.Env, int(rc.WaitMsBeforeAsync), step,
 		)
 		if err != nil {
 			return fmt.Errorf("run_command: background: %w", err)
@@ -135,8 +137,24 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 
 	// Capture stdout and stderr separately
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	
+	stdoutWriter := &streamWriter{
+		buf: &stdout,
+		isStderr: false,
+		step: step,
+		rc: rc,
+		r: r,
+	}
+	stderrWriter := &streamWriter{
+		buf: &stderr,
+		isStderr: true,
+		step: step,
+		rc: rc,
+		r: r,
+	}
+	
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 
 	err := cmd.Run()
 
@@ -169,4 +187,53 @@ func truncateOutput(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + fmt.Sprintf("\n\n... [output truncated, showing %d/%d bytes]", maxLen, len(s))
+}
+
+type streamWriter struct {
+	buf       *bytes.Buffer
+	mu        sync.Mutex
+	isStderr  bool
+	lastEmit  time.Time
+	step      *pb.StepUpdate
+	rc        *pb.ActionRunCommand
+	r         *Registry
+}
+
+func (w *streamWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	n, err = w.buf.Write(p)
+
+	// Emit a streaming step at most every 200ms
+	if time.Since(w.lastEmit) > 200*time.Millisecond {
+		w.doEmitLocked()
+	}
+	return
+}
+
+func (w *streamWriter) doEmitLocked() {
+	if w.r.stepEmitter == nil {
+		return
+	}
+	w.lastEmit = time.Now()
+
+	// Clone the StepUpdate to avoid race conditions
+	clonedStep := proto.Clone(w.step).(*pb.StepUpdate)
+
+	// Get a reference to the cloned ActionRunCommand
+	rc, ok := clonedStep.Action.(*pb.StepUpdate_RunCommand)
+	if !ok {
+		return
+	}
+
+	// Update the strings
+	if w.isStderr {
+		rc.RunCommand.Stderr = truncateOutput(w.buf.String(), 50000)
+	} else {
+		rc.RunCommand.Stdout = truncateOutput(w.buf.String(), 100000)
+	}
+
+	clonedStep.State = pb.StepUpdate_STATE_STREAMING
+	w.r.EmitStep(clonedStep)
 }

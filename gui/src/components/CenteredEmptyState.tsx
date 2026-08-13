@@ -70,7 +70,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
 
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-[#262626] text-xs font-semibold text-[#9CA3AF] cursor-pointer transition-colors">
-                  <Terminal size={14} /> Local
+                  <Terminal size={14} /> {connectionTarget?.kind === 'ssh' ? `SSH: ${connectionTarget.host}` : 'Local'}
                 </div>
                 <button className="p-1.5 rounded-md hover:bg-[#262626] text-[#9CA3AF] transition-colors">
                   <Mic size={16} />
@@ -92,7 +92,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
           <div className="bg-[#0A0A0A] border-t border-[#262626] px-4 py-3 flex items-center justify-between text-xs text-[#9CA3AF]">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
-                <TerminalSquare size={14} /> Local
+                <TerminalSquare size={14} /> {connectionTarget?.kind === 'ssh' ? `SSH: ${connectionTarget.host}` : 'Local'}
               </div>
               <div className="flex items-center gap-1.5 cursor-pointer hover:text-[#F9FAFB] transition-colors">
                 <FolderOpen size={14} /> Select a directory...

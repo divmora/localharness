@@ -40,8 +40,18 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             
             try {
                 console.log("Requesting sidecar from Rust with target:", connectionTarget);
-                const conn = await invoke<HarnessConnection>('start_harness', { target: connectionTarget });
-                console.log("Got sidecar port:", conn.port);
+                let conn: HarnessConnection;
+                try {
+                    conn = await invoke<HarnessConnection>('start_harness', { target: connectionTarget });
+                    console.log("Got sidecar port:", conn.port);
+                } catch (err: any) {
+                    if (err.toString().includes('__TAURI_INTERNALS__')) {
+                        console.warn("Tauri not detected, falling back to standalone localhost:4000 (web dev mode)");
+                        conn = { port: 4000, api_key: "dev-key" };
+                    } else {
+                        throw err;
+                    }
+                }
                 
                 ws = await WebSocket.connect(`ws://localhost:${conn.port}/`, {
                     headers: {

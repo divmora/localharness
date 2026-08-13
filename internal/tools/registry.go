@@ -71,6 +71,9 @@ type Registry struct {
 	// artifactDispatcher is set by the engine for dispatching artifact feedback events.
 	// Nil if no hooks are registered (tools skip dispatch).
 	artifactDispatcher ArtifactFeedbackDispatcher
+
+	// stepEmitter allows tools to stream partial updates (like streaming stdout) back to the client.
+	stepEmitter func(*pb.StepUpdate)
 }
 
 // NewRegistry creates a new tool registry.
@@ -160,6 +163,26 @@ func (r *Registry) conversationMeta(am *pb.ArtifactMetadata) *conversation.Artif
 // The dispatcher interface is satisfied by adk/hooks.HookRunner.
 func (r *Registry) SetArtifactFeedbackDispatcher(d ArtifactFeedbackDispatcher) {
 	r.artifactDispatcher = d
+}
+
+// GetArtifactDispatcher returns the artifact feedback dispatcher.
+func (r *Registry) GetArtifactDispatcher() ArtifactFeedbackDispatcher {
+	return r.artifactDispatcher
+}
+
+// SetStepEmitter registers the engine's step emitter so tools can stream partial updates.
+func (r *Registry) SetStepEmitter(emitter func(*pb.StepUpdate)) {
+	r.stepEmitter = emitter
+	if r.taskMgr != nil {
+		r.taskMgr.SetStepEmitter(emitter)
+	}
+}
+
+// EmitStep allows a tool to push a partial state update (like STATE_STREAMING) to the client.
+func (r *Registry) EmitStep(step *pb.StepUpdate) {
+	if r.stepEmitter != nil {
+		r.stepEmitter(step)
+	}
 }
 
 // dispatchArtifactFeedback emits a non-blocking ArtifactFeedbackEvent.

@@ -270,7 +270,7 @@ func NewEngine(cfg Config) *Engine {
 		bus = NewAgentBus()
 	}
 
-	return &Engine{
+	eng := &Engine{
 		provider:            cfg.Provider,
 		toolRegistry:        cfg.ToolRegistry,
 		logger:              cfg.Logger,
@@ -321,6 +321,12 @@ func NewEngine(cfg Config) *Engine {
 		agentBus:                 bus,
 		convMgr:            cfg.ConversationManager,
 	}
+
+	if eng.toolRegistry != nil {
+		eng.toolRegistry.SetStepEmitter(eng.emitStep)
+	}
+
+	return eng
 }
 
 // Run executes the agentic loop for a user message.

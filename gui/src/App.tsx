@@ -43,7 +43,7 @@ function App() {
   useEffect(() => {
     async function loadSessions() {
       try {
-        const result = await invoke<number[]>('list_sessions');
+        const result = await invoke<number[]>('list_sessions', { target: connectionTarget });
         const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
         setSessions(sessionList.sessions);
       } catch (err) {
