@@ -6,6 +6,12 @@ BIN_DIR := bin
 DIST_DIR := dist
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
 
+ifeq ($(OS),Windows_NT)
+    EXE_EXT := .exe
+else
+    EXE_EXT :=
+endif
+
 # Proto generation using buf
 proto:
 	@echo "==> Generating protobuf code..."
@@ -16,8 +22,8 @@ proto:
 build:
 	@echo "==> Building $(BINARY)..."
 	@mkdir -p $(BIN_DIR)
-	go build -ldflags="-X github.com/divmora/localharness/internal/config.HarnessVersion=$(VERSION)" -o $(BIN_DIR)/$(BINARY) ./cmd/localharness
-	@echo "==> Built $(BIN_DIR)/$(BINARY) ($(VERSION))"
+	go build -ldflags="-X github.com/divmora/localharness/internal/config.HarnessVersion=$(VERSION)" -o $(BIN_DIR)/$(BINARY)$(EXE_EXT) ./cmd/localharness
+	@echo "==> Built $(BIN_DIR)/$(BINARY)$(EXE_EXT) ($(VERSION))"
 
 # Run tests
 test:
@@ -58,7 +64,7 @@ build-gui: build
 	@echo "==> Preparing sidecar for Tauri..."
 	@mkdir -p gui/src-tauri/bin
 	$(eval TAURI_TARGET := $(shell rustc -vV | grep host | cut -f2 -d' '))
-	@cp $(BIN_DIR)/$(BINARY) gui/src-tauri/bin/$(BINARY)-$(TAURI_TARGET)
+	@cp $(BIN_DIR)/$(BINARY)$(EXE_EXT) gui/src-tauri/bin/$(BINARY)-$(TAURI_TARGET)$(EXE_EXT)
 	@echo "==> Sidecar ready for $(TAURI_TARGET). Run 'npm run tauri dev' in gui/ to start."
 
 # Full build: proto + binary + tools + agents
