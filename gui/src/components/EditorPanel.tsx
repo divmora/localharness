@@ -1,9 +1,40 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Editor from '@monaco-editor/react';
 import { Code2, Globe, FileText } from 'lucide-react';
+import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 
-export function EditorPanel() {
+interface EditorPanelProps {
+  steps?: StepUpdate[];
+}
+
+export function EditorPanel({ steps = [] }: EditorPanelProps) {
   const [activeTab, setActiveTab] = useState<'editor' | 'browser' | 'planner'>('editor');
+
+  const { filePath, fileContent } = useMemo(() => {
+    // Traverse steps backwards to find the most recent file action
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const action = steps[i].action;
+      if (action.case === 'writeToFile') {
+        return { 
+          filePath: action.value.path, 
+          fileContent: action.value.content 
+        };
+      } else if (action.case === 'replaceFileContent') {
+        // Simple fallback, in a real app we'd need to fetch the file to show replacements perfectly,
+        // but for now we'll just show the path.
+        return { 
+          filePath: action.value.path, 
+          fileContent: "// File modified via replaceFileContent..." 
+        };
+      } else if (action.case === 'viewFile') {
+        return { 
+          filePath: action.value.path, 
+          fileContent: action.value.content || "// File viewed..." 
+        };
+      }
+    }
+    return { filePath: 'Welcome.md', fileContent: '# Welcome to Divmora\n\nWaiting for agent actions...' };
+  }, [steps]);
 
   return (
     <div className="h-full w-full bg-[#1e1e2e] flex flex-col">
@@ -32,18 +63,24 @@ export function EditorPanel() {
         {activeTab === 'editor' && (
           <div className="absolute inset-0 flex flex-col">
             <div className="px-4 py-2 text-xs font-mono text-[#7f849c] border-b border-[#313244] bg-[#1e1e2e]/50 flex items-center">
-              src / App.tsx
+              {filePath}
             </div>
             <Editor 
               height="100%" 
-              defaultLanguage="typescript" 
+              language={filePath.endsWith('.ts') || filePath.endsWith('.tsx') ? 'typescript' : 
+                        filePath.endsWith('.js') || filePath.endsWith('.jsx') ? 'javascript' :
+                        filePath.endsWith('.json') ? 'json' :
+                        filePath.endsWith('.md') ? 'markdown' :
+                        filePath.endsWith('.go') ? 'go' :
+                        filePath.endsWith('.rs') ? 'rust' : 'plaintext'} 
               theme="vs-dark"
-              defaultValue="// Write your code here"
+              value={fileContent}
               options={{ 
                 minimap: { enabled: false }, 
                 fontSize: 14,
                 fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                padding: { top: 16 }
+                padding: { top: 16 },
+                readOnly: true
               }}
             />
           </div>

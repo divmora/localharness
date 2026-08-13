@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SplitSquareHorizontal, Trash2, X } from 'lucide-react';
+import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 import '@xterm/xterm/css/xterm.css';
 
-export function TerminalPanel() {
+interface TerminalPanelProps {
+  steps?: StepUpdate[];
+}
+
+export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
+  const termInstanceRef = useRef<Terminal | null>(null);
   const [activeTab, setActiveTab] = useState<'problems' | 'output' | 'debug' | 'terminal' | 'ports'>('terminal');
 
   useEffect(() => {
@@ -21,12 +27,14 @@ export function TerminalPanel() {
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: 13,
       cursorBlink: true,
+      convertEol: true, // Important for properly rendering \n as \r\n in xterm
     });
     
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     
     term.open(terminalRef.current);
+    termInstanceRef.current = term;
     
     // Slight delay to ensure DOM is ready for fit
     setTimeout(() => fitAddon.fit(), 10);
@@ -43,8 +51,50 @@ export function TerminalPanel() {
     return () => {
       resizeObserver.disconnect();
       term.dispose();
+      termInstanceRef.current = null;
     };
   }, [activeTab]);
+
+  const lastProcessedStepIndexRef = useRef<number>(-1);
+
+  // Handle incoming steps to write commands and output
+  useEffect(() => {
+    if (!termInstanceRef.current || steps.length === 0) return;
+    const term = termInstanceRef.current;
+
+
+    // Process all steps we haven't seen yet
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      
+      // We only care about tool executions
+      if (!step.action.case) continue;
+      
+      // If we've already processed this step, skip it
+      // Note: Because harness streams updates to the *same* stepIndex, 
+      // tracking by stepIndex alone isn't enough if output is streaming.
+      // For this simplified version, we'll just track if we've seen the 
+      // 'runCommand' action and print it once.
+      // A robust implementation would delta-check the stdout field.
+      
+      if (step.stepIndex <= lastProcessedStepIndexRef.current) continue;
+      
+      if (step.action.case === 'runCommand') {
+        const cmd = step.action.value;
+        if (cmd.command) {
+          term.writeln(`\r\n\x1b[1;32m$ ${cmd.command}\x1b[0m`);
+        }
+        if (cmd.stdout) {
+          term.writeln(cmd.stdout);
+        }
+        if (cmd.stderr) {
+          term.writeln(`\x1b[31m${cmd.stderr}\x1b[0m`);
+        }
+        
+        lastProcessedStepIndexRef.current = step.stepIndex;
+      }
+    }
+  }, [steps]);
 
   return (
     <div className="h-full flex flex-col bg-[#11111b] border-t border-[#313244] overflow-hidden">

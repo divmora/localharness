@@ -22,13 +22,13 @@ function App() {
         <Panel defaultSize={75} minSize={30}>
           <PanelGroup orientation="vertical">
             <Panel defaultSize={70}>
-              <EditorPanel />
+              <EditorPanel steps={steps} />
             </Panel>
             
             <PanelResizeHandle className="h-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
             
             <Panel defaultSize={30} minSize={10}>
-              <TerminalPanel />
+              <TerminalPanel steps={steps} />
             </Panel>
           </PanelGroup>
         </Panel>
