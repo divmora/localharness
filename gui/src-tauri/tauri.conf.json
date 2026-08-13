@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.divmora.localharness",
   "build": {
-    "beforeDevCommand": "cd .. && make build-gui && cd gui && npm run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cd .. && make build-gui && cd gui && npm run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
