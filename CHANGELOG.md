@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0](https://github.com/divmora/localharness/compare/v1.1.0...v1.2.0) (2026-08-13)
+
+
+### Features
+
+* implement GUI Spaces using sqlite and installation_id ([ad0d7fa](https://github.com/divmora/localharness/commit/ad0d7fa9fe462780a55e4b136ed57ea1bf57f936))
+* implement live terminal streaming and improve SSH connection handling ([4969a86](https://github.com/divmora/localharness/commit/4969a869f7bb8675aeec90a13c6f3cccac6ab995))
+* support multi-window architecture for isolated connections ([f80eaa3](https://github.com/divmora/localharness/commit/f80eaa3336a9cf78fa9b4421da72df69b286c45d))
+* support multi-window architecture for isolated connections ([f67c603](https://github.com/divmora/localharness/commit/f67c603e5eba0bf94614d879acd0c27c04cdf75c))
+
+
+### Bug Fixes
+
+* keep sidecar process alive to prevent premature closure ([694b124](https://github.com/divmora/localharness/commit/694b124aef692921e8b1c7d5bbdb08fd281a6fb5))
+* update TaskManager.StartBackground signature in system-messages example ([6cf13cf](https://github.com/divmora/localharness/commit/6cf13cfa491895461f06a2ae1f49dd7c9fba3858))
+
 ## [1.1.0](https://github.com/divmora/localharness/compare/v1.0.0...v1.1.0) (2026-08-13)
 
 
