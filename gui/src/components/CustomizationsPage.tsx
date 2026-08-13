@@ -62,18 +62,12 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
           });
           const parsed = JSON.parse(llmRaw);
           setLlmConfig(parsed);
-          
-          let defaultName = parsed.defaultEndpoint || 'divmora';
-          if (parsed.endpoints && !parsed.endpoints[defaultName] && Object.keys(parsed.endpoints).length > 0) {
-            defaultName = Object.keys(parsed.endpoints)[0];
-          }
-          
-          handleSelectEndpoint(defaultName, parsed);
+          setActiveEndpoint(''); // Start in list view
         } catch (e) {
           // If file doesn't exist, set empty default
           const defaultCfg = { endpoints: { 'divmora': { baseUrl: '', apiKey: '', defaultModel: '' } } };
           setLlmConfig(defaultCfg);
-          handleSelectEndpoint('divmora', defaultCfg);
+          setActiveEndpoint(''); // Start in list view
         }
 
         // Fetch MCP Config
@@ -239,18 +233,7 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
     }
   };
 
-  const handleAddNewEndpoint = () => {
-    const name = prompt("Enter a name for the new endpoint:");
-    if (!name || name.trim() === '') return;
-    
-    const newConfig = { ...llmConfig };
-    if (!newConfig.endpoints) newConfig.endpoints = {};
-    if (!newConfig.endpoints[name]) {
-      newConfig.endpoints[name] = { baseUrl: '', apiKey: '', defaultModel: '' };
-      setLlmConfig(newConfig);
-    }
-    handleSelectEndpoint(name, newConfig);
-  };
+
 
   const tabs = [
     { id: 'llm', label: 'LLM Configuration', icon: Cpu },
@@ -321,95 +304,158 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
                         {loading ? (
                           <div className="text-center text-[#6c7086] text-sm py-8 animate-pulse">Reading config...</div>
                         ) : (
-                          <div className="bg-[#0A0A0A] border border-[#262626] rounded-lg p-5 flex flex-col gap-5">
-                            
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex justify-between items-end">
-                                <label className="text-xs font-semibold text-[#9CA3AF]">Select Endpoint</label>
-                                <button onClick={handleAddNewEndpoint} className="text-xs text-[#3B82F6] hover:text-[#60A5FA] flex items-center gap-1">
-                                  + New Endpoint
-                                </button>
+                          <>
+                            {activeEndpoint !== '' ? (
+                              <div className="bg-[#0A0A0A] border border-[#262626] rounded-lg p-5 flex flex-col gap-5">
+                                <div className="flex items-center gap-3 border-b border-[#262626] pb-3 mb-2">
+                                  <button onClick={() => setActiveEndpoint('')} className="text-[#9CA3AF] hover:text-white transition-colors">
+                                    <ArrowLeft size={16} />
+                                  </button>
+                                  <h4 className="text-sm font-semibold text-white">
+                                    {endpointNames.includes(activeEndpoint) ? `Edit Endpoint: ${activeEndpoint}` : `New Endpoint: ${activeEndpoint}`}
+                                  </h4>
+                                </div>
+                                
+                                <div className="flex flex-col gap-1.5">
+                                  <label className="text-xs font-semibold text-[#9CA3AF]">Base URL</label>
+                                  <input
+                                    type="text"
+                                    placeholder="https://litellm.pixelvide.cloud"
+                                    className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors"
+                                    value={formBaseUrl}
+                                    onChange={e => setFormBaseUrl(e.target.value)}
+                                  />
+                                </div>
+                                
+                                <div className="flex flex-col gap-1.5">
+                                  <label className="text-xs font-semibold text-[#9CA3AF]">API Key</label>
+                                  <input
+                                    type="password"
+                                    placeholder="dc001-litellm-key"
+                                    className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors font-mono"
+                                    value={formApiKey}
+                                    onChange={e => setFormApiKey(e.target.value)}
+                                  />
+                                </div>
+                                
+                                <div className="flex flex-col gap-1.5">
+                                  <label className="text-xs font-semibold text-[#9CA3AF]">Default Model</label>
+                                  <input
+                                    type="text"
+                                    placeholder="workers-ai/@cf/zai-org/glm-5.2"
+                                    className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors font-mono"
+                                    value={formDefaultModel}
+                                    onChange={e => setFormDefaultModel(e.target.value)}
+                                  />
+                                </div>
+                                
+                                {llmError && (
+                                  <div className="text-xs text-red-400 mt-2">{llmError}</div>
+                                )}
+                                
+                                <div className="flex justify-end pt-2">
+                                  <button
+                                    onClick={async () => {
+                                      await handleSaveLlmConfig();
+                                      setActiveEndpoint('');
+                                    }}
+                                    disabled={llmSaving}
+                                    className="bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
+                                  >
+                                    {llmSaving ? 'Saving...' : 'Save Configuration'}
+                                  </button>
+                                </div>
                               </div>
-                              <select
-                                className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors appearance-none"
-                                value={activeEndpoint}
-                                onChange={e => handleSelectEndpoint(e.target.value)}
-                              >
-                                {endpointNames.map((name: string) => (
-                                  <option key={name} value={name}>
-                                    {name} {llmConfig?.defaultEndpoint === name ? '(Default)' : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            
-                            <div className="flex flex-col gap-1.5">
-                              <label className="text-xs font-semibold text-[#9CA3AF]">Base URL</label>
-                              <input
-                                type="text"
-                                placeholder="https://litellm.pixelvide.cloud"
-                                className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors"
-                                value={formBaseUrl}
-                                onChange={e => setFormBaseUrl(e.target.value)}
-                              />
-                            </div>
-                            
-                            <div className="flex flex-col gap-1.5">
-                              <label className="text-xs font-semibold text-[#9CA3AF]">API Key</label>
-                              <input
-                                type="password"
-                                placeholder="dc001-litellm-key"
-                                className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors font-mono"
-                                value={formApiKey}
-                                onChange={e => setFormApiKey(e.target.value)}
-                              />
-                            </div>
-                            
-                            <div className="flex flex-col gap-1.5">
-                              <label className="text-xs font-semibold text-[#9CA3AF]">Default Model</label>
-                              <input
-                                type="text"
-                                placeholder="workers-ai/@cf/zai-org/glm-5.2"
-                                className="w-full bg-[#000000] border border-[#262626] text-sm text-[#F9FAFB] rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors font-mono"
-                                value={formDefaultModel}
-                                onChange={e => setFormDefaultModel(e.target.value)}
-                              />
-                            </div>
-                            
-                            {llmError && (
-                              <div className="text-xs text-red-400 mt-2">{llmError}</div>
+                            ) : (
+                              <div className="flex flex-col gap-4">
+                                <div className="flex justify-end">
+                                  <button 
+                                    onClick={() => {
+                                      const name = prompt("Enter a name for the new endpoint:");
+                                      if (name && name.trim()) {
+                                        setFormBaseUrl('');
+                                        setFormApiKey('');
+                                        setFormDefaultModel('');
+                                        setActiveEndpoint(name.trim());
+                                      }
+                                    }} 
+                                    className="text-xs bg-[#262626] hover:bg-[#333333] text-white px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
+                                  >
+                                    <Plug size={14} /> Add Endpoint
+                                  </button>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 gap-3">
+                                  {endpointNames.map((name: string) => {
+                                    const ep = llmConfig?.endpoints?.[name];
+                                    const isDefault = llmConfig?.defaultEndpoint === name;
+                                    
+                                    return (
+                                      <div key={name} className={`bg-[#0A0A0A] border ${isDefault ? 'border-[#3B82F6]' : 'border-[#262626]'} rounded-lg p-4 flex flex-col gap-3 relative`}>
+                                        <div className="flex justify-between items-start">
+                                          <div className="flex items-center gap-2">
+                                            <h4 className="text-sm font-semibold text-white">{name}</h4>
+                                            {isDefault && <span className="bg-[#3B82F6]/20 text-[#3B82F6] text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">Default</span>}
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            {!isDefault && (
+                                              <button 
+                                                onClick={async () => {
+                                                  const oldActive = activeEndpoint;
+                                                  setActiveEndpoint(name);
+                                                  await handleSetDefaultEndpoint();
+                                                  setActiveEndpoint(oldActive);
+                                                }}
+                                                className="text-[11px] text-[#9CA3AF] hover:text-white bg-[#1A1A1A] hover:bg-[#262626] px-2 py-1 rounded transition-colors"
+                                              >
+                                                Make Default
+                                              </button>
+                                            )}
+                                            <button 
+                                              onClick={() => {
+                                                setFormBaseUrl(ep?.baseUrl || '');
+                                                setFormApiKey(ep?.apiKey || '');
+                                                setFormDefaultModel(ep?.defaultModel || '');
+                                                setActiveEndpoint(name);
+                                              }}
+                                              className="text-[11px] text-[#9CA3AF] hover:text-[#3B82F6] bg-[#1A1A1A] hover:bg-[#262626] px-2 py-1 rounded transition-colors"
+                                            >
+                                              Edit
+                                            </button>
+                                            {endpointNames.length > 1 && (
+                                              <button 
+                                                onClick={async () => {
+                                                  if (!confirm(`Delete endpoint "${name}"?`)) return;
+                                                  const oldActive = activeEndpoint;
+                                                  setActiveEndpoint(name);
+                                                  await handleDeleteEndpoint();
+                                                  setActiveEndpoint(oldActive);
+                                                }}
+                                                className="text-[11px] text-[#9CA3AF] hover:text-red-400 bg-[#1A1A1A] hover:bg-[#262626] px-2 py-1 rounded transition-colors"
+                                              >
+                                                Delete
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+                                        
+                                        <div className="flex flex-col gap-1 mt-1">
+                                          <div className="text-xs flex items-center gap-2">
+                                            <span className="text-[#6B7280] w-16">URL:</span>
+                                            <span className="text-[#D1D5DB] font-mono truncate">{ep?.baseUrl || 'Not set'}</span>
+                                          </div>
+                                          <div className="text-xs flex items-center gap-2">
+                                            <span className="text-[#6B7280] w-16">Model:</span>
+                                            <span className="text-[#D1D5DB] font-mono truncate">{ep?.defaultModel || 'Not set'}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             )}
-                            
-                            <div className="flex justify-between pt-2 items-center">
-                              <div className="flex gap-2">
-                                {llmConfig?.defaultEndpoint !== activeEndpoint && (
-                                  <button
-                                    onClick={handleSetDefaultEndpoint}
-                                    disabled={llmSaving}
-                                    className="bg-[#262626] hover:bg-[#3f3f46] text-[#F9FAFB] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
-                                  >
-                                    Set as Default
-                                  </button>
-                                )}
-                                {endpointNames.length > 1 && (
-                                  <button
-                                    onClick={handleDeleteEndpoint}
-                                    disabled={llmSaving}
-                                    className="bg-[#7f1d1d] hover:bg-[#991b1b] text-[#F9FAFB] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
-                                  >
-                                    Delete
-                                  </button>
-                                )}
-                              </div>
-                              <button
-                                onClick={handleSaveLlmConfig}
-                                disabled={llmSaving}
-                                className="bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
-                              >
-                                {llmSaving ? 'Saving...' : 'Save Configuration'}
-                              </button>
-                            </div>
-                          </div>
+                          </>
                         )}
                         
                         <div className="text-xs text-[#6B7280] flex items-center gap-2 mt-2 bg-[#000000] p-3 rounded-md border border-[#262626]">
