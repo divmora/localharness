@@ -60,8 +60,21 @@ sudo mv localharness /usr/local/bin/
 make build
 ```
 
-See [docs/binary-distribution.md](docs/binary-distribution.md) for the full resolution chain and cross-SDK strategy.
+### macOS "Damaged File" Error
 
+If you download the `.dmg` installer or the binary for macOS from GitHub Releases, Gatekeeper may flag the file as "damaged" because it is not officially code-signed with an Apple Developer Program certificate. 
+
+To bypass this error and run the app, you must remove the quarantine flag using the terminal:
+
+```bash
+# If using the Divmora.app from the .dmg
+xattr -cr /Applications/Divmora.app
+
+# If using the raw binary
+xattr -cr localharness
+```
+
+See [docs/binary-distribution.md](docs/binary-distribution.md) for the full resolution chain and cross-SDK strategy.
 ## Quick Start
 
 ### Build from Source
