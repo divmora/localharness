@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { TerminalSquare, User, Bot, Users, Globe, FileCode, ShieldAlert, Check, X, Send } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { StepUpdate, StepUpdate_Source, StepUpdate_State } from '../gen/localharness/v1/localharness_pb';
+import { clone } from '@bufbuild/protobuf';
+import { StepUpdate, StepUpdate_Source, StepUpdate_State, StepUpdateSchema } from '../gen/localharness/v1/localharness_pb';
 
 interface ChatPanelProps {
   connected: boolean;
@@ -116,7 +117,7 @@ export function ChatPanel({
     
     for (const step of steps) {
       if (!grouped.has(step.stepIndex)) {
-        grouped.set(step.stepIndex, step);
+        grouped.set(step.stepIndex, clone(StepUpdateSchema, step));
       } else {
         const existing = grouped.get(step.stepIndex)!;
         // Merge text if it's a streaming update

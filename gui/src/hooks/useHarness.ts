@@ -8,6 +8,9 @@ import {
     ServerMessageSchema,
     UserMessageSchema,
     StepUpdate,
+    StepUpdateSchema,
+    StepUpdate_Source,
+    StepUpdate_State,
     InitRequestSchema,
     HarnessConfigSchema,
     QuestionResponseSchema,
@@ -62,6 +65,81 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                         setConnectionError(err.toString());
                         return;
                     }
+                }
+                
+                // Fetch transcript to hydrate past session UI state
+                try {
+                    const home = await homeDir();
+                    const transcriptPath = `${home}/.divmora/localharness/brain/${activeSessionId}/.system_generated/logs/transcript.jsonl`;
+                    console.log("Fetching transcript from", transcriptPath);
+                    const rawJsonl = await invoke<string>('read_target_file', { 
+                        target: connectionTarget, 
+                        path: transcriptPath 
+                    });
+                    
+                    const pastSteps: StepUpdate[] = [];
+                    const lines = rawJsonl.split('\n');
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        try {
+                            const entry = JSON.parse(line);
+                            let source = StepUpdate_Source.UNSPECIFIED;
+                            if (entry.source === 'SOURCE_USER' || entry.type === 'USER_INPUT') source = StepUpdate_Source.USER;
+                            if (entry.source === 'SOURCE_MODEL' || entry.type === 'PLANNER_RESPONSE') source = StepUpdate_Source.MODEL;
+                            if (entry.source === 'SOURCE_SYSTEM' || entry.type === 'TOOL_RESULT') source = StepUpdate_Source.SYSTEM;
+                            
+                            const step = create(StepUpdateSchema, {
+                                stepIndex: entry.step_index,
+                                source: source,
+                                state: StepUpdate_State.DONE,
+                                text: entry.content || "",
+                                thinking: entry.thinking || "",
+                            });
+                            
+                            // Map tool calls if present (for MODEL)
+                            if (entry.tool_calls && entry.tool_calls.length > 0) {
+                                const tc = entry.tool_calls[0];
+                                
+                                const toCamel = (s: string) => s.replace(/_([a-z])/g, g => g[1].toUpperCase());
+                                
+                                const deepCamel = (obj: any): any => {
+                                    if (typeof obj === 'string') {
+                                        try {
+                                            const parsed = JSON.parse(obj);
+                                            if (typeof parsed === 'object' && parsed !== null) {
+                                                return deepCamel(parsed);
+                                            }
+                                        } catch (e) {}
+                                    }
+                                    if (Array.isArray(obj)) return obj.map(deepCamel);
+                                    if (obj !== null && typeof obj === 'object') {
+                                        const res: any = {};
+                                        for (const [key, val] of Object.entries(obj)) {
+                                            res[toCamel(key)] = deepCamel(val);
+                                        }
+                                        return res;
+                                    }
+                                    return obj;
+                                };
+
+                                const caseName = toCamel(tc.name);
+                                const value = tc.args ? deepCamel(tc.args) : {};
+                                
+                                step.action = {
+                                    case: caseName as any,
+                                    value: value
+                                };
+                            }
+                            pastSteps.push(step);
+                        } catch (e) {
+                            console.warn("Failed to parse transcript line", line, e);
+                        }
+                    }
+                    if (pastSteps.length > 0) {
+                        setSteps(pastSteps);
+                    }
+                } catch (e) {
+                    console.log("No previous transcript found or failed to load", e);
                 }
                 
                 ws = await WebSocket.connect(`ws://localhost:${conn.port}/`, {
