@@ -336,7 +336,7 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
     let (mut rx, mut child) = if target.kind == "ssh" {
         let host = target.host.as_ref().ok_or("SSH host required")?;
         
-        let mut args = vec!["-T".to_string()];
+        let mut args = vec!["-T".to_string(), "-q".to_string()];
         
         if let Some(ssh_port) = target.port {
             args.push("-p".to_string());
@@ -367,9 +367,9 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
         let version = manifest["."].as_str().ok_or("No version in manifest")?;
         let tag_name = format!("v{}", version);
 
-        // Auto-deploy script over SSH
         let deploy_script = format!(
-            "OS=$(uname -s | tr '[:upper:]' '[:lower:]') && \
+            "{{ \
+             OS=$(uname -s | tr '[:upper:]' '[:lower:]') && \
              ARCH=$(uname -m) && \
              if [ \"$OS\" = \"darwin\" ]; then \
                  if [ \"$ARCH\" = \"x86_64\" ]; then PLAT=\"darwin-amd64\"; \
@@ -381,8 +381,9 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
              mkdir -p ~/.divmora/localharness/bin/{tag_name} && \
              if [ ! -f ~/.divmora/localharness/bin/{tag_name}/localharness ]; then \
                curl -sL https://github.com/divmora/localharness/releases/download/{tag_name}/localharness-{version}-$PLAT.tar.gz | tar xz -C ~/.divmora/localharness/bin/{tag_name}; \
-             fi && \
-             ~/.divmora/localharness/bin/{tag_name}/localharness",
+             fi; \
+             }} >&2 && \
+             exec ~/.divmora/localharness/bin/{tag_name}/localharness",
             tag_name = tag_name,
             version = version
         );
@@ -427,6 +428,7 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
     while let Some(event) = rx.recv().await {
         match event {
             CommandEvent::Stdout(data) => {
+                eprintln!("STDOUT: {:?}", String::from_utf8_lossy(&data));
                 stdout_buf.extend_from_slice(&data);
 
                 // Try to parse if we have at least 4 bytes
@@ -434,6 +436,7 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                     let mut len_bytes = [0u8; 4];
                     len_bytes.copy_from_slice(&stdout_buf[0..4]);
                     let length = u32::from_le_bytes(len_bytes) as usize;
+                    eprintln!("Parsed length: {}", length);
 
                     if stdout_buf.len() >= 4 + length {
                         let payload_bytes = &stdout_buf[4..4 + length];
@@ -454,7 +457,7 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
             }
             CommandEvent::Stderr(line) => {
                 let s = String::from_utf8_lossy(&line);
-                println!("SIDECAR STDERR: {}", s);
+                eprintln!("SIDECAR STDERR: {}", s);
             }
             CommandEvent::Error(err) => {
                 return Err(format!("Sidecar error: {}", err));
