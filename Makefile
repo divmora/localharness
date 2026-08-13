@@ -53,14 +53,8 @@ build-lhctl:
 	go build -o $(BIN_DIR)/lhctl ./cmd/lhctl
 	@echo "==> Built $(BIN_DIR)/lhctl"
 
-# Build Zenith agent
-build-zenith:
-	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/zenith ./agents/zenith
-	@echo "==> Built $(BIN_DIR)/zenith"
-
 # Full build: proto + binary + tools + agents
-all: proto build test-client build-lhctl build-zenith
+all: proto build test-client build-lhctl
 	@echo "==> Full build complete."
 
 # Cross-compile for all supported platforms
