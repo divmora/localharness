@@ -10,7 +10,7 @@ import { useHarness } from './hooks/useHarness';
 
 function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const { connected, steps, sendPrompt } = useHarness(activeSessionId);
+  const { connected, steps, sendPrompt, submitQuestionResponse } = useHarness(activeSessionId);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
@@ -43,7 +43,7 @@ function App() {
 
         {/* Right Pane: Chat/Agent */}
         <Panel defaultSize={25} minSize={20}>
-          <ChatPanel connected={connected} steps={steps} onSend={sendPrompt} />
+          <ChatPanel connected={connected} steps={steps} onSend={sendPrompt} onSubmitQuestionResponse={submitQuestionResponse} />
         </Panel>
 
       </PanelGroup>

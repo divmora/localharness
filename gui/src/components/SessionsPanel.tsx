@@ -1,12 +1,8 @@
 import { MoreHorizontal, Plus, Search, Filter, Clock } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-
-interface SessionInfo {
-  id: string;
-  name: string;
-  updated_at: number;
-}
+import { fromBinary } from '@bufbuild/protobuf';
+import { SessionListSchema, SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
 
 interface SessionsPanelProps {
   activeSessionId: string | null;
@@ -14,14 +10,16 @@ interface SessionsPanelProps {
 }
 
 export function SessionsPanel({ activeSessionId, onSelectSession }: SessionsPanelProps) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadSessions() {
       try {
-        const result = await invoke<SessionInfo[]>('list_sessions');
-        setSessions(result);
+        // Now returns protobuf bytes (number[])
+        const result = await invoke<number[]>('list_sessions');
+        const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
+        setSessions(sessionList.sessions);
       } catch (err) {
         console.error("Failed to list sessions:", err);
       } finally {
@@ -88,7 +86,7 @@ export function SessionsPanel({ activeSessionId, onSelectSession }: SessionsPane
                   <span className="truncate">{session.id.substring(0, 8)}...</span>
                   <span className="flex items-center gap-1">
                     <Clock size={10} />
-                    {new Date(session.updated_at * 1000).toLocaleDateString()}
+                    {new Date(Number(session.updatedAt) * 1000).toLocaleDateString()}
                   </span>
                 </div>
               </div>

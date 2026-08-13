@@ -8,7 +8,8 @@ import {
     UserMessageSchema,
     StepUpdate,
     InitRequestSchema,
-    HarnessConfigSchema
+    HarnessConfigSchema,
+    QuestionResponseSchema
 } from '../gen/localharness/v1/localharness_pb';
 
 interface HarnessConnection {
@@ -121,5 +122,28 @@ export function useHarness(activeSessionId: string | null) {
         
     }, [socket]);
 
-    return { connected, steps, sendPrompt };
+    const submitQuestionResponse = useCallback(async (requestId: string, answers: any[], skipped: boolean) => {
+        if (!socket) return;
+        
+        const qResponse = create(QuestionResponseSchema, {
+            requestId: requestId,
+            answers: answers,
+            skipped: skipped
+        });
+        
+        const clientMsg = create(ClientMessageSchema, {
+            payload: {
+                case: "questionResponse",
+                value: qResponse
+            }
+        });
+        
+        const bytes = toBinary(ClientMessageSchema, clientMsg);
+        await socket.send({
+            type: 'Binary',
+            data: Array.from(bytes)
+        });
+    }, [socket]);
+
+    return { connected, steps, sendPrompt, submitQuestionResponse };
 }

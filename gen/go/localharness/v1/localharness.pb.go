@@ -77,7 +77,7 @@ func (x StepUpdate_Source) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StepUpdate_Source.Descriptor instead.
 func (StepUpdate_Source) EnumDescriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{12, 0}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{14, 0}
 }
 
 // State tracks the step lifecycle.
@@ -136,7 +136,7 @@ func (x StepUpdate_State) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StepUpdate_State.Descriptor instead.
 func (StepUpdate_State) EnumDescriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{12, 1}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{14, 1}
 }
 
 // Target indicates who this step is directed at.
@@ -186,7 +186,7 @@ func (x StepUpdate_Target) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StepUpdate_Target.Descriptor instead.
 func (StepUpdate_Target) EnumDescriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{12, 2}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{14, 2}
 }
 
 type TrajectoryState_TrajState int32
@@ -241,7 +241,7 @@ func (x TrajectoryState_TrajState) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TrajectoryState_TrajState.Descriptor instead.
 func (TrajectoryState_TrajState) EnumDescriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{13, 0}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{15, 0}
 }
 
 type ConversationState_ConversationStatus int32
@@ -293,7 +293,7 @@ func (x ConversationState_ConversationStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ConversationState_ConversationStatus.Descriptor instead.
 func (ConversationState_ConversationStatus) EnumDescriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{79, 0}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{81, 0}
 }
 
 // InputConfig is written by the SDK to the binary's stdin during handshake.
@@ -926,7 +926,8 @@ type ServerMessage struct {
 	//	*ServerMessage_InitResponse
 	//	*ServerMessage_StepUpdate
 	//	*ServerMessage_TrajectoryState
-	//	*ServerMessage_Error
+	//	*ServerMessage_ErrorEvent
+	//	*ServerMessage_TraceEvent
 	Payload       isServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -996,10 +997,19 @@ func (x *ServerMessage) GetTrajectoryState() *TrajectoryState {
 	return nil
 }
 
-func (x *ServerMessage) GetError() *ErrorEvent {
+func (x *ServerMessage) GetErrorEvent() *ErrorEvent {
 	if x != nil {
-		if x, ok := x.Payload.(*ServerMessage_Error); ok {
-			return x.Error
+		if x, ok := x.Payload.(*ServerMessage_ErrorEvent); ok {
+			return x.ErrorEvent
+		}
+	}
+	return nil
+}
+
+func (x *ServerMessage) GetTraceEvent() *TraceEvent {
+	if x != nil {
+		if x, ok := x.Payload.(*ServerMessage_TraceEvent); ok {
+			return x.TraceEvent
 		}
 	}
 	return nil
@@ -1021,8 +1031,12 @@ type ServerMessage_TrajectoryState struct {
 	TrajectoryState *TrajectoryState `protobuf:"bytes,3,opt,name=trajectory_state,json=trajectoryState,proto3,oneof"`
 }
 
-type ServerMessage_Error struct {
-	Error *ErrorEvent `protobuf:"bytes,4,opt,name=error,proto3,oneof"`
+type ServerMessage_ErrorEvent struct {
+	ErrorEvent *ErrorEvent `protobuf:"bytes,4,opt,name=error_event,json=errorEvent,proto3,oneof"`
+}
+
+type ServerMessage_TraceEvent struct {
+	TraceEvent *TraceEvent `protobuf:"bytes,5,opt,name=trace_event,json=traceEvent,proto3,oneof"`
 }
 
 func (*ServerMessage_InitResponse) isServerMessage_Payload() {}
@@ -1031,7 +1045,113 @@ func (*ServerMessage_StepUpdate) isServerMessage_Payload() {}
 
 func (*ServerMessage_TrajectoryState) isServerMessage_Payload() {}
 
-func (*ServerMessage_Error) isServerMessage_Payload() {}
+func (*ServerMessage_ErrorEvent) isServerMessage_Payload() {}
+
+func (*ServerMessage_TraceEvent) isServerMessage_Payload() {}
+
+type SessionInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	UpdatedAt     int64                  `protobuf:"varint,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionInfo) Reset() {
+	*x = SessionInfo{}
+	mi := &file_localharness_v1_localharness_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionInfo) ProtoMessage() {}
+
+func (x *SessionInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_localharness_v1_localharness_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionInfo.ProtoReflect.Descriptor instead.
+func (*SessionInfo) Descriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SessionInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SessionInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SessionInfo) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+type SessionList struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sessions      []*SessionInfo         `protobuf:"bytes,1,rep,name=sessions,proto3" json:"sessions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionList) Reset() {
+	*x = SessionList{}
+	mi := &file_localharness_v1_localharness_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionList) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionList) ProtoMessage() {}
+
+func (x *SessionList) ProtoReflect() protoreflect.Message {
+	mi := &file_localharness_v1_localharness_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionList.ProtoReflect.Descriptor instead.
+func (*SessionList) Descriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SessionList) GetSessions() []*SessionInfo {
+	if x != nil {
+		return x.Sessions
+	}
+	return nil
+}
 
 // InitResponse acknowledges the session initialization.
 type InitResponse struct {
@@ -1044,7 +1164,7 @@ type InitResponse struct {
 
 func (x *InitResponse) Reset() {
 	*x = InitResponse{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[10]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1056,7 +1176,7 @@ func (x *InitResponse) String() string {
 func (*InitResponse) ProtoMessage() {}
 
 func (x *InitResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[10]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1069,7 +1189,7 @@ func (x *InitResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitResponse.ProtoReflect.Descriptor instead.
 func (*InitResponse) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{10}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *InitResponse) GetConversationId() string {
@@ -1098,7 +1218,7 @@ type ErrorEvent struct {
 
 func (x *ErrorEvent) Reset() {
 	*x = ErrorEvent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[11]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1230,7 @@ func (x *ErrorEvent) String() string {
 func (*ErrorEvent) ProtoMessage() {}
 
 func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[11]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1243,7 @@ func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorEvent.ProtoReflect.Descriptor instead.
 func (*ErrorEvent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{11}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ErrorEvent) GetMessage() string {
@@ -1204,7 +1324,7 @@ type StepUpdate struct {
 
 func (x *StepUpdate) Reset() {
 	*x = StepUpdate{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[12]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1216,7 +1336,7 @@ func (x *StepUpdate) String() string {
 func (*StepUpdate) ProtoMessage() {}
 
 func (x *StepUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[12]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1229,7 +1349,7 @@ func (x *StepUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepUpdate.ProtoReflect.Descriptor instead.
 func (*StepUpdate) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{12}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StepUpdate) GetConversationId() string {
@@ -1670,7 +1790,7 @@ type TrajectoryState struct {
 
 func (x *TrajectoryState) Reset() {
 	*x = TrajectoryState{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[13]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +1802,7 @@ func (x *TrajectoryState) String() string {
 func (*TrajectoryState) ProtoMessage() {}
 
 func (x *TrajectoryState) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[13]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +1815,7 @@ func (x *TrajectoryState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrajectoryState.ProtoReflect.Descriptor instead.
 func (*TrajectoryState) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{13}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *TrajectoryState) GetTrajectoryId() string {
@@ -1744,7 +1864,7 @@ type ActionViewFile struct {
 
 func (x *ActionViewFile) Reset() {
 	*x = ActionViewFile{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[14]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1756,7 +1876,7 @@ func (x *ActionViewFile) String() string {
 func (*ActionViewFile) ProtoMessage() {}
 
 func (x *ActionViewFile) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[14]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1769,7 +1889,7 @@ func (x *ActionViewFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionViewFile.ProtoReflect.Descriptor instead.
 func (*ActionViewFile) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{14}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ActionViewFile) GetPath() string {
@@ -1838,7 +1958,7 @@ type ArtifactMetadata struct {
 
 func (x *ArtifactMetadata) Reset() {
 	*x = ArtifactMetadata{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[15]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1850,7 +1970,7 @@ func (x *ArtifactMetadata) String() string {
 func (*ArtifactMetadata) ProtoMessage() {}
 
 func (x *ArtifactMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[15]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1863,7 +1983,7 @@ func (x *ArtifactMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactMetadata.ProtoReflect.Descriptor instead.
 func (*ArtifactMetadata) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{15}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ArtifactMetadata) GetArtifactType() string {
@@ -1905,7 +2025,7 @@ type ActionWriteToFile struct {
 
 func (x *ActionWriteToFile) Reset() {
 	*x = ActionWriteToFile{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[16]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1917,7 +2037,7 @@ func (x *ActionWriteToFile) String() string {
 func (*ActionWriteToFile) ProtoMessage() {}
 
 func (x *ActionWriteToFile) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[16]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1930,7 +2050,7 @@ func (x *ActionWriteToFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionWriteToFile.ProtoReflect.Descriptor instead.
 func (*ActionWriteToFile) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{16}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ActionWriteToFile) GetPath() string {
@@ -1992,7 +2112,7 @@ type ActionReplaceFileContent struct {
 
 func (x *ActionReplaceFileContent) Reset() {
 	*x = ActionReplaceFileContent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[17]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2004,7 +2124,7 @@ func (x *ActionReplaceFileContent) String() string {
 func (*ActionReplaceFileContent) ProtoMessage() {}
 
 func (x *ActionReplaceFileContent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[17]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2017,7 +2137,7 @@ func (x *ActionReplaceFileContent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionReplaceFileContent.ProtoReflect.Descriptor instead.
 func (*ActionReplaceFileContent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{17}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ActionReplaceFileContent) GetPath() string {
@@ -2069,7 +2189,7 @@ type EditChunk struct {
 
 func (x *EditChunk) Reset() {
 	*x = EditChunk{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[18]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2081,7 +2201,7 @@ func (x *EditChunk) String() string {
 func (*EditChunk) ProtoMessage() {}
 
 func (x *EditChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[18]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2094,7 +2214,7 @@ func (x *EditChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditChunk.ProtoReflect.Descriptor instead.
 func (*EditChunk) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{18}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *EditChunk) GetStartLine() int32 {
@@ -2145,7 +2265,7 @@ type ActionListDir struct {
 
 func (x *ActionListDir) Reset() {
 	*x = ActionListDir{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[19]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2157,7 +2277,7 @@ func (x *ActionListDir) String() string {
 func (*ActionListDir) ProtoMessage() {}
 
 func (x *ActionListDir) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[19]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2170,7 +2290,7 @@ func (x *ActionListDir) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionListDir.ProtoReflect.Descriptor instead.
 func (*ActionListDir) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{19}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ActionListDir) GetPath() string {
@@ -2200,7 +2320,7 @@ type DirEntry struct {
 
 func (x *DirEntry) Reset() {
 	*x = DirEntry{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[20]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2212,7 +2332,7 @@ func (x *DirEntry) String() string {
 func (*DirEntry) ProtoMessage() {}
 
 func (x *DirEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[20]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2225,7 +2345,7 @@ func (x *DirEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirEntry.ProtoReflect.Descriptor instead.
 func (*DirEntry) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{20}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DirEntry) GetName() string {
@@ -2277,7 +2397,7 @@ type ActionGrepSearch struct {
 
 func (x *ActionGrepSearch) Reset() {
 	*x = ActionGrepSearch{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[21]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2289,7 +2409,7 @@ func (x *ActionGrepSearch) String() string {
 func (*ActionGrepSearch) ProtoMessage() {}
 
 func (x *ActionGrepSearch) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[21]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2302,7 +2422,7 @@ func (x *ActionGrepSearch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionGrepSearch.ProtoReflect.Descriptor instead.
 func (*ActionGrepSearch) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{21}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ActionGrepSearch) GetQuery() string {
@@ -2387,7 +2507,7 @@ type SearchMatch struct {
 
 func (x *SearchMatch) Reset() {
 	*x = SearchMatch{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[22]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2399,7 +2519,7 @@ func (x *SearchMatch) String() string {
 func (*SearchMatch) ProtoMessage() {}
 
 func (x *SearchMatch) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[22]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2412,7 +2532,7 @@ func (x *SearchMatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchMatch.ProtoReflect.Descriptor instead.
 func (*SearchMatch) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{22}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SearchMatch) GetFilename() string {
@@ -2450,7 +2570,7 @@ type ActionFindFile struct {
 
 func (x *ActionFindFile) Reset() {
 	*x = ActionFindFile{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[23]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2462,7 +2582,7 @@ func (x *ActionFindFile) String() string {
 func (*ActionFindFile) ProtoMessage() {}
 
 func (x *ActionFindFile) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[23]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2475,7 +2595,7 @@ func (x *ActionFindFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionFindFile.ProtoReflect.Descriptor instead.
 func (*ActionFindFile) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{23}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ActionFindFile) GetPattern() string {
@@ -2525,7 +2645,7 @@ type ActionRunCommand struct {
 
 func (x *ActionRunCommand) Reset() {
 	*x = ActionRunCommand{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[24]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2537,7 +2657,7 @@ func (x *ActionRunCommand) String() string {
 func (*ActionRunCommand) ProtoMessage() {}
 
 func (x *ActionRunCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[24]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2550,7 +2670,7 @@ func (x *ActionRunCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionRunCommand.ProtoReflect.Descriptor instead.
 func (*ActionRunCommand) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{24}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ActionRunCommand) GetCommand() string {
@@ -2661,7 +2781,7 @@ type ActionFinish struct {
 
 func (x *ActionFinish) Reset() {
 	*x = ActionFinish{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[25]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2673,7 +2793,7 @@ func (x *ActionFinish) String() string {
 func (*ActionFinish) ProtoMessage() {}
 
 func (x *ActionFinish) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[25]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2686,7 +2806,7 @@ func (x *ActionFinish) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionFinish.ProtoReflect.Descriptor instead.
 func (*ActionFinish) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{25}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ActionFinish) GetOutputJson() string {
@@ -2710,7 +2830,7 @@ type ActionHostToolCall struct {
 
 func (x *ActionHostToolCall) Reset() {
 	*x = ActionHostToolCall{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[26]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2722,7 +2842,7 @@ func (x *ActionHostToolCall) String() string {
 func (*ActionHostToolCall) ProtoMessage() {}
 
 func (x *ActionHostToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[26]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2735,7 +2855,7 @@ func (x *ActionHostToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionHostToolCall.ProtoReflect.Descriptor instead.
 func (*ActionHostToolCall) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{26}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ActionHostToolCall) GetToolName() string {
@@ -2780,7 +2900,7 @@ type ActionCompaction struct {
 
 func (x *ActionCompaction) Reset() {
 	*x = ActionCompaction{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[27]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2792,7 +2912,7 @@ func (x *ActionCompaction) String() string {
 func (*ActionCompaction) ProtoMessage() {}
 
 func (x *ActionCompaction) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[27]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2805,7 +2925,7 @@ func (x *ActionCompaction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionCompaction.ProtoReflect.Descriptor instead.
 func (*ActionCompaction) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{27}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ActionCompaction) GetOriginalTokens() int32 {
@@ -2854,7 +2974,7 @@ type ActionUserQuestion struct {
 
 func (x *ActionUserQuestion) Reset() {
 	*x = ActionUserQuestion{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[28]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2866,7 +2986,7 @@ func (x *ActionUserQuestion) String() string {
 func (*ActionUserQuestion) ProtoMessage() {}
 
 func (x *ActionUserQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[28]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2879,7 +2999,7 @@ func (x *ActionUserQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionUserQuestion.ProtoReflect.Descriptor instead.
 func (*ActionUserQuestion) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{28}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ActionUserQuestion) GetRequestId() string {
@@ -2922,7 +3042,7 @@ type UserQuestion struct {
 
 func (x *UserQuestion) Reset() {
 	*x = UserQuestion{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[29]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2934,7 +3054,7 @@ func (x *UserQuestion) String() string {
 func (*UserQuestion) ProtoMessage() {}
 
 func (x *UserQuestion) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[29]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2947,7 +3067,7 @@ func (x *UserQuestion) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserQuestion.ProtoReflect.Descriptor instead.
 func (*UserQuestion) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{29}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *UserQuestion) GetQuestion() string {
@@ -2986,7 +3106,7 @@ type QuestionAnswer struct {
 
 func (x *QuestionAnswer) Reset() {
 	*x = QuestionAnswer{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[30]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2998,7 +3118,7 @@ func (x *QuestionAnswer) String() string {
 func (*QuestionAnswer) ProtoMessage() {}
 
 func (x *QuestionAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[30]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3011,7 +3131,7 @@ func (x *QuestionAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuestionAnswer.ProtoReflect.Descriptor instead.
 func (*QuestionAnswer) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{30}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *QuestionAnswer) GetSelectedIndices() []int32 {
@@ -3047,7 +3167,7 @@ type QuestionResponse struct {
 
 func (x *QuestionResponse) Reset() {
 	*x = QuestionResponse{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[31]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3059,7 +3179,7 @@ func (x *QuestionResponse) String() string {
 func (*QuestionResponse) ProtoMessage() {}
 
 func (x *QuestionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[31]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3072,7 +3192,7 @@ func (x *QuestionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuestionResponse.ProtoReflect.Descriptor instead.
 func (*QuestionResponse) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{31}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *QuestionResponse) GetRequestId() string {
@@ -3112,7 +3232,7 @@ type ActionManageTask struct {
 
 func (x *ActionManageTask) Reset() {
 	*x = ActionManageTask{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[32]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3124,7 +3244,7 @@ func (x *ActionManageTask) String() string {
 func (*ActionManageTask) ProtoMessage() {}
 
 func (x *ActionManageTask) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[32]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3137,7 +3257,7 @@ func (x *ActionManageTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionManageTask.ProtoReflect.Descriptor instead.
 func (*ActionManageTask) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{32}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ActionManageTask) GetAction() string {
@@ -3193,7 +3313,7 @@ type TaskInfo struct {
 
 func (x *TaskInfo) Reset() {
 	*x = TaskInfo{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[33]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3205,7 +3325,7 @@ func (x *TaskInfo) String() string {
 func (*TaskInfo) ProtoMessage() {}
 
 func (x *TaskInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[33]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3218,7 +3338,7 @@ func (x *TaskInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskInfo.ProtoReflect.Descriptor instead.
 func (*TaskInfo) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{33}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *TaskInfo) GetTaskId() string {
@@ -3318,7 +3438,7 @@ type ActionInvokeSubagent struct {
 
 func (x *ActionInvokeSubagent) Reset() {
 	*x = ActionInvokeSubagent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[34]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3330,7 +3450,7 @@ func (x *ActionInvokeSubagent) String() string {
 func (*ActionInvokeSubagent) ProtoMessage() {}
 
 func (x *ActionInvokeSubagent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[34]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3343,7 +3463,7 @@ func (x *ActionInvokeSubagent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionInvokeSubagent.ProtoReflect.Descriptor instead.
 func (*ActionInvokeSubagent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{34}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ActionInvokeSubagent) GetSubagents() []*SubagentInvocation {
@@ -3443,7 +3563,7 @@ type SubagentInvocation struct {
 
 func (x *SubagentInvocation) Reset() {
 	*x = SubagentInvocation{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[35]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3455,7 +3575,7 @@ func (x *SubagentInvocation) String() string {
 func (*SubagentInvocation) ProtoMessage() {}
 
 func (x *SubagentInvocation) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[35]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3468,7 +3588,7 @@ func (x *SubagentInvocation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentInvocation.ProtoReflect.Descriptor instead.
 func (*SubagentInvocation) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{35}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SubagentInvocation) GetTypeName() string {
@@ -3511,7 +3631,7 @@ type SubagentLaunchResult struct {
 
 func (x *SubagentLaunchResult) Reset() {
 	*x = SubagentLaunchResult{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[36]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3523,7 +3643,7 @@ func (x *SubagentLaunchResult) String() string {
 func (*SubagentLaunchResult) ProtoMessage() {}
 
 func (x *SubagentLaunchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[36]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3536,7 +3656,7 @@ func (x *SubagentLaunchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentLaunchResult.ProtoReflect.Descriptor instead.
 func (*SubagentLaunchResult) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{36}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SubagentLaunchResult) GetConversationId() string {
@@ -3578,7 +3698,7 @@ type ActionBrowserSubagent struct {
 
 func (x *ActionBrowserSubagent) Reset() {
 	*x = ActionBrowserSubagent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[37]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3590,7 +3710,7 @@ func (x *ActionBrowserSubagent) String() string {
 func (*ActionBrowserSubagent) ProtoMessage() {}
 
 func (x *ActionBrowserSubagent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[37]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3603,7 +3723,7 @@ func (x *ActionBrowserSubagent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionBrowserSubagent.ProtoReflect.Descriptor instead.
 func (*ActionBrowserSubagent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{37}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ActionBrowserSubagent) GetTaskName() string {
@@ -3677,7 +3797,7 @@ type ActionDefineSubagent struct {
 
 func (x *ActionDefineSubagent) Reset() {
 	*x = ActionDefineSubagent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[38]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3689,7 +3809,7 @@ func (x *ActionDefineSubagent) String() string {
 func (*ActionDefineSubagent) ProtoMessage() {}
 
 func (x *ActionDefineSubagent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[38]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3702,7 +3822,7 @@ func (x *ActionDefineSubagent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionDefineSubagent.ProtoReflect.Descriptor instead.
 func (*ActionDefineSubagent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{38}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ActionDefineSubagent) GetName() string {
@@ -3760,7 +3880,7 @@ type ActionManageSubagents struct {
 
 func (x *ActionManageSubagents) Reset() {
 	*x = ActionManageSubagents{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[39]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3772,7 +3892,7 @@ func (x *ActionManageSubagents) String() string {
 func (*ActionManageSubagents) ProtoMessage() {}
 
 func (x *ActionManageSubagents) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[39]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3785,7 +3905,7 @@ func (x *ActionManageSubagents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionManageSubagents.ProtoReflect.Descriptor instead.
 func (*ActionManageSubagents) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{39}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ActionManageSubagents) GetAction() string {
@@ -3822,7 +3942,7 @@ type SubagentInfo struct {
 
 func (x *SubagentInfo) Reset() {
 	*x = SubagentInfo{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[40]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3834,7 +3954,7 @@ func (x *SubagentInfo) String() string {
 func (*SubagentInfo) ProtoMessage() {}
 
 func (x *SubagentInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[40]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3847,7 +3967,7 @@ func (x *SubagentInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentInfo.ProtoReflect.Descriptor instead.
 func (*SubagentInfo) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{40}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *SubagentInfo) GetConversationId() string {
@@ -3889,7 +4009,7 @@ type ActionSendMessage struct {
 
 func (x *ActionSendMessage) Reset() {
 	*x = ActionSendMessage{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[41]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3901,7 +4021,7 @@ func (x *ActionSendMessage) String() string {
 func (*ActionSendMessage) ProtoMessage() {}
 
 func (x *ActionSendMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[41]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3914,7 +4034,7 @@ func (x *ActionSendMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionSendMessage.ProtoReflect.Descriptor instead.
 func (*ActionSendMessage) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{41}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ActionSendMessage) GetRecipient() string {
@@ -3944,7 +4064,7 @@ type ActionSearchWeb struct {
 
 func (x *ActionSearchWeb) Reset() {
 	*x = ActionSearchWeb{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[42]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3956,7 +4076,7 @@ func (x *ActionSearchWeb) String() string {
 func (*ActionSearchWeb) ProtoMessage() {}
 
 func (x *ActionSearchWeb) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[42]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3969,7 +4089,7 @@ func (x *ActionSearchWeb) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionSearchWeb.ProtoReflect.Descriptor instead.
 func (*ActionSearchWeb) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{42}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ActionSearchWeb) GetQuery() string {
@@ -3998,7 +4118,7 @@ type WebSearchResult struct {
 
 func (x *WebSearchResult) Reset() {
 	*x = WebSearchResult{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[43]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4010,7 +4130,7 @@ func (x *WebSearchResult) String() string {
 func (*WebSearchResult) ProtoMessage() {}
 
 func (x *WebSearchResult) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[43]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4023,7 +4143,7 @@ func (x *WebSearchResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebSearchResult.ProtoReflect.Descriptor instead.
 func (*WebSearchResult) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{43}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *WebSearchResult) GetTitle() string {
@@ -4061,7 +4181,7 @@ type ActionReadUrlContent struct {
 
 func (x *ActionReadUrlContent) Reset() {
 	*x = ActionReadUrlContent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[44]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4073,7 +4193,7 @@ func (x *ActionReadUrlContent) String() string {
 func (*ActionReadUrlContent) ProtoMessage() {}
 
 func (x *ActionReadUrlContent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[44]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4086,7 +4206,7 @@ func (x *ActionReadUrlContent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionReadUrlContent.ProtoReflect.Descriptor instead.
 func (*ActionReadUrlContent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{44}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ActionReadUrlContent) GetUrl() string {
@@ -4126,7 +4246,7 @@ type ActionPermissionRequest struct {
 
 func (x *ActionPermissionRequest) Reset() {
 	*x = ActionPermissionRequest{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[45]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4138,7 +4258,7 @@ func (x *ActionPermissionRequest) String() string {
 func (*ActionPermissionRequest) ProtoMessage() {}
 
 func (x *ActionPermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[45]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4151,7 +4271,7 @@ func (x *ActionPermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionPermissionRequest.ProtoReflect.Descriptor instead.
 func (*ActionPermissionRequest) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{45}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ActionPermissionRequest) GetRequestId() string {
@@ -4202,7 +4322,7 @@ type PermissionResponse struct {
 
 func (x *PermissionResponse) Reset() {
 	*x = PermissionResponse{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[46]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4214,7 +4334,7 @@ func (x *PermissionResponse) String() string {
 func (*PermissionResponse) ProtoMessage() {}
 
 func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[46]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4227,7 +4347,7 @@ func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionResponse.ProtoReflect.Descriptor instead.
 func (*PermissionResponse) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{46}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *PermissionResponse) GetRequestId() string {
@@ -4311,7 +4431,7 @@ type HarnessConfig struct {
 
 func (x *HarnessConfig) Reset() {
 	*x = HarnessConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[47]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4323,7 +4443,7 @@ func (x *HarnessConfig) String() string {
 func (*HarnessConfig) ProtoMessage() {}
 
 func (x *HarnessConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[47]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4336,7 +4456,7 @@ func (x *HarnessConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessConfig.ProtoReflect.Descriptor instead.
 func (*HarnessConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{47}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *HarnessConfig) GetLitellmEndpoint() string {
@@ -4529,7 +4649,7 @@ type UserRuleConfig struct {
 
 func (x *UserRuleConfig) Reset() {
 	*x = UserRuleConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[48]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4541,7 +4661,7 @@ func (x *UserRuleConfig) String() string {
 func (*UserRuleConfig) ProtoMessage() {}
 
 func (x *UserRuleConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[48]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4554,7 +4674,7 @@ func (x *UserRuleConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserRuleConfig.ProtoReflect.Descriptor instead.
 func (*UserRuleConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{48}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *UserRuleConfig) GetLabel() string {
@@ -4600,7 +4720,7 @@ type PromptModules struct {
 
 func (x *PromptModules) Reset() {
 	*x = PromptModules{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[49]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4612,7 +4732,7 @@ func (x *PromptModules) String() string {
 func (*PromptModules) ProtoMessage() {}
 
 func (x *PromptModules) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[49]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4625,7 +4745,7 @@ func (x *PromptModules) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PromptModules.ProtoReflect.Descriptor instead.
 func (*PromptModules) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{49}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *PromptModules) GetEnableWebDevelopment() bool {
@@ -4667,7 +4787,7 @@ type SlashCommandDef struct {
 
 func (x *SlashCommandDef) Reset() {
 	*x = SlashCommandDef{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[50]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4679,7 +4799,7 @@ func (x *SlashCommandDef) String() string {
 func (*SlashCommandDef) ProtoMessage() {}
 
 func (x *SlashCommandDef) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[50]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4692,7 +4812,7 @@ func (x *SlashCommandDef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SlashCommandDef.ProtoReflect.Descriptor instead.
 func (*SlashCommandDef) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{50}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *SlashCommandDef) GetName() string {
@@ -4723,7 +4843,7 @@ type SkillDef struct {
 
 func (x *SkillDef) Reset() {
 	*x = SkillDef{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[51]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4735,7 +4855,7 @@ func (x *SkillDef) String() string {
 func (*SkillDef) ProtoMessage() {}
 
 func (x *SkillDef) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[51]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4748,7 +4868,7 @@ func (x *SkillDef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SkillDef.ProtoReflect.Descriptor instead.
 func (*SkillDef) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{51}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *SkillDef) GetName() string {
@@ -4787,7 +4907,7 @@ type PluginDef struct {
 
 func (x *PluginDef) Reset() {
 	*x = PluginDef{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[52]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4799,7 +4919,7 @@ func (x *PluginDef) String() string {
 func (*PluginDef) ProtoMessage() {}
 
 func (x *PluginDef) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[52]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4812,7 +4932,7 @@ func (x *PluginDef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginDef.ProtoReflect.Descriptor instead.
 func (*PluginDef) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{52}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *PluginDef) GetName() string {
@@ -4859,7 +4979,7 @@ type SubagentTypeConfig struct {
 
 func (x *SubagentTypeConfig) Reset() {
 	*x = SubagentTypeConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[53]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4871,7 +4991,7 @@ func (x *SubagentTypeConfig) String() string {
 func (*SubagentTypeConfig) ProtoMessage() {}
 
 func (x *SubagentTypeConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[53]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4884,7 +5004,7 @@ func (x *SubagentTypeConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentTypeConfig.ProtoReflect.Descriptor instead.
 func (*SubagentTypeConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{53}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *SubagentTypeConfig) GetName() string {
@@ -4949,7 +5069,7 @@ type StructuredSystemInstructions struct {
 
 func (x *StructuredSystemInstructions) Reset() {
 	*x = StructuredSystemInstructions{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[54]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4961,7 +5081,7 @@ func (x *StructuredSystemInstructions) String() string {
 func (*StructuredSystemInstructions) ProtoMessage() {}
 
 func (x *StructuredSystemInstructions) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[54]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4974,7 +5094,7 @@ func (x *StructuredSystemInstructions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredSystemInstructions.ProtoReflect.Descriptor instead.
 func (*StructuredSystemInstructions) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{54}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *StructuredSystemInstructions) GetIdentity() string {
@@ -5017,7 +5137,7 @@ type SystemSection struct {
 
 func (x *SystemSection) Reset() {
 	*x = SystemSection{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[55]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5029,7 +5149,7 @@ func (x *SystemSection) String() string {
 func (*SystemSection) ProtoMessage() {}
 
 func (x *SystemSection) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[55]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5042,7 +5162,7 @@ func (x *SystemSection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemSection.ProtoReflect.Descriptor instead.
 func (*SystemSection) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{55}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *SystemSection) GetTag() string {
@@ -5079,7 +5199,7 @@ type ToolDef struct {
 
 func (x *ToolDef) Reset() {
 	*x = ToolDef{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[56]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5091,7 +5211,7 @@ func (x *ToolDef) String() string {
 func (*ToolDef) ProtoMessage() {}
 
 func (x *ToolDef) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[56]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5104,7 +5224,7 @@ func (x *ToolDef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolDef.ProtoReflect.Descriptor instead.
 func (*ToolDef) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{56}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *ToolDef) GetName() string {
@@ -5162,7 +5282,7 @@ type BuiltinToolsConfig struct {
 
 func (x *BuiltinToolsConfig) Reset() {
 	*x = BuiltinToolsConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[57]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5174,7 +5294,7 @@ func (x *BuiltinToolsConfig) String() string {
 func (*BuiltinToolsConfig) ProtoMessage() {}
 
 func (x *BuiltinToolsConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[57]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5187,7 +5307,7 @@ func (x *BuiltinToolsConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuiltinToolsConfig.ProtoReflect.Descriptor instead.
 func (*BuiltinToolsConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{57}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *BuiltinToolsConfig) GetViewFile() bool {
@@ -5327,7 +5447,7 @@ type ToolConfigs struct {
 
 func (x *ToolConfigs) Reset() {
 	*x = ToolConfigs{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[58]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5339,7 +5459,7 @@ func (x *ToolConfigs) String() string {
 func (*ToolConfigs) ProtoMessage() {}
 
 func (x *ToolConfigs) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[58]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5352,7 +5472,7 @@ func (x *ToolConfigs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolConfigs.ProtoReflect.Descriptor instead.
 func (*ToolConfigs) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{58}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *ToolConfigs) GetViewFile() *ViewFileToolConfig {
@@ -5428,7 +5548,7 @@ type ViewFileToolConfig struct {
 
 func (x *ViewFileToolConfig) Reset() {
 	*x = ViewFileToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[59]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5440,7 +5560,7 @@ func (x *ViewFileToolConfig) String() string {
 func (*ViewFileToolConfig) ProtoMessage() {}
 
 func (x *ViewFileToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[59]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5453,7 +5573,7 @@ func (x *ViewFileToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ViewFileToolConfig.ProtoReflect.Descriptor instead.
 func (*ViewFileToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{59}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *ViewFileToolConfig) GetMaxLines() int32 {
@@ -5473,7 +5593,7 @@ type RunCommandToolConfig struct {
 
 func (x *RunCommandToolConfig) Reset() {
 	*x = RunCommandToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[60]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5485,7 +5605,7 @@ func (x *RunCommandToolConfig) String() string {
 func (*RunCommandToolConfig) ProtoMessage() {}
 
 func (x *RunCommandToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[60]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5498,7 +5618,7 @@ func (x *RunCommandToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunCommandToolConfig.ProtoReflect.Descriptor instead.
 func (*RunCommandToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{60}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *RunCommandToolConfig) GetDefaultTimeoutMs() int32 {
@@ -5524,7 +5644,7 @@ type FileEditToolConfig struct {
 
 func (x *FileEditToolConfig) Reset() {
 	*x = FileEditToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[61]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5536,7 +5656,7 @@ func (x *FileEditToolConfig) String() string {
 func (*FileEditToolConfig) ProtoMessage() {}
 
 func (x *FileEditToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[61]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5549,7 +5669,7 @@ func (x *FileEditToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileEditToolConfig.ProtoReflect.Descriptor instead.
 func (*FileEditToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{61}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *FileEditToolConfig) GetMaxChunkLines() int32 {
@@ -5568,7 +5688,7 @@ type FindToolConfig struct {
 
 func (x *FindToolConfig) Reset() {
 	*x = FindToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[62]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5580,7 +5700,7 @@ func (x *FindToolConfig) String() string {
 func (*FindToolConfig) ProtoMessage() {}
 
 func (x *FindToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[62]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5593,7 +5713,7 @@ func (x *FindToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindToolConfig.ProtoReflect.Descriptor instead.
 func (*FindToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{62}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *FindToolConfig) GetMaxResults() int32 {
@@ -5612,7 +5732,7 @@ type GrepSearchToolConfig struct {
 
 func (x *GrepSearchToolConfig) Reset() {
 	*x = GrepSearchToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[63]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5624,7 +5744,7 @@ func (x *GrepSearchToolConfig) String() string {
 func (*GrepSearchToolConfig) ProtoMessage() {}
 
 func (x *GrepSearchToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[63]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5637,7 +5757,7 @@ func (x *GrepSearchToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrepSearchToolConfig.ProtoReflect.Descriptor instead.
 func (*GrepSearchToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{63}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *GrepSearchToolConfig) GetMaxResults() int32 {
@@ -5656,7 +5776,7 @@ type ListDirToolConfig struct {
 
 func (x *ListDirToolConfig) Reset() {
 	*x = ListDirToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[64]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5668,7 +5788,7 @@ func (x *ListDirToolConfig) String() string {
 func (*ListDirToolConfig) ProtoMessage() {}
 
 func (x *ListDirToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[64]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5681,7 +5801,7 @@ func (x *ListDirToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDirToolConfig.ProtoReflect.Descriptor instead.
 func (*ListDirToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{64}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *ListDirToolConfig) GetMaxEntries() int32 {
@@ -5700,7 +5820,7 @@ type WriteToFileToolConfig struct {
 
 func (x *WriteToFileToolConfig) Reset() {
 	*x = WriteToFileToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[65]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5712,7 +5832,7 @@ func (x *WriteToFileToolConfig) String() string {
 func (*WriteToFileToolConfig) ProtoMessage() {}
 
 func (x *WriteToFileToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[65]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5725,7 +5845,7 @@ func (x *WriteToFileToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteToFileToolConfig.ProtoReflect.Descriptor instead.
 func (*WriteToFileToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{65}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *WriteToFileToolConfig) GetMaxFileSize() int64 {
@@ -5744,7 +5864,7 @@ type WebSearchToolConfig struct {
 
 func (x *WebSearchToolConfig) Reset() {
 	*x = WebSearchToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[66]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5756,7 +5876,7 @@ func (x *WebSearchToolConfig) String() string {
 func (*WebSearchToolConfig) ProtoMessage() {}
 
 func (x *WebSearchToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[66]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5769,7 +5889,7 @@ func (x *WebSearchToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebSearchToolConfig.ProtoReflect.Descriptor instead.
 func (*WebSearchToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{66}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *WebSearchToolConfig) GetMaxResults() int32 {
@@ -5788,7 +5908,7 @@ type WebFetchToolConfig struct {
 
 func (x *WebFetchToolConfig) Reset() {
 	*x = WebFetchToolConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[67]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5800,7 +5920,7 @@ func (x *WebFetchToolConfig) String() string {
 func (*WebFetchToolConfig) ProtoMessage() {}
 
 func (x *WebFetchToolConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[67]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5813,7 +5933,7 @@ func (x *WebFetchToolConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WebFetchToolConfig.ProtoReflect.Descriptor instead.
 func (*WebFetchToolConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{67}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *WebFetchToolConfig) GetMaxContentSize() int64 {
@@ -5835,7 +5955,7 @@ type Workspace struct {
 
 func (x *Workspace) Reset() {
 	*x = Workspace{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[68]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5847,7 +5967,7 @@ func (x *Workspace) String() string {
 func (*Workspace) ProtoMessage() {}
 
 func (x *Workspace) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[68]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5860,7 +5980,7 @@ func (x *Workspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Workspace.ProtoReflect.Descriptor instead.
 func (*Workspace) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{68}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *Workspace) GetDirectory() string {
@@ -5901,7 +6021,7 @@ type McpServerConfig struct {
 
 func (x *McpServerConfig) Reset() {
 	*x = McpServerConfig{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[69]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5913,7 +6033,7 @@ func (x *McpServerConfig) String() string {
 func (*McpServerConfig) ProtoMessage() {}
 
 func (x *McpServerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[69]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5926,7 +6046,7 @@ func (x *McpServerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpServerConfig.ProtoReflect.Descriptor instead.
 func (*McpServerConfig) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{69}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *McpServerConfig) GetName() string {
@@ -6002,7 +6122,7 @@ type McpStdioTransport struct {
 
 func (x *McpStdioTransport) Reset() {
 	*x = McpStdioTransport{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[70]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6014,7 +6134,7 @@ func (x *McpStdioTransport) String() string {
 func (*McpStdioTransport) ProtoMessage() {}
 
 func (x *McpStdioTransport) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[70]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6027,7 +6147,7 @@ func (x *McpStdioTransport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpStdioTransport.ProtoReflect.Descriptor instead.
 func (*McpStdioTransport) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{70}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *McpStdioTransport) GetCommand() string {
@@ -6055,7 +6175,7 @@ type McpHttpTransport struct {
 
 func (x *McpHttpTransport) Reset() {
 	*x = McpHttpTransport{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[71]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6067,7 +6187,7 @@ func (x *McpHttpTransport) String() string {
 func (*McpHttpTransport) ProtoMessage() {}
 
 func (x *McpHttpTransport) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[71]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6080,7 +6200,7 @@ func (x *McpHttpTransport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use McpHttpTransport.ProtoReflect.Descriptor instead.
 func (*McpHttpTransport) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{71}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *McpHttpTransport) GetUrl() string {
@@ -6114,7 +6234,7 @@ type ActionMcpTool struct {
 
 func (x *ActionMcpTool) Reset() {
 	*x = ActionMcpTool{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[72]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6126,7 +6246,7 @@ func (x *ActionMcpTool) String() string {
 func (*ActionMcpTool) ProtoMessage() {}
 
 func (x *ActionMcpTool) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[72]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6139,7 +6259,7 @@ func (x *ActionMcpTool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionMcpTool.ProtoReflect.Descriptor instead.
 func (*ActionMcpTool) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{72}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *ActionMcpTool) GetServerName() string {
@@ -6204,7 +6324,7 @@ type SettingsChange struct {
 
 func (x *SettingsChange) Reset() {
 	*x = SettingsChange{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[73]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6216,7 +6336,7 @@ func (x *SettingsChange) String() string {
 func (*SettingsChange) ProtoMessage() {}
 
 func (x *SettingsChange) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[73]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6229,7 +6349,7 @@ func (x *SettingsChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettingsChange.ProtoReflect.Descriptor instead.
 func (*SettingsChange) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{73}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *SettingsChange) GetSetting() string {
@@ -6272,7 +6392,7 @@ type ErrorInfo struct {
 
 func (x *ErrorInfo) Reset() {
 	*x = ErrorInfo{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[74]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6284,7 +6404,7 @@ func (x *ErrorInfo) String() string {
 func (*ErrorInfo) ProtoMessage() {}
 
 func (x *ErrorInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[74]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6297,7 +6417,7 @@ func (x *ErrorInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorInfo.ProtoReflect.Descriptor instead.
 func (*ErrorInfo) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{74}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *ErrorInfo) GetMessage() string {
@@ -6335,7 +6455,7 @@ type UsageMetadata struct {
 
 func (x *UsageMetadata) Reset() {
 	*x = UsageMetadata{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[75]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6347,7 +6467,7 @@ func (x *UsageMetadata) String() string {
 func (*UsageMetadata) ProtoMessage() {}
 
 func (x *UsageMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[75]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6360,7 +6480,7 @@ func (x *UsageMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageMetadata.ProtoReflect.Descriptor instead.
 func (*UsageMetadata) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{75}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *UsageMetadata) GetPromptTokens() int32 {
@@ -6416,7 +6536,7 @@ type TraceEvent struct {
 
 func (x *TraceEvent) Reset() {
 	*x = TraceEvent{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[76]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6428,7 +6548,7 @@ func (x *TraceEvent) String() string {
 func (*TraceEvent) ProtoMessage() {}
 
 func (x *TraceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[76]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6441,7 +6561,7 @@ func (x *TraceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceEvent.ProtoReflect.Descriptor instead.
 func (*TraceEvent) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{76}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *TraceEvent) GetTimestamp() string {
@@ -6526,7 +6646,7 @@ type ModelCallTrace struct {
 
 func (x *ModelCallTrace) Reset() {
 	*x = ModelCallTrace{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[77]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6538,7 +6658,7 @@ func (x *ModelCallTrace) String() string {
 func (*ModelCallTrace) ProtoMessage() {}
 
 func (x *ModelCallTrace) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[77]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6551,7 +6671,7 @@ func (x *ModelCallTrace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelCallTrace.ProtoReflect.Descriptor instead.
 func (*ModelCallTrace) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{77}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *ModelCallTrace) GetModelName() string {
@@ -6595,7 +6715,7 @@ type ModelResponseTrace struct {
 
 func (x *ModelResponseTrace) Reset() {
 	*x = ModelResponseTrace{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[78]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6607,7 +6727,7 @@ func (x *ModelResponseTrace) String() string {
 func (*ModelResponseTrace) ProtoMessage() {}
 
 func (x *ModelResponseTrace) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[78]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6620,7 +6740,7 @@ func (x *ModelResponseTrace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelResponseTrace.ProtoReflect.Descriptor instead.
 func (*ModelResponseTrace) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{78}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *ModelResponseTrace) GetResponseJson() string {
@@ -6685,7 +6805,7 @@ type ConversationState struct {
 
 func (x *ConversationState) Reset() {
 	*x = ConversationState{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[79]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6697,7 +6817,7 @@ func (x *ConversationState) String() string {
 func (*ConversationState) ProtoMessage() {}
 
 func (x *ConversationState) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[79]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6710,7 +6830,7 @@ func (x *ConversationState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationState.ProtoReflect.Descriptor instead.
 func (*ConversationState) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{79}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *ConversationState) GetConversationId() string {
@@ -6834,7 +6954,7 @@ type ConversationMessage struct {
 
 func (x *ConversationMessage) Reset() {
 	*x = ConversationMessage{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[80]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6846,7 +6966,7 @@ func (x *ConversationMessage) String() string {
 func (*ConversationMessage) ProtoMessage() {}
 
 func (x *ConversationMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[80]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6859,7 +6979,7 @@ func (x *ConversationMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConversationMessage.ProtoReflect.Descriptor instead.
 func (*ConversationMessage) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{80}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *ConversationMessage) GetRole() string {
@@ -6916,7 +7036,7 @@ type ToolCallRecord struct {
 
 func (x *ToolCallRecord) Reset() {
 	*x = ToolCallRecord{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[81]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6928,7 +7048,7 @@ func (x *ToolCallRecord) String() string {
 func (*ToolCallRecord) ProtoMessage() {}
 
 func (x *ToolCallRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[81]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6941,7 +7061,7 @@ func (x *ToolCallRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCallRecord.ProtoReflect.Descriptor instead.
 func (*ToolCallRecord) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{81}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *ToolCallRecord) GetCallId() string {
@@ -6978,7 +7098,7 @@ type ToolResultRecord struct {
 
 func (x *ToolResultRecord) Reset() {
 	*x = ToolResultRecord{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[82]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6990,7 +7110,7 @@ func (x *ToolResultRecord) String() string {
 func (*ToolResultRecord) ProtoMessage() {}
 
 func (x *ToolResultRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[82]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7003,7 +7123,7 @@ func (x *ToolResultRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolResultRecord.ProtoReflect.Descriptor instead.
 func (*ToolResultRecord) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{82}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *ToolResultRecord) GetCallId() string {
@@ -7045,7 +7165,7 @@ type TranscriptLog struct {
 
 func (x *TranscriptLog) Reset() {
 	*x = TranscriptLog{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[83]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7057,7 +7177,7 @@ func (x *TranscriptLog) String() string {
 func (*TranscriptLog) ProtoMessage() {}
 
 func (x *TranscriptLog) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[83]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7070,7 +7190,7 @@ func (x *TranscriptLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TranscriptLog.ProtoReflect.Descriptor instead.
 func (*TranscriptLog) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{83}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *TranscriptLog) GetEntries() []*TranscriptEntry {
@@ -7098,7 +7218,7 @@ type TranscriptEntry struct {
 
 func (x *TranscriptEntry) Reset() {
 	*x = TranscriptEntry{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[84]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7110,7 +7230,7 @@ func (x *TranscriptEntry) String() string {
 func (*TranscriptEntry) ProtoMessage() {}
 
 func (x *TranscriptEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[84]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7123,7 +7243,7 @@ func (x *TranscriptEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TranscriptEntry.ProtoReflect.Descriptor instead.
 func (*TranscriptEntry) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{84}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *TranscriptEntry) GetStepIndex() int32 {
@@ -7199,7 +7319,7 @@ type ActionSchedule struct {
 
 func (x *ActionSchedule) Reset() {
 	*x = ActionSchedule{}
-	mi := &file_localharness_v1_localharness_proto_msgTypes[85]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7211,7 +7331,7 @@ func (x *ActionSchedule) String() string {
 func (*ActionSchedule) ProtoMessage() {}
 
 func (x *ActionSchedule) ProtoReflect() protoreflect.Message {
-	mi := &file_localharness_v1_localharness_proto_msgTypes[85]
+	mi := &file_localharness_v1_localharness_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7224,7 +7344,7 @@ func (x *ActionSchedule) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionSchedule.ProtoReflect.Descriptor instead.
 func (*ActionSchedule) Descriptor() ([]byte, []int) {
-	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{85}
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *ActionSchedule) GetDurationSeconds() int32 {
@@ -7319,14 +7439,24 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\vresult_json\x18\x03 \x01(\tR\n" +
 	"resultJson\x12\x19\n" +
 	"\bis_error\x18\x04 \x01(\bR\aisError\"\x0f\n" +
-	"\rCancelRequest\"\xa4\x02\n" +
+	"\rCancelRequest\"\xef\x02\n" +
 	"\rServerMessage\x12D\n" +
 	"\rinit_response\x18\x01 \x01(\v2\x1d.localharness.v1.InitResponseH\x00R\finitResponse\x12>\n" +
 	"\vstep_update\x18\x02 \x01(\v2\x1b.localharness.v1.StepUpdateH\x00R\n" +
 	"stepUpdate\x12M\n" +
-	"\x10trajectory_state\x18\x03 \x01(\v2 .localharness.v1.TrajectoryStateH\x00R\x0ftrajectoryState\x123\n" +
-	"\x05error\x18\x04 \x01(\v2\x1b.localharness.v1.ErrorEventH\x00R\x05errorB\t\n" +
-	"\apayload\"`\n" +
+	"\x10trajectory_state\x18\x03 \x01(\v2 .localharness.v1.TrajectoryStateH\x00R\x0ftrajectoryState\x12>\n" +
+	"\verror_event\x18\x04 \x01(\v2\x1b.localharness.v1.ErrorEventH\x00R\n" +
+	"errorEvent\x12>\n" +
+	"\vtrace_event\x18\x05 \x01(\v2\x1b.localharness.v1.TraceEventH\x00R\n" +
+	"traceEventB\t\n" +
+	"\apayload\"P\n" +
+	"\vSessionInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x03 \x01(\x03R\tupdatedAt\"G\n" +
+	"\vSessionList\x128\n" +
+	"\bsessions\x18\x01 \x03(\v2\x1c.localharness.v1.SessionInfoR\bsessions\"`\n" +
 	"\fInitResponse\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12'\n" +
 	"\x0fharness_version\x18\x02 \x01(\tR\x0eharnessVersion\"P\n" +
@@ -7940,7 +8070,7 @@ func file_localharness_v1_localharness_proto_rawDescGZIP() []byte {
 }
 
 var file_localharness_v1_localharness_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_localharness_v1_localharness_proto_msgTypes = make([]protoimpl.MessageInfo, 91)
+var file_localharness_v1_localharness_proto_msgTypes = make([]protoimpl.MessageInfo, 93)
 var file_localharness_v1_localharness_proto_goTypes = []any{
 	(StepUpdate_Source)(0),                    // 0: localharness.v1.StepUpdate.Source
 	(StepUpdate_State)(0),                     // 1: localharness.v1.StepUpdate.State
@@ -7957,192 +8087,196 @@ var file_localharness_v1_localharness_proto_goTypes = []any{
 	(*ToolResult)(nil),                        // 12: localharness.v1.ToolResult
 	(*CancelRequest)(nil),                     // 13: localharness.v1.CancelRequest
 	(*ServerMessage)(nil),                     // 14: localharness.v1.ServerMessage
-	(*InitResponse)(nil),                      // 15: localharness.v1.InitResponse
-	(*ErrorEvent)(nil),                        // 16: localharness.v1.ErrorEvent
-	(*StepUpdate)(nil),                        // 17: localharness.v1.StepUpdate
-	(*TrajectoryState)(nil),                   // 18: localharness.v1.TrajectoryState
-	(*ActionViewFile)(nil),                    // 19: localharness.v1.ActionViewFile
-	(*ArtifactMetadata)(nil),                  // 20: localharness.v1.ArtifactMetadata
-	(*ActionWriteToFile)(nil),                 // 21: localharness.v1.ActionWriteToFile
-	(*ActionReplaceFileContent)(nil),          // 22: localharness.v1.ActionReplaceFileContent
-	(*EditChunk)(nil),                         // 23: localharness.v1.EditChunk
-	(*ActionListDir)(nil),                     // 24: localharness.v1.ActionListDir
-	(*DirEntry)(nil),                          // 25: localharness.v1.DirEntry
-	(*ActionGrepSearch)(nil),                  // 26: localharness.v1.ActionGrepSearch
-	(*SearchMatch)(nil),                       // 27: localharness.v1.SearchMatch
-	(*ActionFindFile)(nil),                    // 28: localharness.v1.ActionFindFile
-	(*ActionRunCommand)(nil),                  // 29: localharness.v1.ActionRunCommand
-	(*ActionFinish)(nil),                      // 30: localharness.v1.ActionFinish
-	(*ActionHostToolCall)(nil),                // 31: localharness.v1.ActionHostToolCall
-	(*ActionCompaction)(nil),                  // 32: localharness.v1.ActionCompaction
-	(*ActionUserQuestion)(nil),                // 33: localharness.v1.ActionUserQuestion
-	(*UserQuestion)(nil),                      // 34: localharness.v1.UserQuestion
-	(*QuestionAnswer)(nil),                    // 35: localharness.v1.QuestionAnswer
-	(*QuestionResponse)(nil),                  // 36: localharness.v1.QuestionResponse
-	(*ActionManageTask)(nil),                  // 37: localharness.v1.ActionManageTask
-	(*TaskInfo)(nil),                          // 38: localharness.v1.TaskInfo
-	(*ActionInvokeSubagent)(nil),              // 39: localharness.v1.ActionInvokeSubagent
-	(*SubagentInvocation)(nil),                // 40: localharness.v1.SubagentInvocation
-	(*SubagentLaunchResult)(nil),              // 41: localharness.v1.SubagentLaunchResult
-	(*ActionBrowserSubagent)(nil),             // 42: localharness.v1.ActionBrowserSubagent
-	(*ActionDefineSubagent)(nil),              // 43: localharness.v1.ActionDefineSubagent
-	(*ActionManageSubagents)(nil),             // 44: localharness.v1.ActionManageSubagents
-	(*SubagentInfo)(nil),                      // 45: localharness.v1.SubagentInfo
-	(*ActionSendMessage)(nil),                 // 46: localharness.v1.ActionSendMessage
-	(*ActionSearchWeb)(nil),                   // 47: localharness.v1.ActionSearchWeb
-	(*WebSearchResult)(nil),                   // 48: localharness.v1.WebSearchResult
-	(*ActionReadUrlContent)(nil),              // 49: localharness.v1.ActionReadUrlContent
-	(*ActionPermissionRequest)(nil),           // 50: localharness.v1.ActionPermissionRequest
-	(*PermissionResponse)(nil),                // 51: localharness.v1.PermissionResponse
-	(*HarnessConfig)(nil),                     // 52: localharness.v1.HarnessConfig
-	(*UserRuleConfig)(nil),                    // 53: localharness.v1.UserRuleConfig
-	(*PromptModules)(nil),                     // 54: localharness.v1.PromptModules
-	(*SlashCommandDef)(nil),                   // 55: localharness.v1.SlashCommandDef
-	(*SkillDef)(nil),                          // 56: localharness.v1.SkillDef
-	(*PluginDef)(nil),                         // 57: localharness.v1.PluginDef
-	(*SubagentTypeConfig)(nil),                // 58: localharness.v1.SubagentTypeConfig
-	(*StructuredSystemInstructions)(nil),      // 59: localharness.v1.StructuredSystemInstructions
-	(*SystemSection)(nil),                     // 60: localharness.v1.SystemSection
-	(*ToolDef)(nil),                           // 61: localharness.v1.ToolDef
-	(*BuiltinToolsConfig)(nil),                // 62: localharness.v1.BuiltinToolsConfig
-	(*ToolConfigs)(nil),                       // 63: localharness.v1.ToolConfigs
-	(*ViewFileToolConfig)(nil),                // 64: localharness.v1.ViewFileToolConfig
-	(*RunCommandToolConfig)(nil),              // 65: localharness.v1.RunCommandToolConfig
-	(*FileEditToolConfig)(nil),                // 66: localharness.v1.FileEditToolConfig
-	(*FindToolConfig)(nil),                    // 67: localharness.v1.FindToolConfig
-	(*GrepSearchToolConfig)(nil),              // 68: localharness.v1.GrepSearchToolConfig
-	(*ListDirToolConfig)(nil),                 // 69: localharness.v1.ListDirToolConfig
-	(*WriteToFileToolConfig)(nil),             // 70: localharness.v1.WriteToFileToolConfig
-	(*WebSearchToolConfig)(nil),               // 71: localharness.v1.WebSearchToolConfig
-	(*WebFetchToolConfig)(nil),                // 72: localharness.v1.WebFetchToolConfig
-	(*Workspace)(nil),                         // 73: localharness.v1.Workspace
-	(*McpServerConfig)(nil),                   // 74: localharness.v1.McpServerConfig
-	(*McpStdioTransport)(nil),                 // 75: localharness.v1.McpStdioTransport
-	(*McpHttpTransport)(nil),                  // 76: localharness.v1.McpHttpTransport
-	(*ActionMcpTool)(nil),                     // 77: localharness.v1.ActionMcpTool
-	(*SettingsChange)(nil),                    // 78: localharness.v1.SettingsChange
-	(*ErrorInfo)(nil),                         // 79: localharness.v1.ErrorInfo
-	(*UsageMetadata)(nil),                     // 80: localharness.v1.UsageMetadata
-	(*TraceEvent)(nil),                        // 81: localharness.v1.TraceEvent
-	(*ModelCallTrace)(nil),                    // 82: localharness.v1.ModelCallTrace
-	(*ModelResponseTrace)(nil),                // 83: localharness.v1.ModelResponseTrace
-	(*ConversationState)(nil),                 // 84: localharness.v1.ConversationState
-	(*ConversationMessage)(nil),               // 85: localharness.v1.ConversationMessage
-	(*ToolCallRecord)(nil),                    // 86: localharness.v1.ToolCallRecord
-	(*ToolResultRecord)(nil),                  // 87: localharness.v1.ToolResultRecord
-	(*TranscriptLog)(nil),                     // 88: localharness.v1.TranscriptLog
-	(*TranscriptEntry)(nil),                   // 89: localharness.v1.TranscriptEntry
-	(*ActionSchedule)(nil),                    // 90: localharness.v1.ActionSchedule
-	nil,                                       // 91: localharness.v1.UserContext.ExtraEntry
-	nil,                                       // 92: localharness.v1.ActionRunCommand.EnvEntry
-	nil,                                       // 93: localharness.v1.McpServerConfig.EnvEntry
-	nil,                                       // 94: localharness.v1.McpHttpTransport.HeadersEntry
-	nil,                                       // 95: localharness.v1.ErrorInfo.MetadataEntry
+	(*SessionInfo)(nil),                       // 15: localharness.v1.SessionInfo
+	(*SessionList)(nil),                       // 16: localharness.v1.SessionList
+	(*InitResponse)(nil),                      // 17: localharness.v1.InitResponse
+	(*ErrorEvent)(nil),                        // 18: localharness.v1.ErrorEvent
+	(*StepUpdate)(nil),                        // 19: localharness.v1.StepUpdate
+	(*TrajectoryState)(nil),                   // 20: localharness.v1.TrajectoryState
+	(*ActionViewFile)(nil),                    // 21: localharness.v1.ActionViewFile
+	(*ArtifactMetadata)(nil),                  // 22: localharness.v1.ArtifactMetadata
+	(*ActionWriteToFile)(nil),                 // 23: localharness.v1.ActionWriteToFile
+	(*ActionReplaceFileContent)(nil),          // 24: localharness.v1.ActionReplaceFileContent
+	(*EditChunk)(nil),                         // 25: localharness.v1.EditChunk
+	(*ActionListDir)(nil),                     // 26: localharness.v1.ActionListDir
+	(*DirEntry)(nil),                          // 27: localharness.v1.DirEntry
+	(*ActionGrepSearch)(nil),                  // 28: localharness.v1.ActionGrepSearch
+	(*SearchMatch)(nil),                       // 29: localharness.v1.SearchMatch
+	(*ActionFindFile)(nil),                    // 30: localharness.v1.ActionFindFile
+	(*ActionRunCommand)(nil),                  // 31: localharness.v1.ActionRunCommand
+	(*ActionFinish)(nil),                      // 32: localharness.v1.ActionFinish
+	(*ActionHostToolCall)(nil),                // 33: localharness.v1.ActionHostToolCall
+	(*ActionCompaction)(nil),                  // 34: localharness.v1.ActionCompaction
+	(*ActionUserQuestion)(nil),                // 35: localharness.v1.ActionUserQuestion
+	(*UserQuestion)(nil),                      // 36: localharness.v1.UserQuestion
+	(*QuestionAnswer)(nil),                    // 37: localharness.v1.QuestionAnswer
+	(*QuestionResponse)(nil),                  // 38: localharness.v1.QuestionResponse
+	(*ActionManageTask)(nil),                  // 39: localharness.v1.ActionManageTask
+	(*TaskInfo)(nil),                          // 40: localharness.v1.TaskInfo
+	(*ActionInvokeSubagent)(nil),              // 41: localharness.v1.ActionInvokeSubagent
+	(*SubagentInvocation)(nil),                // 42: localharness.v1.SubagentInvocation
+	(*SubagentLaunchResult)(nil),              // 43: localharness.v1.SubagentLaunchResult
+	(*ActionBrowserSubagent)(nil),             // 44: localharness.v1.ActionBrowserSubagent
+	(*ActionDefineSubagent)(nil),              // 45: localharness.v1.ActionDefineSubagent
+	(*ActionManageSubagents)(nil),             // 46: localharness.v1.ActionManageSubagents
+	(*SubagentInfo)(nil),                      // 47: localharness.v1.SubagentInfo
+	(*ActionSendMessage)(nil),                 // 48: localharness.v1.ActionSendMessage
+	(*ActionSearchWeb)(nil),                   // 49: localharness.v1.ActionSearchWeb
+	(*WebSearchResult)(nil),                   // 50: localharness.v1.WebSearchResult
+	(*ActionReadUrlContent)(nil),              // 51: localharness.v1.ActionReadUrlContent
+	(*ActionPermissionRequest)(nil),           // 52: localharness.v1.ActionPermissionRequest
+	(*PermissionResponse)(nil),                // 53: localharness.v1.PermissionResponse
+	(*HarnessConfig)(nil),                     // 54: localharness.v1.HarnessConfig
+	(*UserRuleConfig)(nil),                    // 55: localharness.v1.UserRuleConfig
+	(*PromptModules)(nil),                     // 56: localharness.v1.PromptModules
+	(*SlashCommandDef)(nil),                   // 57: localharness.v1.SlashCommandDef
+	(*SkillDef)(nil),                          // 58: localharness.v1.SkillDef
+	(*PluginDef)(nil),                         // 59: localharness.v1.PluginDef
+	(*SubagentTypeConfig)(nil),                // 60: localharness.v1.SubagentTypeConfig
+	(*StructuredSystemInstructions)(nil),      // 61: localharness.v1.StructuredSystemInstructions
+	(*SystemSection)(nil),                     // 62: localharness.v1.SystemSection
+	(*ToolDef)(nil),                           // 63: localharness.v1.ToolDef
+	(*BuiltinToolsConfig)(nil),                // 64: localharness.v1.BuiltinToolsConfig
+	(*ToolConfigs)(nil),                       // 65: localharness.v1.ToolConfigs
+	(*ViewFileToolConfig)(nil),                // 66: localharness.v1.ViewFileToolConfig
+	(*RunCommandToolConfig)(nil),              // 67: localharness.v1.RunCommandToolConfig
+	(*FileEditToolConfig)(nil),                // 68: localharness.v1.FileEditToolConfig
+	(*FindToolConfig)(nil),                    // 69: localharness.v1.FindToolConfig
+	(*GrepSearchToolConfig)(nil),              // 70: localharness.v1.GrepSearchToolConfig
+	(*ListDirToolConfig)(nil),                 // 71: localharness.v1.ListDirToolConfig
+	(*WriteToFileToolConfig)(nil),             // 72: localharness.v1.WriteToFileToolConfig
+	(*WebSearchToolConfig)(nil),               // 73: localharness.v1.WebSearchToolConfig
+	(*WebFetchToolConfig)(nil),                // 74: localharness.v1.WebFetchToolConfig
+	(*Workspace)(nil),                         // 75: localharness.v1.Workspace
+	(*McpServerConfig)(nil),                   // 76: localharness.v1.McpServerConfig
+	(*McpStdioTransport)(nil),                 // 77: localharness.v1.McpStdioTransport
+	(*McpHttpTransport)(nil),                  // 78: localharness.v1.McpHttpTransport
+	(*ActionMcpTool)(nil),                     // 79: localharness.v1.ActionMcpTool
+	(*SettingsChange)(nil),                    // 80: localharness.v1.SettingsChange
+	(*ErrorInfo)(nil),                         // 81: localharness.v1.ErrorInfo
+	(*UsageMetadata)(nil),                     // 82: localharness.v1.UsageMetadata
+	(*TraceEvent)(nil),                        // 83: localharness.v1.TraceEvent
+	(*ModelCallTrace)(nil),                    // 84: localharness.v1.ModelCallTrace
+	(*ModelResponseTrace)(nil),                // 85: localharness.v1.ModelResponseTrace
+	(*ConversationState)(nil),                 // 86: localharness.v1.ConversationState
+	(*ConversationMessage)(nil),               // 87: localharness.v1.ConversationMessage
+	(*ToolCallRecord)(nil),                    // 88: localharness.v1.ToolCallRecord
+	(*ToolResultRecord)(nil),                  // 89: localharness.v1.ToolResultRecord
+	(*TranscriptLog)(nil),                     // 90: localharness.v1.TranscriptLog
+	(*TranscriptEntry)(nil),                   // 91: localharness.v1.TranscriptEntry
+	(*ActionSchedule)(nil),                    // 92: localharness.v1.ActionSchedule
+	nil,                                       // 93: localharness.v1.UserContext.ExtraEntry
+	nil,                                       // 94: localharness.v1.ActionRunCommand.EnvEntry
+	nil,                                       // 95: localharness.v1.McpServerConfig.EnvEntry
+	nil,                                       // 96: localharness.v1.McpHttpTransport.HeadersEntry
+	nil,                                       // 97: localharness.v1.ErrorInfo.MetadataEntry
 }
 var file_localharness_v1_localharness_proto_depIdxs = []int32{
-	8,  // 0: localharness.v1.ClientMessage.init:type_name -> localharness.v1.InitRequest
-	9,  // 1: localharness.v1.ClientMessage.user_message:type_name -> localharness.v1.UserMessage
-	12, // 2: localharness.v1.ClientMessage.host_tool_result:type_name -> localharness.v1.ToolResult
-	13, // 3: localharness.v1.ClientMessage.cancel:type_name -> localharness.v1.CancelRequest
-	51, // 4: localharness.v1.ClientMessage.permission_response:type_name -> localharness.v1.PermissionResponse
-	36, // 5: localharness.v1.ClientMessage.question_response:type_name -> localharness.v1.QuestionResponse
-	52, // 6: localharness.v1.InitRequest.config:type_name -> localharness.v1.HarnessConfig
-	11, // 7: localharness.v1.UserMessage.context:type_name -> localharness.v1.UserContext
-	78, // 8: localharness.v1.UserMessage.settings_changes:type_name -> localharness.v1.SettingsChange
-	10, // 9: localharness.v1.UserContext.active_file:type_name -> localharness.v1.FileInfo
-	10, // 10: localharness.v1.UserContext.open_files:type_name -> localharness.v1.FileInfo
-	91, // 11: localharness.v1.UserContext.extra:type_name -> localharness.v1.UserContext.ExtraEntry
-	15, // 12: localharness.v1.ServerMessage.init_response:type_name -> localharness.v1.InitResponse
-	17, // 13: localharness.v1.ServerMessage.step_update:type_name -> localharness.v1.StepUpdate
-	18, // 14: localharness.v1.ServerMessage.trajectory_state:type_name -> localharness.v1.TrajectoryState
-	16, // 15: localharness.v1.ServerMessage.error:type_name -> localharness.v1.ErrorEvent
-	0,  // 16: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
-	1,  // 17: localharness.v1.StepUpdate.state:type_name -> localharness.v1.StepUpdate.State
-	2,  // 18: localharness.v1.StepUpdate.target:type_name -> localharness.v1.StepUpdate.Target
-	19, // 19: localharness.v1.StepUpdate.view_file:type_name -> localharness.v1.ActionViewFile
-	21, // 20: localharness.v1.StepUpdate.write_to_file:type_name -> localharness.v1.ActionWriteToFile
-	22, // 21: localharness.v1.StepUpdate.replace_file_content:type_name -> localharness.v1.ActionReplaceFileContent
-	24, // 22: localharness.v1.StepUpdate.list_dir:type_name -> localharness.v1.ActionListDir
-	26, // 23: localharness.v1.StepUpdate.grep_search:type_name -> localharness.v1.ActionGrepSearch
-	28, // 24: localharness.v1.StepUpdate.find_file:type_name -> localharness.v1.ActionFindFile
-	29, // 25: localharness.v1.StepUpdate.run_command:type_name -> localharness.v1.ActionRunCommand
-	30, // 26: localharness.v1.StepUpdate.finish:type_name -> localharness.v1.ActionFinish
-	31, // 27: localharness.v1.StepUpdate.host_tool_call:type_name -> localharness.v1.ActionHostToolCall
-	32, // 28: localharness.v1.StepUpdate.compaction:type_name -> localharness.v1.ActionCompaction
-	33, // 29: localharness.v1.StepUpdate.user_question:type_name -> localharness.v1.ActionUserQuestion
-	37, // 30: localharness.v1.StepUpdate.manage_task:type_name -> localharness.v1.ActionManageTask
-	50, // 31: localharness.v1.StepUpdate.permission_request:type_name -> localharness.v1.ActionPermissionRequest
-	39, // 32: localharness.v1.StepUpdate.invoke_subagent:type_name -> localharness.v1.ActionInvokeSubagent
-	47, // 33: localharness.v1.StepUpdate.search_web:type_name -> localharness.v1.ActionSearchWeb
-	49, // 34: localharness.v1.StepUpdate.read_url_content:type_name -> localharness.v1.ActionReadUrlContent
-	77, // 35: localharness.v1.StepUpdate.mcp_tool:type_name -> localharness.v1.ActionMcpTool
-	90, // 36: localharness.v1.StepUpdate.schedule:type_name -> localharness.v1.ActionSchedule
-	43, // 37: localharness.v1.StepUpdate.define_subagent:type_name -> localharness.v1.ActionDefineSubagent
-	44, // 38: localharness.v1.StepUpdate.manage_subagents:type_name -> localharness.v1.ActionManageSubagents
-	46, // 39: localharness.v1.StepUpdate.send_message_action:type_name -> localharness.v1.ActionSendMessage
-	42, // 40: localharness.v1.StepUpdate.browser_subagent:type_name -> localharness.v1.ActionBrowserSubagent
-	79, // 41: localharness.v1.StepUpdate.error_info:type_name -> localharness.v1.ErrorInfo
-	80, // 42: localharness.v1.StepUpdate.usage:type_name -> localharness.v1.UsageMetadata
-	3,  // 43: localharness.v1.TrajectoryState.state:type_name -> localharness.v1.TrajectoryState.TrajState
-	20, // 44: localharness.v1.ActionWriteToFile.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
-	23, // 45: localharness.v1.ActionReplaceFileContent.chunks:type_name -> localharness.v1.EditChunk
-	20, // 46: localharness.v1.ActionReplaceFileContent.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
-	25, // 47: localharness.v1.ActionListDir.entries:type_name -> localharness.v1.DirEntry
-	27, // 48: localharness.v1.ActionGrepSearch.matches:type_name -> localharness.v1.SearchMatch
-	92, // 49: localharness.v1.ActionRunCommand.env:type_name -> localharness.v1.ActionRunCommand.EnvEntry
-	34, // 50: localharness.v1.ActionUserQuestion.questions:type_name -> localharness.v1.UserQuestion
-	35, // 51: localharness.v1.ActionUserQuestion.answers:type_name -> localharness.v1.QuestionAnswer
-	35, // 52: localharness.v1.QuestionResponse.answers:type_name -> localharness.v1.QuestionAnswer
-	38, // 53: localharness.v1.ActionManageTask.tasks:type_name -> localharness.v1.TaskInfo
-	40, // 54: localharness.v1.ActionInvokeSubagent.subagents:type_name -> localharness.v1.SubagentInvocation
-	41, // 55: localharness.v1.ActionInvokeSubagent.launch_results:type_name -> localharness.v1.SubagentLaunchResult
-	80, // 56: localharness.v1.ActionInvokeSubagent.child_usage:type_name -> localharness.v1.UsageMetadata
-	45, // 57: localharness.v1.ActionManageSubagents.active_subagents:type_name -> localharness.v1.SubagentInfo
-	48, // 58: localharness.v1.ActionSearchWeb.results:type_name -> localharness.v1.WebSearchResult
-	61, // 59: localharness.v1.HarnessConfig.host_tools:type_name -> localharness.v1.ToolDef
-	62, // 60: localharness.v1.HarnessConfig.builtin_tools:type_name -> localharness.v1.BuiltinToolsConfig
-	73, // 61: localharness.v1.HarnessConfig.workspaces:type_name -> localharness.v1.Workspace
-	63, // 62: localharness.v1.HarnessConfig.tool_configs:type_name -> localharness.v1.ToolConfigs
-	74, // 63: localharness.v1.HarnessConfig.mcp_servers:type_name -> localharness.v1.McpServerConfig
-	59, // 64: localharness.v1.HarnessConfig.structured_instructions:type_name -> localharness.v1.StructuredSystemInstructions
-	54, // 65: localharness.v1.HarnessConfig.prompt_modules:type_name -> localharness.v1.PromptModules
-	55, // 66: localharness.v1.HarnessConfig.slash_commands:type_name -> localharness.v1.SlashCommandDef
-	56, // 67: localharness.v1.HarnessConfig.skills:type_name -> localharness.v1.SkillDef
-	57, // 68: localharness.v1.HarnessConfig.plugins:type_name -> localharness.v1.PluginDef
-	58, // 69: localharness.v1.HarnessConfig.subagent_types:type_name -> localharness.v1.SubagentTypeConfig
-	53, // 70: localharness.v1.HarnessConfig.user_rules:type_name -> localharness.v1.UserRuleConfig
-	56, // 71: localharness.v1.PluginDef.skills:type_name -> localharness.v1.SkillDef
-	60, // 72: localharness.v1.StructuredSystemInstructions.sections:type_name -> localharness.v1.SystemSection
-	64, // 73: localharness.v1.ToolConfigs.view_file:type_name -> localharness.v1.ViewFileToolConfig
-	65, // 74: localharness.v1.ToolConfigs.run_command:type_name -> localharness.v1.RunCommandToolConfig
-	66, // 75: localharness.v1.ToolConfigs.edit_file:type_name -> localharness.v1.FileEditToolConfig
-	67, // 76: localharness.v1.ToolConfigs.find_file:type_name -> localharness.v1.FindToolConfig
-	68, // 77: localharness.v1.ToolConfigs.grep_search:type_name -> localharness.v1.GrepSearchToolConfig
-	69, // 78: localharness.v1.ToolConfigs.list_dir:type_name -> localharness.v1.ListDirToolConfig
-	70, // 79: localharness.v1.ToolConfigs.write_file:type_name -> localharness.v1.WriteToFileToolConfig
-	71, // 80: localharness.v1.ToolConfigs.web_search:type_name -> localharness.v1.WebSearchToolConfig
-	72, // 81: localharness.v1.ToolConfigs.web_fetch:type_name -> localharness.v1.WebFetchToolConfig
-	75, // 82: localharness.v1.McpServerConfig.stdio:type_name -> localharness.v1.McpStdioTransport
-	76, // 83: localharness.v1.McpServerConfig.http:type_name -> localharness.v1.McpHttpTransport
-	93, // 84: localharness.v1.McpServerConfig.env:type_name -> localharness.v1.McpServerConfig.EnvEntry
-	94, // 85: localharness.v1.McpHttpTransport.headers:type_name -> localharness.v1.McpHttpTransport.HeadersEntry
-	95, // 86: localharness.v1.ErrorInfo.metadata:type_name -> localharness.v1.ErrorInfo.MetadataEntry
-	82, // 87: localharness.v1.TraceEvent.model_call:type_name -> localharness.v1.ModelCallTrace
-	83, // 88: localharness.v1.TraceEvent.model_response:type_name -> localharness.v1.ModelResponseTrace
-	52, // 89: localharness.v1.ConversationState.config:type_name -> localharness.v1.HarnessConfig
-	85, // 90: localharness.v1.ConversationState.messages:type_name -> localharness.v1.ConversationMessage
-	80, // 91: localharness.v1.ConversationState.total_usage:type_name -> localharness.v1.UsageMetadata
-	4,  // 92: localharness.v1.ConversationState.status:type_name -> localharness.v1.ConversationState.ConversationStatus
-	86, // 93: localharness.v1.ConversationMessage.tool_calls:type_name -> localharness.v1.ToolCallRecord
-	87, // 94: localharness.v1.ConversationMessage.tool_result:type_name -> localharness.v1.ToolResultRecord
-	89, // 95: localharness.v1.TranscriptLog.entries:type_name -> localharness.v1.TranscriptEntry
-	17, // 96: localharness.v1.TranscriptEntry.step_update:type_name -> localharness.v1.StepUpdate
-	18, // 97: localharness.v1.TranscriptEntry.trajectory_state:type_name -> localharness.v1.TrajectoryState
-	98, // [98:98] is the sub-list for method output_type
-	98, // [98:98] is the sub-list for method input_type
-	98, // [98:98] is the sub-list for extension type_name
-	98, // [98:98] is the sub-list for extension extendee
-	0,  // [0:98] is the sub-list for field type_name
+	8,   // 0: localharness.v1.ClientMessage.init:type_name -> localharness.v1.InitRequest
+	9,   // 1: localharness.v1.ClientMessage.user_message:type_name -> localharness.v1.UserMessage
+	12,  // 2: localharness.v1.ClientMessage.host_tool_result:type_name -> localharness.v1.ToolResult
+	13,  // 3: localharness.v1.ClientMessage.cancel:type_name -> localharness.v1.CancelRequest
+	53,  // 4: localharness.v1.ClientMessage.permission_response:type_name -> localharness.v1.PermissionResponse
+	38,  // 5: localharness.v1.ClientMessage.question_response:type_name -> localharness.v1.QuestionResponse
+	54,  // 6: localharness.v1.InitRequest.config:type_name -> localharness.v1.HarnessConfig
+	11,  // 7: localharness.v1.UserMessage.context:type_name -> localharness.v1.UserContext
+	80,  // 8: localharness.v1.UserMessage.settings_changes:type_name -> localharness.v1.SettingsChange
+	10,  // 9: localharness.v1.UserContext.active_file:type_name -> localharness.v1.FileInfo
+	10,  // 10: localharness.v1.UserContext.open_files:type_name -> localharness.v1.FileInfo
+	93,  // 11: localharness.v1.UserContext.extra:type_name -> localharness.v1.UserContext.ExtraEntry
+	17,  // 12: localharness.v1.ServerMessage.init_response:type_name -> localharness.v1.InitResponse
+	19,  // 13: localharness.v1.ServerMessage.step_update:type_name -> localharness.v1.StepUpdate
+	20,  // 14: localharness.v1.ServerMessage.trajectory_state:type_name -> localharness.v1.TrajectoryState
+	18,  // 15: localharness.v1.ServerMessage.error_event:type_name -> localharness.v1.ErrorEvent
+	83,  // 16: localharness.v1.ServerMessage.trace_event:type_name -> localharness.v1.TraceEvent
+	15,  // 17: localharness.v1.SessionList.sessions:type_name -> localharness.v1.SessionInfo
+	0,   // 18: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
+	1,   // 19: localharness.v1.StepUpdate.state:type_name -> localharness.v1.StepUpdate.State
+	2,   // 20: localharness.v1.StepUpdate.target:type_name -> localharness.v1.StepUpdate.Target
+	21,  // 21: localharness.v1.StepUpdate.view_file:type_name -> localharness.v1.ActionViewFile
+	23,  // 22: localharness.v1.StepUpdate.write_to_file:type_name -> localharness.v1.ActionWriteToFile
+	24,  // 23: localharness.v1.StepUpdate.replace_file_content:type_name -> localharness.v1.ActionReplaceFileContent
+	26,  // 24: localharness.v1.StepUpdate.list_dir:type_name -> localharness.v1.ActionListDir
+	28,  // 25: localharness.v1.StepUpdate.grep_search:type_name -> localharness.v1.ActionGrepSearch
+	30,  // 26: localharness.v1.StepUpdate.find_file:type_name -> localharness.v1.ActionFindFile
+	31,  // 27: localharness.v1.StepUpdate.run_command:type_name -> localharness.v1.ActionRunCommand
+	32,  // 28: localharness.v1.StepUpdate.finish:type_name -> localharness.v1.ActionFinish
+	33,  // 29: localharness.v1.StepUpdate.host_tool_call:type_name -> localharness.v1.ActionHostToolCall
+	34,  // 30: localharness.v1.StepUpdate.compaction:type_name -> localharness.v1.ActionCompaction
+	35,  // 31: localharness.v1.StepUpdate.user_question:type_name -> localharness.v1.ActionUserQuestion
+	39,  // 32: localharness.v1.StepUpdate.manage_task:type_name -> localharness.v1.ActionManageTask
+	52,  // 33: localharness.v1.StepUpdate.permission_request:type_name -> localharness.v1.ActionPermissionRequest
+	41,  // 34: localharness.v1.StepUpdate.invoke_subagent:type_name -> localharness.v1.ActionInvokeSubagent
+	49,  // 35: localharness.v1.StepUpdate.search_web:type_name -> localharness.v1.ActionSearchWeb
+	51,  // 36: localharness.v1.StepUpdate.read_url_content:type_name -> localharness.v1.ActionReadUrlContent
+	79,  // 37: localharness.v1.StepUpdate.mcp_tool:type_name -> localharness.v1.ActionMcpTool
+	92,  // 38: localharness.v1.StepUpdate.schedule:type_name -> localharness.v1.ActionSchedule
+	45,  // 39: localharness.v1.StepUpdate.define_subagent:type_name -> localharness.v1.ActionDefineSubagent
+	46,  // 40: localharness.v1.StepUpdate.manage_subagents:type_name -> localharness.v1.ActionManageSubagents
+	48,  // 41: localharness.v1.StepUpdate.send_message_action:type_name -> localharness.v1.ActionSendMessage
+	44,  // 42: localharness.v1.StepUpdate.browser_subagent:type_name -> localharness.v1.ActionBrowserSubagent
+	81,  // 43: localharness.v1.StepUpdate.error_info:type_name -> localharness.v1.ErrorInfo
+	82,  // 44: localharness.v1.StepUpdate.usage:type_name -> localharness.v1.UsageMetadata
+	3,   // 45: localharness.v1.TrajectoryState.state:type_name -> localharness.v1.TrajectoryState.TrajState
+	22,  // 46: localharness.v1.ActionWriteToFile.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
+	25,  // 47: localharness.v1.ActionReplaceFileContent.chunks:type_name -> localharness.v1.EditChunk
+	22,  // 48: localharness.v1.ActionReplaceFileContent.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
+	27,  // 49: localharness.v1.ActionListDir.entries:type_name -> localharness.v1.DirEntry
+	29,  // 50: localharness.v1.ActionGrepSearch.matches:type_name -> localharness.v1.SearchMatch
+	94,  // 51: localharness.v1.ActionRunCommand.env:type_name -> localharness.v1.ActionRunCommand.EnvEntry
+	36,  // 52: localharness.v1.ActionUserQuestion.questions:type_name -> localharness.v1.UserQuestion
+	37,  // 53: localharness.v1.ActionUserQuestion.answers:type_name -> localharness.v1.QuestionAnswer
+	37,  // 54: localharness.v1.QuestionResponse.answers:type_name -> localharness.v1.QuestionAnswer
+	40,  // 55: localharness.v1.ActionManageTask.tasks:type_name -> localharness.v1.TaskInfo
+	42,  // 56: localharness.v1.ActionInvokeSubagent.subagents:type_name -> localharness.v1.SubagentInvocation
+	43,  // 57: localharness.v1.ActionInvokeSubagent.launch_results:type_name -> localharness.v1.SubagentLaunchResult
+	82,  // 58: localharness.v1.ActionInvokeSubagent.child_usage:type_name -> localharness.v1.UsageMetadata
+	47,  // 59: localharness.v1.ActionManageSubagents.active_subagents:type_name -> localharness.v1.SubagentInfo
+	50,  // 60: localharness.v1.ActionSearchWeb.results:type_name -> localharness.v1.WebSearchResult
+	63,  // 61: localharness.v1.HarnessConfig.host_tools:type_name -> localharness.v1.ToolDef
+	64,  // 62: localharness.v1.HarnessConfig.builtin_tools:type_name -> localharness.v1.BuiltinToolsConfig
+	75,  // 63: localharness.v1.HarnessConfig.workspaces:type_name -> localharness.v1.Workspace
+	65,  // 64: localharness.v1.HarnessConfig.tool_configs:type_name -> localharness.v1.ToolConfigs
+	76,  // 65: localharness.v1.HarnessConfig.mcp_servers:type_name -> localharness.v1.McpServerConfig
+	61,  // 66: localharness.v1.HarnessConfig.structured_instructions:type_name -> localharness.v1.StructuredSystemInstructions
+	56,  // 67: localharness.v1.HarnessConfig.prompt_modules:type_name -> localharness.v1.PromptModules
+	57,  // 68: localharness.v1.HarnessConfig.slash_commands:type_name -> localharness.v1.SlashCommandDef
+	58,  // 69: localharness.v1.HarnessConfig.skills:type_name -> localharness.v1.SkillDef
+	59,  // 70: localharness.v1.HarnessConfig.plugins:type_name -> localharness.v1.PluginDef
+	60,  // 71: localharness.v1.HarnessConfig.subagent_types:type_name -> localharness.v1.SubagentTypeConfig
+	55,  // 72: localharness.v1.HarnessConfig.user_rules:type_name -> localharness.v1.UserRuleConfig
+	58,  // 73: localharness.v1.PluginDef.skills:type_name -> localharness.v1.SkillDef
+	62,  // 74: localharness.v1.StructuredSystemInstructions.sections:type_name -> localharness.v1.SystemSection
+	66,  // 75: localharness.v1.ToolConfigs.view_file:type_name -> localharness.v1.ViewFileToolConfig
+	67,  // 76: localharness.v1.ToolConfigs.run_command:type_name -> localharness.v1.RunCommandToolConfig
+	68,  // 77: localharness.v1.ToolConfigs.edit_file:type_name -> localharness.v1.FileEditToolConfig
+	69,  // 78: localharness.v1.ToolConfigs.find_file:type_name -> localharness.v1.FindToolConfig
+	70,  // 79: localharness.v1.ToolConfigs.grep_search:type_name -> localharness.v1.GrepSearchToolConfig
+	71,  // 80: localharness.v1.ToolConfigs.list_dir:type_name -> localharness.v1.ListDirToolConfig
+	72,  // 81: localharness.v1.ToolConfigs.write_file:type_name -> localharness.v1.WriteToFileToolConfig
+	73,  // 82: localharness.v1.ToolConfigs.web_search:type_name -> localharness.v1.WebSearchToolConfig
+	74,  // 83: localharness.v1.ToolConfigs.web_fetch:type_name -> localharness.v1.WebFetchToolConfig
+	77,  // 84: localharness.v1.McpServerConfig.stdio:type_name -> localharness.v1.McpStdioTransport
+	78,  // 85: localharness.v1.McpServerConfig.http:type_name -> localharness.v1.McpHttpTransport
+	95,  // 86: localharness.v1.McpServerConfig.env:type_name -> localharness.v1.McpServerConfig.EnvEntry
+	96,  // 87: localharness.v1.McpHttpTransport.headers:type_name -> localharness.v1.McpHttpTransport.HeadersEntry
+	97,  // 88: localharness.v1.ErrorInfo.metadata:type_name -> localharness.v1.ErrorInfo.MetadataEntry
+	84,  // 89: localharness.v1.TraceEvent.model_call:type_name -> localharness.v1.ModelCallTrace
+	85,  // 90: localharness.v1.TraceEvent.model_response:type_name -> localharness.v1.ModelResponseTrace
+	54,  // 91: localharness.v1.ConversationState.config:type_name -> localharness.v1.HarnessConfig
+	87,  // 92: localharness.v1.ConversationState.messages:type_name -> localharness.v1.ConversationMessage
+	82,  // 93: localharness.v1.ConversationState.total_usage:type_name -> localharness.v1.UsageMetadata
+	4,   // 94: localharness.v1.ConversationState.status:type_name -> localharness.v1.ConversationState.ConversationStatus
+	88,  // 95: localharness.v1.ConversationMessage.tool_calls:type_name -> localharness.v1.ToolCallRecord
+	89,  // 96: localharness.v1.ConversationMessage.tool_result:type_name -> localharness.v1.ToolResultRecord
+	91,  // 97: localharness.v1.TranscriptLog.entries:type_name -> localharness.v1.TranscriptEntry
+	19,  // 98: localharness.v1.TranscriptEntry.step_update:type_name -> localharness.v1.StepUpdate
+	20,  // 99: localharness.v1.TranscriptEntry.trajectory_state:type_name -> localharness.v1.TrajectoryState
+	100, // [100:100] is the sub-list for method output_type
+	100, // [100:100] is the sub-list for method input_type
+	100, // [100:100] is the sub-list for extension type_name
+	100, // [100:100] is the sub-list for extension extendee
+	0,   // [0:100] is the sub-list for field type_name
 }
 
 func init() { file_localharness_v1_localharness_proto_init() }
@@ -8162,9 +8296,10 @@ func file_localharness_v1_localharness_proto_init() {
 		(*ServerMessage_InitResponse)(nil),
 		(*ServerMessage_StepUpdate)(nil),
 		(*ServerMessage_TrajectoryState)(nil),
-		(*ServerMessage_Error)(nil),
+		(*ServerMessage_ErrorEvent)(nil),
+		(*ServerMessage_TraceEvent)(nil),
 	}
-	file_localharness_v1_localharness_proto_msgTypes[12].OneofWrappers = []any{
+	file_localharness_v1_localharness_proto_msgTypes[14].OneofWrappers = []any{
 		(*StepUpdate_ViewFile)(nil),
 		(*StepUpdate_WriteToFile)(nil),
 		(*StepUpdate_ReplaceFileContent)(nil),
@@ -8188,11 +8323,11 @@ func file_localharness_v1_localharness_proto_init() {
 		(*StepUpdate_SendMessageAction)(nil),
 		(*StepUpdate_BrowserSubagent)(nil),
 	}
-	file_localharness_v1_localharness_proto_msgTypes[69].OneofWrappers = []any{
+	file_localharness_v1_localharness_proto_msgTypes[71].OneofWrappers = []any{
 		(*McpServerConfig_Stdio)(nil),
 		(*McpServerConfig_Http)(nil),
 	}
-	file_localharness_v1_localharness_proto_msgTypes[76].OneofWrappers = []any{
+	file_localharness_v1_localharness_proto_msgTypes[78].OneofWrappers = []any{
 		(*TraceEvent_ModelCall)(nil),
 		(*TraceEvent_ModelResponse)(nil),
 	}
@@ -8202,7 +8337,7 @@ func file_localharness_v1_localharness_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_localharness_v1_localharness_proto_rawDesc), len(file_localharness_v1_localharness_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   91,
+			NumMessages:   93,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

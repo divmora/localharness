@@ -4,7 +4,8 @@ use std::io::Write;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 mod localharness;
-use localharness::v1::{InputConfig, OutputConfig};
+use localharness::v1::{InputConfig, OutputConfig, ConversationState, SessionInfo, SessionList};
+use prost::Message;
 
 #[derive(Serialize)]
 pub struct HarnessConnection {
@@ -12,15 +13,8 @@ pub struct HarnessConnection {
     pub api_key: String,
 }
 
-#[derive(Serialize)]
-pub struct SessionInfo {
-    pub id: String,
-    pub name: String,
-    pub updated_at: i64,
-}
-
 #[tauri::command]
-async fn list_sessions() -> Result<Vec<SessionInfo>, String> {
+async fn list_sessions() -> Result<Vec<u8>, String> {
     let mut sessions = Vec::new();
     
     // We expect conversations in ~/.divmora/localharness/conversations/
@@ -39,9 +33,30 @@ async fn list_sessions() -> Result<Vec<SessionInfo>, String> {
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0);
                 
+                let mut name = format!("Session {}", &id[..std::cmp::min(8, id.len())]);
+                
+                if let Ok(buf) = std::fs::read(&path) {
+                    if let Ok(state) = ConversationState::decode(buf.as_slice()) {
+                        if let Some(first_msg) = state.messages.iter().find(|m| m.role == "user" && !m.content.is_empty()) {
+                            let content = first_msg.content.trim();
+                            let first_line = content.lines().next().unwrap_or("").trim();
+                            
+                            let title = if first_line.len() > 40 {
+                                format!("{}...", &first_line[..37])
+                            } else {
+                                first_line.to_string()
+                            };
+                            
+                            if !title.is_empty() {
+                                name = title;
+                            }
+                        }
+                    }
+                }
+                
                 sessions.push(SessionInfo {
                     id: id.clone(),
-                    name: format!("Session {}", &id[..std::cmp::min(8, id.len())]),
+                    name,
                     updated_at,
                 });
             }
@@ -50,7 +65,12 @@ async fn list_sessions() -> Result<Vec<SessionInfo>, String> {
     
     // Sort newest first
     sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(sessions)
+    
+    let session_list = SessionList { sessions };
+    let mut buf = Vec::new();
+    session_list.encode(&mut buf).map_err(|e| e.to_string())?;
+    
+    Ok(buf)
 }
 
 #[tauri::command]

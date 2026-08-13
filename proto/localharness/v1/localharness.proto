@@ -105,9 +105,28 @@ message ServerMessage {
     InitResponse init_response = 1;
     StepUpdate step_update = 2;
     TrajectoryState trajectory_state = 3;
-    ErrorEvent error = 4;
+    ErrorEvent error_event = 4;
+    TraceEvent trace_event = 5;
   }
 }
+
+// -----------------------------------------------------------------------------
+// DESKTOP IPC MESSAGES (Tauri <-> React)
+// -----------------------------------------------------------------------------
+
+message SessionInfo {
+  string id = 1;
+  string name = 2;
+  int64 updated_at = 3;
+}
+
+message SessionList {
+  repeated SessionInfo sessions = 1;
+}
+
+// -----------------------------------------------------------------------------
+// COMPONENT MESSAGES
+// -----------------------------------------------------------------------------
 
 // InitResponse acknowledges the session initialization.
 message InitResponse {
