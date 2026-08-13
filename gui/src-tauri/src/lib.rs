@@ -5,12 +5,49 @@ use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 mod localharness;
 use localharness::v1::{InputConfig, OutputConfig, ConversationState, SessionInfo, SessionList};
-use prost::Message;
 
 #[derive(Serialize)]
 pub struct HarnessConnection {
     pub port: i32,
     pub api_key: String,
+}
+
+#[tauri::command]
+async fn list_files(dir: Option<String>) -> Result<Vec<String>, String> {
+    let target = dir.unwrap_or_else(|| ".".to_string());
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(target) {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if !name.starts_with('.') && name != "node_modules" && name != "target" && name != "bin" {
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    if is_dir {
+                        files.push(format!("{}/", name));
+                    } else {
+                        files.push(name);
+                    }
+                }
+            }
+        }
+    }
+    // Sort directories first, then alphabetically
+    files.sort_by(|a, b| {
+        let a_is_dir = a.ends_with('/');
+        let b_is_dir = b.ends_with('/');
+        if a_is_dir && !b_is_dir {
+            std::cmp::Ordering::Less
+        } else if !a_is_dir && b_is_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
+    });
+    Ok(files)
+}
+
+#[tauri::command]
+async fn read_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -167,7 +204,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![start_harness, list_sessions])
+        .invoke_handler(tauri::generate_handler![start_harness, list_sessions, list_files, read_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

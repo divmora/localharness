@@ -7,9 +7,11 @@ import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 
 interface EditorPanelProps {
   steps?: StepUpdate[];
+  userActiveFile?: string | null;
+  userActiveContent?: string;
 }
 
-export function EditorPanel({ steps = [] }: EditorPanelProps) {
+export function EditorPanel({ steps = [], userActiveFile = null, userActiveContent = "" }: EditorPanelProps) {
   const [activeTab, setActiveTab] = useState<'editor' | 'browser' | 'planner'>('editor');
 
   const { filePath, fileContent, browserUrl, plannerContent, isEmpty } = useMemo(() => {
@@ -54,13 +56,13 @@ export function EditorPanel({ steps = [] }: EditorPanelProps) {
     }
     
     return { 
-      filePath: recentFile, 
-      fileContent: recentFileContent,
+      filePath: userActiveFile || recentFile, 
+      fileContent: userActiveContent || recentFileContent,
       browserUrl: recentBrowserUrl,
       plannerContent: recentPlannerContent,
-      isEmpty: !hasActions && recentFile === 'Welcome.md'
+      isEmpty: !hasActions && !userActiveFile && recentFile === 'Welcome.md'
     };
-  }, [steps]);
+  }, [steps, userActiveFile, userActiveContent]);
 
   // If empty, render the Dashboard
   if (isEmpty) {
