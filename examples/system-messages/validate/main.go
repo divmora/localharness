@@ -50,6 +50,7 @@ func main() {
 		".",
 		nil, // no env
 		500, // wait 500ms for initial output
+		nil, // no step update needed for this test
 	)
 	if err != nil {
 		log.Fatalf("   ✗ Failed to start task: %v", err)
