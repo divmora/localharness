@@ -21,8 +21,8 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
     onConnect({
       kind: "ssh",
       host,
-      user,
-      port: port ? parseInt(port, 10) : 22,
+      user: user || undefined,
+      port: port ? parseInt(port, 10) : undefined,
       key_path: keyPath || undefined
     });
     onClose();
@@ -47,7 +47,7 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
             <input 
               type="text" 
               required
-              placeholder="e.g. 192.168.1.100"
+              placeholder="e.g. 192.168.1.100 or 'myserver' from ~/.ssh/config"
               className="w-full rounded border border-[#222] bg-[#111] p-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               value={host}
               onChange={(e) => setHost(e.target.value)}
@@ -56,10 +56,9 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
 
           <div className="flex gap-4">
             <div className="flex-1">
-              <label className="mb-1 block text-sm text-neutral-400">Username</label>
+              <label className="mb-1 block text-sm text-neutral-400">Username (Optional)</label>
               <input 
                 type="text" 
-                required
                 placeholder="e.g. root"
                 className="w-full rounded border border-[#222] bg-[#111] p-2 text-sm text-white focus:border-blue-500 focus:outline-none"
                 value={user}

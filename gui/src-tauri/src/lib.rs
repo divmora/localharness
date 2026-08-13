@@ -159,26 +159,45 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
 
     let (mut rx, mut child) = if target.kind == "ssh" {
         let host = target.host.as_ref().ok_or("SSH host required")?;
-        let user = target.user.as_ref().ok_or("SSH user required")?;
-        let ssh_port = target.port.unwrap_or(22);
         
-        let mut args = vec![
-            "-T".to_string(),
-            "-p".to_string(), ssh_port.to_string(),
-        ];
-        if let Some(key) = target.key_path.as_ref() {
-            args.push("-i".to_string());
-            args.push(key.clone());
+        let mut args = vec!["-T".to_string()];
+        
+        if let Some(ssh_port) = target.port {
+            args.push("-p".to_string());
+            args.push(ssh_port.to_string());
         }
-        args.push(format!("{}@{}", user, host));
         
+        if let Some(key) = target.key_path.as_ref() {
+            if !key.is_empty() {
+                args.push("-i".to_string());
+                args.push(key.clone());
+            }
+        }
+        
+        if let Some(user) = target.user.as_ref() {
+            if !user.is_empty() {
+                args.push(format!("{}@{}", user, host));
+            } else {
+                args.push(host.clone());
+            }
+        } else {
+            args.push(host.clone());
+        }
+        
+        // Read version from manifest
+        let manifest_str = include_str!("../../../.release-please-manifest.json");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_str)
+            .map_err(|e| format!("Failed to parse manifest: {}", e))?;
+        let version = manifest["."].as_str().ok_or("No version in manifest")?;
+        let tag_name = format!("v{}", version);
+
         // Auto-deploy script over SSH
         let deploy_script = format!(
-            "mkdir -p ~/.divmora/localharness/bin/latest && \
-             if [ ! -f ~/.divmora/localharness/bin/latest/localharness ]; then \
-               curl -sL https://github.com/divmora/localharness/releases/latest/download/localharness-linux-amd64.tar.gz | tar xz -C ~/.divmora/localharness/bin/latest; \
+            "mkdir -p ~/.divmora/localharness/bin/{tag_name} && \
+             if [ ! -f ~/.divmora/localharness/bin/{tag_name}/localharness ]; then \
+               curl -sL https://github.com/divmora/localharness/releases/download/{tag_name}/localharness-linux-amd64.tar.gz | tar xz -C ~/.divmora/localharness/bin/{tag_name}; \
              fi && \
-             ~/.divmora/localharness/bin/latest/localharness"
+             ~/.divmora/localharness/bin/{tag_name}/localharness"
         );
         args.push(deploy_script);
 
@@ -269,19 +288,33 @@ async fn setup_ssh_tunnel(app: &tauri::AppHandle, target: &ConnectionTarget, rem
     drop(listener);
 
     let host = target.host.as_ref().unwrap();
-    let user = target.user.as_ref().unwrap();
-    let ssh_port = target.port.unwrap_or(22);
-
+    
     let mut args = vec![
         "-N".to_string(),
-        "-p".to_string(), ssh_port.to_string(),
         "-L".to_string(), format!("{}:127.0.0.1:{}", local_port, remote_port),
     ];
-    if let Some(ref key) = target.key_path {
-        args.push("-i".to_string());
-        args.push(key.clone());
+    
+    if let Some(ssh_port) = target.port {
+        args.push("-p".to_string());
+        args.push(ssh_port.to_string());
     }
-    args.push(format!("{}@{}", user, host));
+    
+    if let Some(key) = target.key_path.as_ref() {
+        if !key.is_empty() {
+            args.push("-i".to_string());
+            args.push(key.clone());
+        }
+    }
+    
+    if let Some(user) = target.user.as_ref() {
+        if !user.is_empty() {
+            args.push(format!("{}@{}", user, host));
+        } else {
+            args.push(host.clone());
+        }
+    } else {
+        args.push(host.clone());
+    }
 
     app.shell()
         .command("ssh")

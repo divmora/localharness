@@ -25,23 +25,25 @@ pub async fn resolve_localharness() -> Result<PathBuf, String> {
         }
     }
 
-    // 3. Auto-download from GitHub latest release
+    // 3. Auto-download from GitHub using version from manifest
+    let manifest_str = include_str!("../../../.release-please-manifest.json");
+    let manifest: Value = serde_json::from_str(manifest_str).map_err(|e| e.to_string())?;
+    let version = manifest["."].as_str().ok_or("No version in manifest")?;
+    let tag_name = format!("v{}", version);
+
     let client = reqwest::Client::builder()
         .user_agent("localharness-tauri")
         .build()
         .map_err(|e| e.to_string())?;
 
-    let release_url = "https://api.github.com/repos/divmora/localharness/releases/latest";
-    let resp: Value = client.get(release_url)
+    let release_url = format!("https://api.github.com/repos/divmora/localharness/releases/tags/{}", tag_name);
+    let resp: Value = client.get(&release_url)
         .send()
         .await
         .map_err(|e| e.to_string())?
         .json()
         .await
         .map_err(|e| e.to_string())?;
-
-    let tag_name = resp["tag_name"].as_str().ok_or("No tag_name in release")?;
-    let version = tag_name.trim_start_matches('v');
 
     let home_dir = dirs::home_dir().ok_or("Could not find home directory")?;
     let cache_dir = home_dir.join(".divmora/localharness/bin").join(tag_name);
