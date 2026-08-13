@@ -568,6 +568,21 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
                             local_port = setup_ssh_tunnel(&app, &target, output_cfg.port).await?;
                         }
 
+                        // Store child to prevent it from being dropped and killed
+                        use tauri::Manager;
+                        if let Some(state) = app.try_state::<AppState>() {
+                            state.children.lock().unwrap().push(child);
+                        }
+
+                        // Keep processing stderr logs in background so sidecar's pipes aren't closed
+                        tauri::async_runtime::spawn(async move {
+                            while let Some(event) = rx.recv().await {
+                                if let CommandEvent::Stderr(line) = event {
+                                    eprintln!("SIDECAR STDERR: {}", String::from_utf8_lossy(&line));
+                                }
+                            }
+                        });
+
                         return Ok(HarnessConnection {
                             port: local_port,
                             api_key: output_cfg.api_key,
@@ -636,10 +651,19 @@ async fn setup_ssh_tunnel(app: &tauri::AppHandle, target: &ConnectionTarget, rem
 
     Ok(local_port)
 }
+use std::sync::Mutex;
+use tauri_plugin_shell::process::Child;
+
+struct AppState {
+    children: Mutex<Vec<Child>>,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState {
+            children: Mutex::new(Vec::new()),
+        })
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
