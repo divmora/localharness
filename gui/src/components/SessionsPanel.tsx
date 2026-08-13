@@ -8,7 +8,12 @@ interface SessionInfo {
   updated_at: number;
 }
 
-export function SessionsPanel() {
+interface SessionsPanelProps {
+  activeSessionId: string | null;
+  onSelectSession: (id: string) => void;
+}
+
+export function SessionsPanel({ activeSessionId, onSelectSession }: SessionsPanelProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -68,7 +73,12 @@ export function SessionsPanel() {
             {sessions.map((session) => (
               <div 
                 key={session.id}
-                className="p-3 rounded-lg hover:bg-[#181825] cursor-pointer border border-transparent hover:border-[#313244] transition-all group"
+                onClick={() => onSelectSession(session.id)}
+                className={`p-3 rounded-lg cursor-pointer transition-all group ${
+                  activeSessionId === session.id 
+                    ? 'bg-[#313244]/40 border border-[#45475a]' 
+                    : 'hover:bg-[#181825] border border-transparent hover:border-[#313244]'
+                }`}
               >
                 <div className="text-[10px] uppercase font-bold text-[#f38ba8] mb-1">LOCAL-HARNESS</div>
                 <div className="text-[13px] font-medium text-[#cdd6f4] truncate mb-1">

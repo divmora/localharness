@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { Sidebar } from './components/Sidebar';
 import { SessionsPanel } from './components/SessionsPanel';
@@ -8,7 +9,8 @@ import './App.css';
 import { useHarness } from './hooks/useHarness';
 
 function App() {
-  const { connected, steps, sendPrompt } = useHarness();
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const { connected, steps, sendPrompt } = useHarness(activeSessionId);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
@@ -17,7 +19,7 @@ function App() {
         
         {/* Left Pane: Sessions/Spaces */}
         <Panel defaultSize={20} minSize={15}>
-          <SessionsPanel />
+          <SessionsPanel activeSessionId={activeSessionId} onSelectSession={setActiveSessionId} />
         </Panel>
         
         <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />

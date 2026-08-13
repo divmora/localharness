@@ -7,6 +7,8 @@ import {
     ServerMessageSchema,
     UserMessageSchema,
     StepUpdate,
+    InitRequestSchema,
+    HarnessConfigSchema
 } from '../gen/localharness/v1/localharness_pb';
 
 interface HarnessConnection {
@@ -14,7 +16,7 @@ interface HarnessConnection {
     api_key: string;
 }
 
-export function useHarness() {
+export function useHarness(activeSessionId: string | null) {
     const [connected, setConnected] = useState(false);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [socket, setSocket] = useState<WebSocket | null>(null);
@@ -23,6 +25,9 @@ export function useHarness() {
         let ws: WebSocket | null = null;
         
         async function initHarness() {
+            // Reset steps when switching sessions
+            setSteps([]);
+            
             try {
                 console.log("Requesting sidecar from Rust...");
                 const conn = await invoke<HarnessConnection>('start_harness');
@@ -34,7 +39,34 @@ export function useHarness() {
                     }
                 });
                 
-                console.log("WebSocket connected.");
+                // Send InitRequest
+                const initReq = create(InitRequestSchema, {
+                    config: create(HarnessConfigSchema, {
+                        conversationId: activeSessionId || "",
+                        builtinTools: {
+                            viewFile: true,
+                            createFile: true,
+                            editFile: true,
+                            listDir: true,
+                            searchDir: true,
+                            findFile: true,
+                            runCommand: true,
+                            finish: true,
+                            schedule: true,
+                        }
+                    })
+                });
+                
+                const initClientMsg = create(ClientMessageSchema, {
+                    payload: {
+                        case: "init",
+                        value: initReq
+                    }
+                });
+                
+                await ws.send(Array.from(toBinary(ClientMessageSchema, initClientMsg)));
+                
+                console.log(`WebSocket connected for session: ${activeSessionId || 'new'}`);
                 setConnected(true);
                 
                 ws.addListener((msg) => {
@@ -60,8 +92,9 @@ export function useHarness() {
         
         return () => {
             if (ws) ws.disconnect();
+            setConnected(false);
         };
-    }, []);
+    }, [activeSessionId]);
 
     const sendPrompt = useCallback(async (text: string) => {
         if (!socket) return;
