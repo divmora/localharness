@@ -28,7 +28,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
   return (
     <div className="flex-1 bg-[#000000] flex flex-col items-center overflow-y-auto">
       <div className="w-full max-w-3xl flex flex-col items-center mt-32 px-6 pb-20">
-        
+
         {/* Logo / Hero */}
         <div className="mb-12 flex items-center justify-center">
           {/* A simple placeholder logo resembling three hexagons */}
@@ -44,7 +44,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
           <div className="px-4 py-3 border-b border-[#262626] flex items-center text-xs text-[#9CA3AF] font-medium">
             Tip: Try typing "megaplan" to plan deeply before building
           </div>
-          
+
           <div className="p-4 flex flex-col">
             <textarea
               value={prompt}
@@ -54,7 +54,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
               className="w-full bg-transparent text-[#F9FAFB] placeholder-[#6B7280] resize-none outline-none min-h-[60px]"
               autoFocus
             />
-            
+
             <div className="flex items-center justify-between mt-2">
               <div className="flex items-center gap-2">
                 <button className="p-1.5 rounded-md hover:bg-[#262626] text-[#9CA3AF] transition-colors">
@@ -68,26 +68,25 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
 
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-[#262626] text-xs font-semibold text-[#9CA3AF] cursor-pointer transition-colors">
-                  <Terminal size={14} /> Devin Local
+                  <Terminal size={14} /> Local
                 </div>
                 <button className="p-1.5 rounded-md hover:bg-[#262626] text-[#9CA3AF] transition-colors">
                   <Mic size={16} />
                 </button>
-                <button 
+                <button
                   onClick={handleSubmit}
                   disabled={!prompt.trim()}
-                  className={`p-1.5 rounded-full flex items-center justify-center transition-colors ${
-                    prompt.trim() 
-                      ? 'bg-[#F9FAFB] text-[#000000] hover:bg-[#E5E7EB]' 
+                  className={`p-1.5 rounded-full flex items-center justify-center transition-colors ${prompt.trim()
+                      ? 'bg-[#F9FAFB] text-[#000000] hover:bg-[#E5E7EB]'
                       : 'bg-[#262626] text-[#6B7280] cursor-not-allowed'
-                  }`}
+                    }`}
                 >
                   <ArrowUp size={16} strokeWidth={3} />
                 </button>
               </div>
             </div>
           </div>
-          
+
           <div className="bg-[#0A0A0A] border-t border-[#262626] px-4 py-3 flex items-center justify-between text-xs text-[#9CA3AF]">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
@@ -125,27 +124,26 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
             <span className="font-semibold">Recent sessions</span>
             <span className="text-[#3B82F6] cursor-pointer hover:underline">View all</span>
           </div>
-          
+
           <div className="flex flex-col border border-[#262626] rounded-lg bg-[#0A0A0A] overflow-hidden">
             {sessions.slice(0, 5).map((session, i) => (
-              <div 
+              <div
                 key={session.id}
                 onClick={() => onSelectSession(session.id)}
-                className={`flex items-center justify-between p-3 cursor-pointer hover:bg-[#121212] transition-colors ${
-                  i < sessions.length - 1 ? 'border-b border-[#262626]' : ''
-                }`}
+                className={`flex items-center justify-between p-3 cursor-pointer hover:bg-[#121212] transition-colors ${i < sessions.length - 1 ? 'border-b border-[#262626]' : ''
+                  }`}
               >
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-semibold text-[#F9FAFB]">{session.name || "Untitled session"}</span>
                   <span className="text-[10px] text-[#6B7280]">
                     • {(() => {
-                        const diff = Date.now() - (Number(session.updatedAt) * 1000);
-                        const minutes = Math.floor(diff / 60000);
-                        if (minutes < 60) return `${minutes}m ago`;
-                        const hours = Math.floor(minutes / 60);
-                        if (hours < 24) return `${hours}h ago`;
-                        return `${Math.floor(hours / 24)}d ago`;
-                      })()}
+                      const diff = Date.now() - (Number(session.updatedAt) * 1000);
+                      const minutes = Math.floor(diff / 60000);
+                      if (minutes < 60) return `${minutes}m ago`;
+                      const hours = Math.floor(minutes / 60);
+                      if (hours < 24) return `${hours}h ago`;
+                      return `${Math.floor(hours / 24)}d ago`;
+                    })()}
                   </span>
                 </div>
               </div>

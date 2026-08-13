@@ -193,11 +193,22 @@ async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) 
 
         // Auto-deploy script over SSH
         let deploy_script = format!(
-            "mkdir -p ~/.divmora/localharness/bin/{tag_name} && \
+            "OS=$(uname -s | tr '[:upper:]' '[:lower:]') && \
+             ARCH=$(uname -m) && \
+             if [ \"$OS\" = \"darwin\" ]; then \
+                 if [ \"$ARCH\" = \"x86_64\" ]; then PLAT=\"darwin-amd64\"; \
+                 else PLAT=\"darwin-arm64\"; fi; \
+             elif [ \"$OS\" = \"linux\" ]; then \
+                 if [ \"$ARCH\" = \"x86_64\" ]; then PLAT=\"linux-amd64\"; \
+                 else PLAT=\"linux-arm64\"; fi; \
+             else echo \"Unsupported OS: $OS\"; exit 1; fi && \
+             mkdir -p ~/.divmora/localharness/bin/{tag_name} && \
              if [ ! -f ~/.divmora/localharness/bin/{tag_name}/localharness ]; then \
-               curl -sL https://github.com/divmora/localharness/releases/download/{tag_name}/localharness-linux-amd64.tar.gz | tar xz -C ~/.divmora/localharness/bin/{tag_name}; \
+               curl -sL https://github.com/divmora/localharness/releases/download/{tag_name}/localharness-{version}-$PLAT.tar.gz | tar xz -C ~/.divmora/localharness/bin/{tag_name}; \
              fi && \
-             ~/.divmora/localharness/bin/{tag_name}/localharness"
+             ~/.divmora/localharness/bin/{tag_name}/localharness",
+            tag_name = tag_name,
+            version = version
         );
         args.push(deploy_script);
 
