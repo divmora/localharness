@@ -13,12 +13,20 @@ import {
     PermissionResponseSchema
 } from '../gen/localharness/v1/localharness_pb';
 
+export interface ConnectionTarget {
+    kind: "local" | "ssh";
+    host?: string;
+    user?: string;
+    port?: number;
+    key_path?: string;
+}
+
 interface HarnessConnection {
     port: number;
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null) {
+export function useHarness(activeSessionId: string | null, connectionTarget: ConnectionTarget | null = null) {
     const [connected, setConnected] = useState(false);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [socket, setSocket] = useState<WebSocket | null>(null);
@@ -31,8 +39,8 @@ export function useHarness(activeSessionId: string | null) {
             setSteps([]);
             
             try {
-                console.log("Requesting sidecar from Rust...");
-                const conn = await invoke<HarnessConnection>('start_harness');
+                console.log("Requesting sidecar from Rust with target:", connectionTarget);
+                const conn = await invoke<HarnessConnection>('start_harness', { target: connectionTarget });
                 console.log("Got sidecar port:", conn.port);
                 
                 ws = await WebSocket.connect(`ws://127.0.0.1:${conn.port}/`, {

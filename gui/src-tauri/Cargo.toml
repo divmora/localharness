@@ -28,4 +28,8 @@ prost = "0.14.4"
 bytes = "1.12.1"
 tauri-plugin-websocket = "2"
 dirs = "6.0.0"
+reqwest = { version = "0.13.4", features = ["json"] }
+tar = "0.4.46"
+flate2 = "1.1.9"
+tokio = { version = "1.53.1", features = ["full"] }
 

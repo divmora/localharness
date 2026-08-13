@@ -6,9 +6,10 @@ interface CenteredEmptyStateProps {
   onSelectSession: (id: string) => void;
   sessions: ProtoSessionInfo[];
   onSubmitPrompt: (prompt: string) => void;
+  onOpenSSHModal: () => void;
 }
 
-export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt }: CenteredEmptyStateProps) {
+export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal }: CenteredEmptyStateProps) {
   const [prompt, setPrompt] = useState("");
 
   const handleSubmit = () => {
@@ -112,7 +113,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt }
             <Cloud size={16} className="text-[#9CA3AF]" />
             <span className="text-xs font-semibold text-[#F9FAFB]">Clone repository</span>
           </div>
-          <div className="bg-[#0A0A0A] hover:bg-[#121212] border border-[#262626] hover:border-[#333333] rounded-lg p-4 cursor-pointer transition-all flex flex-col gap-2">
+          <div onClick={onOpenSSHModal} className="bg-[#0A0A0A] hover:bg-[#121212] border border-[#262626] hover:border-[#333333] rounded-lg p-4 cursor-pointer transition-all flex flex-col gap-2">
             <TerminalSquare size={16} className="text-[#9CA3AF]" />
             <span className="text-xs font-semibold text-[#F9FAFB]">Connect via SSH</span>
           </div>

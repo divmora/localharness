@@ -4,6 +4,7 @@ use std::io::Write;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 mod localharness;
+mod resolver;
 use localharness::v1::{InputConfig, OutputConfig, ConversationState, SessionInfo, SessionList};
 
 #[derive(Serialize)]
@@ -137,15 +138,62 @@ async fn list_sessions() -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+#[derive(serde::Deserialize, Clone)]
+pub struct ConnectionTarget {
+    pub kind: String, // "local" or "ssh"
+    pub host: Option<String>,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub key_path: Option<String>,
+}
+
 #[tauri::command]
-async fn start_harness(app: tauri::AppHandle) -> Result<HarnessConnection, String> {
-    // 1. Spawn sidecar
-    let (mut rx, mut child) = app
-        .shell()
-        .sidecar("localharness")
-        .map_err(|e| format!("Failed to create sidecar command: {}", e))?
-        .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+async fn start_harness(app: tauri::AppHandle, target: Option<ConnectionTarget>) -> Result<HarnessConnection, String> {
+    let target = target.unwrap_or(ConnectionTarget {
+        kind: "local".to_string(),
+        host: None,
+        user: None,
+        port: None,
+        key_path: None,
+    });
+
+    let (mut rx, mut child) = if target.kind == "ssh" {
+        let host = target.host.as_ref().ok_or("SSH host required")?;
+        let user = target.user.as_ref().ok_or("SSH user required")?;
+        let ssh_port = target.port.unwrap_or(22);
+        
+        let mut args = vec![
+            "-T".to_string(),
+            "-p".to_string(), ssh_port.to_string(),
+        ];
+        if let Some(key) = target.key_path.as_ref() {
+            args.push("-i".to_string());
+            args.push(key.clone());
+        }
+        args.push(format!("{}@{}", user, host));
+        
+        // Auto-deploy script over SSH
+        let deploy_script = format!(
+            "mkdir -p ~/.divmora/localharness/bin/latest && \
+             if [ ! -f ~/.divmora/localharness/bin/latest/localharness ]; then \
+               curl -sL https://github.com/divmora/localharness/releases/latest/download/localharness-linux-amd64.tar.gz | tar xz -C ~/.divmora/localharness/bin/latest; \
+             fi && \
+             ~/.divmora/localharness/bin/latest/localharness"
+        );
+        args.push(deploy_script);
+
+        app.shell()
+            .command("ssh")
+            .args(args)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn ssh: {}", e))?
+    } else {
+        let binary_path = resolver::resolve_localharness().await?;
+        app.shell()
+            .command(binary_path.to_string_lossy().to_string())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn localharness: {}", e))?
+    };
 
     // 2. Prepare InputConfig
     let input_cfg = InputConfig {
@@ -186,8 +234,13 @@ async fn start_harness(app: tauri::AppHandle) -> Result<HarnessConnection, Strin
                         let output_cfg = OutputConfig::decode(payload_bytes)
                             .map_err(|e| format!("Failed to decode OutputConfig: {}", e))?;
 
+                        let mut local_port = output_cfg.port;
+                        if target.kind == "ssh" {
+                            local_port = setup_ssh_tunnel(&app, &target, output_cfg.port).await?;
+                        }
+
                         return Ok(HarnessConnection {
-                            port: output_cfg.port,
+                            port: local_port,
                             api_key: output_cfg.api_key,
                         });
                     }
@@ -208,6 +261,37 @@ async fn start_harness(app: tauri::AppHandle) -> Result<HarnessConnection, Strin
     }
 
     Err("Sidecar closed without returning OutputConfig".to_string())
+}
+
+async fn setup_ssh_tunnel(app: &tauri::AppHandle, target: &ConnectionTarget, remote_port: i32) -> Result<i32, String> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Bind failed: {}", e))?;
+    let local_port = listener.local_addr().unwrap().port() as i32;
+    drop(listener);
+
+    let host = target.host.as_ref().unwrap();
+    let user = target.user.as_ref().unwrap();
+    let ssh_port = target.port.unwrap_or(22);
+
+    let mut args = vec![
+        "-N".to_string(),
+        "-p".to_string(), ssh_port.to_string(),
+        "-L".to_string(), format!("{}:127.0.0.1:{}", local_port, remote_port),
+    ];
+    if let Some(ref key) = target.key_path {
+        args.push("-i".to_string());
+        args.push(key.clone());
+    }
+    args.push(format!("{}@{}", user, host));
+
+    app.shell()
+        .command("ssh")
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ssh tunnel: {}", e))?;
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    Ok(local_port)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

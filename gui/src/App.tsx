@@ -5,17 +5,21 @@ import { CenteredEmptyState } from './components/CenteredEmptyState';
 import { ChatPanel } from './components/ChatPanel';
 import { WorkspacePanel } from './components/WorkspacePanel';
 import { CustomizationsModal } from './components/CustomizationsModal';
+import { ConnectSSHModal } from './components/ConnectSSHModal';
 import './App.css';
-import { useHarness } from './hooks/useHarness';
+import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
 import { fromBinary } from '@bufbuild/protobuf';
 import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
 
 function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [connectionTarget, setConnectionTarget] = useState<ConnectionTarget | null>(null);
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [customizationsOpen, setCustomizationsOpen] = useState(false);
-  const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId);
+  const [sshModalOpen, setSshModalOpen] = useState(false);
+  
+  const { connected, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget);
 
   useEffect(() => {
     async function loadSessions() {
@@ -50,11 +54,22 @@ function App() {
     }, 500);
   };
 
+  const handleConnectSSH = (target: ConnectionTarget) => {
+    setConnectionTarget(target);
+    const newId = crypto.randomUUID();
+    setActiveSessionId(newId);
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#000000] text-white">
       <CustomizationsModal 
         isOpen={customizationsOpen} 
         onClose={() => setCustomizationsOpen(false)} 
+      />
+      <ConnectSSHModal
+        isOpen={sshModalOpen}
+        onClose={() => setSshModalOpen(false)}
+        onConnect={handleConnectSSH}
       />
 
       <UnifiedSidebar 
@@ -71,6 +86,7 @@ function App() {
           onSelectSession={setActiveSessionId}
           sessions={sessions}
           onSubmitPrompt={handleStartPromptSession}
+          onOpenSSHModal={() => setSshModalOpen(true)}
         />
       ) : (
         <PanelGroup orientation="horizontal" className="flex-1 border-l border-[#0A0A0A]">
