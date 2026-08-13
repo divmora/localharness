@@ -71,16 +71,12 @@ function App() {
           )}
         </Panel>
 
-        {activeSessionId && (
-          <>
-            <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
+        <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
 
-            {/* Right Pane: Workspace */}
-            <Panel defaultSize={25} minSize={20}>
-              <WorkspacePanel steps={steps} />
-            </Panel>
-          </>
-        )}
+        {/* Right Pane: Workspace */}
+        <Panel defaultSize={25} minSize={20}>
+          <WorkspacePanel steps={steps} />
+        </Panel>
 
       </PanelGroup>
     </div>
