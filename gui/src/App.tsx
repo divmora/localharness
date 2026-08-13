@@ -1,5 +1,6 @@
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
 import { Sidebar } from './components/Sidebar';
+import { SessionsPanel } from './components/SessionsPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { EditorPanel } from './components/EditorPanel';
 import { TerminalPanel } from './components/TerminalPanel';
@@ -13,25 +14,36 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-[#11111b] text-white">
       <Sidebar />
       <PanelGroup orientation="horizontal" className="flex-1">
-        <Panel defaultSize={25} minSize={20}>
-          <ChatPanel connected={connected} steps={steps} onSend={sendPrompt} />
+        
+        {/* Left Pane: Sessions/Spaces */}
+        <Panel defaultSize={20} minSize={15}>
+          <SessionsPanel />
         </Panel>
         
-        <PanelResizeHandle className="w-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
+        <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
         
-        <Panel defaultSize={75} minSize={30}>
+        {/* Center Pane: Editor/Dashboard + Terminal */}
+        <Panel defaultSize={55} minSize={30}>
           <PanelGroup orientation="vertical">
             <Panel defaultSize={70}>
               <EditorPanel steps={steps} />
             </Panel>
             
-            <PanelResizeHandle className="h-1 bg-[#313244] hover:bg-blue-500 transition-colors" />
+            <PanelResizeHandle className="h-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
             
             <Panel defaultSize={30} minSize={10}>
               <TerminalPanel steps={steps} />
             </Panel>
           </PanelGroup>
         </Panel>
+
+        <PanelResizeHandle className="w-1 bg-[#181825] hover:bg-[#89b4fa]/50 transition-colors" />
+
+        {/* Right Pane: Chat/Agent */}
+        <Panel defaultSize={25} minSize={20}>
+          <ChatPanel connected={connected} steps={steps} onSend={sendPrompt} />
+        </Panel>
+
       </PanelGroup>
     </div>
   );

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import Editor from '@monaco-editor/react';
-import { Code2, Globe, FileText, ArrowLeft, ArrowRight, RotateCw, Home } from 'lucide-react';
+import { Code2, Globe, FileText, ArrowLeft, ArrowRight, RotateCw, Home, FolderOpen, GitBranch, Terminal as TerminalIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
@@ -12,16 +12,18 @@ interface EditorPanelProps {
 export function EditorPanel({ steps = [] }: EditorPanelProps) {
   const [activeTab, setActiveTab] = useState<'editor' | 'browser' | 'planner'>('editor');
 
-  const { filePath, fileContent, browserUrl, plannerContent } = useMemo(() => {
+  const { filePath, fileContent, browserUrl, plannerContent, isEmpty } = useMemo(() => {
     let recentFile = 'Welcome.md';
-    let recentFileContent = '# Welcome to Divmora\n\nWaiting for agent actions...';
+    let recentFileContent = '';
     let recentBrowserUrl = 'https://google.com';
     let recentPlannerContent = '# No plans yet\n\nWhen the agent creates a task list or implementation plan, it will appear here.';
+    let hasActions = false;
 
     // Traverse steps backwards to find the most recent actions for each tab type
     for (let i = steps.length - 1; i >= 0; i--) {
       const action = steps[i].action;
       if (!action.case) continue;
+      hasActions = true;
 
       // 1. Check for File edits (Editor Tab)
       if (action.case === 'writeToFile' || action.case === 'replaceFileContent' || action.case === 'viewFile') {
@@ -34,9 +36,7 @@ export function EditorPanel({ steps = [] }: EditorPanelProps) {
         }
 
         // 2. Check for Artifacts / Plans (Planner Tab)
-        // If it's a known plan file or has artifact metadata, we put it in the planner.
         if (path.endsWith('task.md') || path.endsWith('implementation_plan.md') || path.endsWith('walkthrough.md')) {
-           // Only grab the first one we see (most recent)
            if (recentPlannerContent.startsWith('# No plans yet')) {
              recentPlannerContent = action.case === 'replaceFileContent'
                ? "> *File modified, waiting for full sync...*"
@@ -57,9 +57,64 @@ export function EditorPanel({ steps = [] }: EditorPanelProps) {
       filePath: recentFile, 
       fileContent: recentFileContent,
       browserUrl: recentBrowserUrl,
-      plannerContent: recentPlannerContent
+      plannerContent: recentPlannerContent,
+      isEmpty: !hasActions && recentFile === 'Welcome.md'
     };
   }, [steps]);
+
+  // If empty, render the Dashboard
+  if (isEmpty) {
+    return (
+      <div className="h-full w-full bg-[#181825] flex flex-col items-center justify-center p-8 text-[#cdd6f4]">
+        <div className="w-full max-w-3xl flex flex-col items-center gap-12">
+          
+          <div className="flex justify-center opacity-80">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="text-[#a6adc8]">
+              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+              <path d="M5 3v4M3 5h4"/>
+            </svg>
+          </div>
+
+          <div className="w-full max-w-2xl bg-[#1e1e2e] rounded-xl border border-[#313244] shadow-lg p-2 flex flex-col">
+            <div className="text-xs text-[#7f849c] px-4 pt-2 pb-1">Tip: Type a command to start a session</div>
+            <div className="flex items-center gap-2 px-4 py-3">
+              <span className="text-[#89b4fa] font-bold">+</span>
+              <span className="text-sm font-mono text-[#a6adc8]">&lt;/&gt; Code</span>
+              <span className="text-sm font-mono text-[#a6adc8]">Agent-1.0</span>
+              <div className="flex-1" />
+              <span className="text-xs text-[#7f849c] flex items-center gap-1"><TerminalIcon size={12}/> Local Engine</span>
+            </div>
+            <div className="border-t border-[#313244] px-4 py-3 flex items-center gap-4 text-xs text-[#a6adc8]">
+              <span className="flex items-center gap-1 hover:text-white cursor-pointer"><FolderOpen size={14}/> Open directory...</span>
+            </div>
+          </div>
+
+          <div className="w-full max-w-2xl grid grid-cols-3 gap-4">
+            <button className="flex flex-col gap-2 p-4 bg-[#1e1e2e] rounded-lg border border-[#313244] hover:border-[#89b4fa] transition-colors text-left group">
+              <FolderOpen size={18} className="text-[#a6adc8] group-hover:text-[#89b4fa]"/>
+              <span className="text-sm font-medium">Open project</span>
+            </button>
+            <button className="flex flex-col gap-2 p-4 bg-[#1e1e2e] rounded-lg border border-[#313244] hover:border-[#89b4fa] transition-colors text-left group">
+              <GitBranch size={18} className="text-[#a6adc8] group-hover:text-[#89b4fa]"/>
+              <span className="text-sm font-medium">Clone repository</span>
+            </button>
+            <button className="flex flex-col gap-2 p-4 bg-[#1e1e2e] rounded-lg border border-[#313244] hover:border-[#89b4fa] transition-colors text-left group">
+              <TerminalIcon size={18} className="text-[#a6adc8] group-hover:text-[#89b4fa]"/>
+              <span className="text-sm font-medium">Connect via SSH</span>
+            </button>
+          </div>
+
+          <div className="w-full max-w-2xl bg-[#1e1e2e] rounded-lg border border-[#313244] overflow-hidden">
+            <div className="px-4 py-3 text-xs font-semibold text-[#7f849c] uppercase tracking-wider border-b border-[#313244]">Start new session</div>
+            <button className="w-full text-left px-4 py-3 text-sm hover:bg-[#313244]/50 transition-colors">Explore my codebase and diagram how it works</button>
+            <button className="w-full text-left px-4 py-3 text-sm hover:bg-[#313244]/50 transition-colors border-t border-[#313244]">Review my latest changes and suggest improvements</button>
+            <button className="w-full text-left px-4 py-3 text-sm hover:bg-[#313244]/50 transition-colors border-t border-[#313244]">Write tests for my most critical code paths</button>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full w-full bg-[#1e1e2e] flex flex-col">
@@ -122,8 +177,6 @@ export function EditorPanel({ steps = [] }: EditorPanelProps) {
               </div>
             </div>
             <div className="flex-1 bg-white flex items-center justify-center">
-              {/* Due to x-frame-options, many sites won't load in an iframe. 
-                  But this gives the visual feedback that the agent is browsing. */}
               <iframe 
                 src={browserUrl} 
                 className="w-full h-full border-0"

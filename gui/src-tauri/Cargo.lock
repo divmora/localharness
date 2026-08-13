@@ -787,6 +787,7 @@ name = "divmora"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "dirs",
  "prost",
  "prost-build",
  "serde",

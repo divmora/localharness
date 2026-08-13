@@ -55,43 +55,43 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
     };
   }, [activeTab]);
 
-  const lastProcessedStepIndexRef = useRef<number>(-1);
+  const processedLengths = useRef<Record<number, { stdout: number, stderr: number }>>({});
 
   // Handle incoming steps to write commands and output
   useEffect(() => {
     if (!termInstanceRef.current || steps.length === 0) return;
     const term = termInstanceRef.current;
 
-
-    // Process all steps we haven't seen yet
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       
       // We only care about tool executions
       if (!step.action.case) continue;
       
-      // If we've already processed this step, skip it
-      // Note: Because harness streams updates to the *same* stepIndex, 
-      // tracking by stepIndex alone isn't enough if output is streaming.
-      // For this simplified version, we'll just track if we've seen the 
-      // 'runCommand' action and print it once.
-      // A robust implementation would delta-check the stdout field.
-      
-      if (step.stepIndex <= lastProcessedStepIndexRef.current) continue;
-      
       if (step.action.case === 'runCommand') {
         const cmd = step.action.value;
-        if (cmd.command) {
+        const state = processedLengths.current[step.stepIndex] || { stdout: 0, stderr: 0 };
+        
+        // First time seeing this command? Write the prompt.
+        if (state.stdout === 0 && state.stderr === 0 && cmd.command) {
           term.writeln(`\r\n\x1b[1;32m$ ${cmd.command}\x1b[0m`);
         }
-        if (cmd.stdout) {
-          term.writeln(cmd.stdout);
-        }
-        if (cmd.stderr) {
-          term.writeln(`\x1b[31m${cmd.stderr}\x1b[0m`);
+        
+        // Stream new stdout
+        if (cmd.stdout && cmd.stdout.length > state.stdout) {
+          const delta = cmd.stdout.substring(state.stdout);
+          term.write(delta);
+          state.stdout = cmd.stdout.length;
         }
         
-        lastProcessedStepIndexRef.current = step.stepIndex;
+        // Stream new stderr (with red coloring)
+        if (cmd.stderr && cmd.stderr.length > state.stderr) {
+          const delta = cmd.stderr.substring(state.stderr);
+          term.write(`\x1b[31m${delta}\x1b[0m`);
+          state.stderr = cmd.stderr.length;
+        }
+        
+        processedLengths.current[step.stepIndex] = state;
       }
     }
   }, [steps]);
