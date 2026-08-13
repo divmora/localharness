@@ -38,16 +38,16 @@ export function useTheme() {
     syncTheme();
   }, []);
 
+  const applyThemeToDom = (targetTheme: Theme) => {
+    const root = window.document.documentElement;
+    THEMES.forEach(t => root.classList.remove(`theme-${t.id}`));
+    root.classList.remove('dark');
+    root.classList.add(`theme-${targetTheme}`);
+  };
+
   // Update DOM when theme state changes
   useEffect(() => {
-    const root = window.document.documentElement;
-    // Remove all theme classes
-    THEMES.forEach(t => root.classList.remove(`theme-${t.id}`));
-    // Also remove the old legacy 'dark' class just in case
-    root.classList.remove('dark');
-    
-    // Add the active theme class
-    root.classList.add(`theme-${theme}`);
+    applyThemeToDom(theme);
   }, [theme]);
 
   const setTheme = (newTheme: Theme) => {
@@ -62,5 +62,5 @@ export function useTheme() {
     setTheme(theme === 'light' ? 'dark' : 'light');
   };
 
-  return { theme, toggleTheme, setTheme };
+  return { theme, toggleTheme, setTheme, applyThemeToDom };
 }

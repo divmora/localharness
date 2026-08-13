@@ -1,7 +1,6 @@
-import { Plus, MessageSquare, Search, Filter, Settings, Cpu, FolderOpen, Moon, Sun } from 'lucide-react';
+import { Plus, MessageSquare, Search, Filter, Settings, Cpu, FolderOpen } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
-import { useTheme } from '../hooks/useTheme';
 
 import { Space } from '../App';
 
@@ -32,7 +31,6 @@ export function UnifiedSidebar({
   sessionSpaces = {},
   mcpServerCount = 0
 }: UnifiedSidebarProps) {
-  const { theme, toggleTheme } = useTheme();
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, sessionId: string } | null>(null);
 
   useEffect(() => {
@@ -202,14 +200,6 @@ export function UnifiedSidebar({
           >
             <span>Customizations</span>
             <Settings size={14} className="text-text-secondary" />
-          </button>
-          
-          <button 
-            onClick={toggleTheme}
-            className="flex items-center justify-center px-2 py-1.5 text-text-secondary hover:text-text-primary hover:bg-bg-secondary rounded-md transition-colors"
-            title="Toggle Theme"
-          >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
           </button>
         </div>
         <div className="flex items-center justify-between px-2 text-[11px] text-text-tertiary font-medium">
