@@ -1,9 +1,9 @@
 use prost::Message;
 use serde::Serialize;
 use std::io::Write;
-use tauri_plugin_shell::{process::CommandEvent, ShellExt};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
-use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 mod db;
 mod localharness;
@@ -787,7 +787,8 @@ async fn start_harness(
                         let mut local_port = output_cfg.port;
                         let mut tunnel_child_opt = None;
                         if target.kind == "ssh" {
-                            let (port, tunnel_child) = setup_ssh_tunnel(&app, &target, output_cfg.port).await?;
+                            let (port, tunnel_child) =
+                                setup_ssh_tunnel(&app, &target, output_cfg.port).await?;
                             local_port = port;
                             tunnel_child_opt = Some(tunnel_child);
                         }
@@ -875,7 +876,8 @@ async fn setup_ssh_tunnel(
         args.push(host.clone());
     }
 
-    let (mut rx, child) = app.shell()
+    let (mut rx, child) = app
+        .shell()
         .command("ssh")
         .args(args)
         .spawn()
@@ -908,6 +910,7 @@ struct AppState {
 pub fn run() {
     let db = db::init_db().expect("Failed to initialize database");
     tauri::Builder::default()
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .manage(db)
         .manage(AppState {
@@ -915,6 +918,14 @@ pub fn run() {
         })
         .setup(|app| {
             let handle = app.handle();
+            
+            if let Some(window) = handle.get_webview_window("main") {
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = window.set_decorations(false);
+                }
+            }
+
             let mut menu = Menu::default(handle)?;
 
             let prefs_menu = Submenu::new(handle, "Preferences", true)?;
@@ -952,7 +963,12 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
                         if let Some(window) = tray.app_handle().get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();

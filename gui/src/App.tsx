@@ -8,6 +8,7 @@ import { CustomizationsPage } from './components/CustomizationsPage';
 import { ConnectSSHModal } from './components/ConnectSSHModal';
 import { SessionsManager } from './components/SessionsManager';
 import { CommandPalette } from './components/CommandPalette';
+import { TopBar } from './components/TopBar';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
@@ -176,9 +177,11 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
-      <CommandPalette />
-      <ConnectSSHModal
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
+      <TopBar />
+      <div className="flex flex-1 overflow-hidden relative">
+        <CommandPalette />
+        <ConnectSSHModal
         isOpen={sshModalOpen}
         onClose={() => setSshModalOpen(false)}
         onConnect={handleConnectSSH}
@@ -242,6 +245,7 @@ function App() {
           </Panel>
         </PanelGroup>
       )}
+      </div>
     </div>
   );
 }
