@@ -4,7 +4,7 @@ import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localhar
 
 import { Space } from '../App';
 
-interface UnifiedSidebarProps {
+interface AgentSidebarProps {
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
@@ -18,7 +18,7 @@ interface UnifiedSidebarProps {
   mcpServerCount?: number;
 }
 
-export function UnifiedSidebar({ 
+export function AgentSidebar({ 
   activeSessionId, 
   onSelectSession, 
   onNewSession, 
@@ -30,7 +30,7 @@ export function UnifiedSidebar({
   spaces = [],
   sessionSpaces = {},
   mcpServerCount = 0
-}: UnifiedSidebarProps) {
+}: AgentSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, sessionId: string } | null>(null);
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function UnifiedSidebar({
   }, []);
 
   return (
-    <div className="w-64 h-full bg-bg-primary border-r border-border-primary flex flex-col text-text-primary shrink-0">
+    <div className="w-full h-full bg-bg-primary border-r border-border-primary flex flex-col text-text-primary">
       {/* Top action */}
       <div className="p-3 pb-2">
         <button 

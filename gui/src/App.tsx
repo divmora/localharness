@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
-import { UnifiedSidebar } from './components/UnifiedSidebar';
+import { AgentSidebar } from './components/AgentSidebar';
 import { CenteredEmptyState } from './components/CenteredEmptyState';
 import { ChatPanel } from './components/ChatPanel';
 import { WorkspacePanel } from './components/WorkspacePanel';
@@ -9,6 +9,7 @@ import { ConnectSSHModal } from './components/ConnectSSHModal';
 import { SessionsManager } from './components/SessionsManager';
 import { CommandPalette } from './components/CommandPalette';
 import { TopBar } from './components/TopBar';
+import { TerminalPanel } from './components/TerminalPanel';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
@@ -54,6 +55,21 @@ function App() {
   const [installationId, setInstallationId] = useState<string | null>(null);
   
   const { connected, connectionError, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, connectionTarget, workspace);
+
+  const [showAgentSidebar, setShowAgentSidebar] = useState(true);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd+B on Mac, Ctrl+B on Windows/Linux
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setShowAgentSidebar(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     async function loadSessions() {
@@ -182,61 +198,80 @@ function App() {
       <div className="flex flex-1 overflow-hidden relative">
         <CommandPalette />
         <ConnectSSHModal
-        isOpen={sshModalOpen}
-        onClose={() => setSshModalOpen(false)}
-        onConnect={handleConnectSSH}
-      />
-
-      <UnifiedSidebar 
-        activeSessionId={activeSessionId} 
-        onSelectSession={handleSelectSession} 
-        onNewSession={handleNewSession}
-        onCreateSpace={handleCreateSpace}
-        onMoveSessionToSpace={handleMoveSessionToSpace}
-        onOpenCustomizations={() => setCurrentView('customizations')}
-        onOpenSessionsManager={() => setCurrentView('sessions')}
-        sessions={sessions}
-        spaces={spaces}
-        sessionSpaces={sessionSpaces}
-        mcpServerCount={0}
-      />
-
-      {currentView === 'customizations' ? (
-        <CustomizationsPage 
-          onClose={() => setCurrentView('main')} 
-          connectionTarget={connectionTarget}
+          isOpen={sshModalOpen}
+          onClose={() => setSshModalOpen(false)}
+          onConnect={handleConnectSSH}
         />
-      ) : currentView === 'sessions' ? (
-        <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
-      ) : !activeSessionId ? (
-        <CenteredEmptyState 
-          sessions={sessions} 
-          onSelectSession={handleSelectSession} 
-          onSubmitPrompt={handleStartPromptSession}
-          onOpenSSHModal={() => setSshModalOpen(true)}
-          onOpenSessionsManager={() => setCurrentView('sessions')}
-          connectionTarget={connectionTarget}
-          workspace={workspace}
-          onSelectWorkspace={setWorkspace}
-        />
-      ) : (
-        <PanelGroup orientation="horizontal" className="flex-1 border-l border-border-primary">
-          {/* Center Pane: ChatPanel */}
-          <Panel defaultSize={75} minSize={30}>
-            <ChatPanel 
-              connected={connected} 
-              connectionError={connectionError}
-              steps={steps} 
-              onSend={sendPrompt} 
-              onSubmitQuestionResponse={submitQuestionResponse} 
-              onSubmitPermissionResponse={submitPermissionResponse}
-            />
+
+        <PanelGroup orientation="horizontal" className="flex-1">
+          {/* Left Pane: Agent Sidebar */}
+          {showAgentSidebar && (
+            <>
+              <Panel defaultSize={20} minSize={15} className="flex flex-col" collapsible>
+                <AgentSidebar 
+                  activeSessionId={activeSessionId} 
+                  onSelectSession={handleSelectSession} 
+                  onNewSession={handleNewSession}
+                  onCreateSpace={handleCreateSpace}
+                  onMoveSessionToSpace={handleMoveSessionToSpace}
+                  onOpenCustomizations={() => setCurrentView('customizations')}
+                  onOpenSessionsManager={() => setCurrentView('sessions')}
+                  sessions={sessions}
+                  spaces={spaces}
+                  sessionSpaces={sessionSpaces}
+                  mcpServerCount={0}
+                />
+              </Panel>
+              <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+            </>
+          )}
+
+          {/* Center Pane: Main Content & Terminal */}
+          <Panel defaultSize={60} minSize={30} className="flex flex-col bg-bg-primary">
+            <PanelGroup orientation="vertical">
+              <Panel defaultSize={70} minSize={20} className="flex flex-col">
+                {currentView === 'customizations' ? (
+                  <CustomizationsPage 
+                    onClose={() => setCurrentView('main')} 
+                    connectionTarget={connectionTarget}
+                  />
+                ) : currentView === 'sessions' ? (
+                  <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
+                ) : !activeSessionId ? (
+                  <CenteredEmptyState 
+                    sessions={sessions} 
+                    onSelectSession={handleSelectSession} 
+                    onSubmitPrompt={handleStartPromptSession}
+                    onOpenSSHModal={() => setSshModalOpen(true)}
+                    onOpenSessionsManager={() => setCurrentView('sessions')}
+                    connectionTarget={connectionTarget}
+                    workspace={workspace}
+                    onSelectWorkspace={setWorkspace}
+                  />
+                ) : (
+                  <ChatPanel 
+                    connected={connected} 
+                    connectionError={connectionError}
+                    steps={steps} 
+                    onSend={sendPrompt} 
+                    onSubmitQuestionResponse={submitQuestionResponse} 
+                    onSubmitPermissionResponse={submitPermissionResponse}
+                  />
+                )}
+              </Panel>
+              
+              <PanelResizeHandle className="h-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+              
+              <Panel defaultSize={30} minSize={10}>
+                <TerminalPanel steps={steps} />
+              </Panel>
+            </PanelGroup>
           </Panel>
 
-          <PanelResizeHandle className="w-1 bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+          <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
 
           {/* Right Pane: Workspace */}
-          <Panel defaultSize={45} minSize={20}>
+          <Panel defaultSize={20} minSize={15} className="flex flex-col">
             <WorkspacePanel 
               steps={steps} 
               onNewSession={handleNewSession} 
@@ -244,7 +279,6 @@ function App() {
             />
           </Panel>
         </PanelGroup>
-      )}
       </div>
     </div>
   );
