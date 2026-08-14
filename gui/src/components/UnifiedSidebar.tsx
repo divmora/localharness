@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
 
 import { Space } from '../App';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 interface UnifiedSidebarProps {
   activeSessionId: string | null;
@@ -55,14 +56,12 @@ export function UnifiedSidebar({
       <div className="px-3 pb-3">
         <button 
           onClick={() => {
-            import('@tauri-apps/api/webviewWindow').then(m => {
-              new m.WebviewWindow(`local-${Date.now()}`, {
-                url: `/?new_session=true`,
-                title: `Local Workspace`,
-                width: 1200,
-                height: 800
-              });
-            }).catch(console.error);
+            new WebviewWindow(`local-${Date.now()}`, {
+              url: `/?new_session=true`,
+              title: `Local Workspace`,
+              width: 1200,
+              height: 800
+            });
           }}
           className="w-full flex items-center gap-2 bg-transparent hover:bg-bg-secondary text-text-secondary px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-transparent hover:border-border-highlight"
         >
