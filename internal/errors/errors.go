@@ -3,6 +3,9 @@ package errors
 
 import (
 	"fmt"
+	"strconv"
+
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
 
 // ErrorCode represents a categorizable error code for programmatic handling.
@@ -187,4 +190,73 @@ func GetCode(err error) ErrorCode {
 		return hErr.Code
 	}
 	return ""
+}
+
+// ToProto converts a HarnessError to a protobuf ErrorEvent.
+// It serializes the context map to string values for wire transmission.
+func (e *HarnessError) ToProto() *pb.ErrorEvent {
+	event := &pb.ErrorEvent{
+		Message: e.Message,
+		Code:    string(e.Code),
+		Fatal:   false, // Default to non-fatal, can be overridden if needed
+	}
+
+	// Convert context map to protobuf map<string, string>
+	if e.Context != nil && len(e.Context) > 0 {
+		event.Metadata = make(map[string]string)
+		for key, value := range e.Context {
+			event.Metadata[key] = serializeValue(value)
+		}
+	}
+
+	// Add component if set
+	if e.Component != "" {
+		if event.Metadata == nil {
+			event.Metadata = make(map[string]string)
+		}
+		event.Metadata["component"] = e.Component
+	}
+
+	// Add request ID if set
+	if e.RequestID != "" {
+		if event.Metadata == nil {
+			event.Metadata = make(map[string]string)
+		}
+		event.Metadata["request_id"] = e.RequestID
+	}
+
+	return event
+}
+
+// serializeValue converts an interface{} value to string for protobuf transmission.
+func serializeValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case int:
+		return strconv.Itoa(v)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// SerializeValue is the public version of serializeValue for use by other packages.
+func SerializeValue(value interface{}) string {
+	return serializeValue(value)
 }

@@ -1291,6 +1291,7 @@ type ErrorEvent struct {
 	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
 	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
 	Fatal         bool                   `protobuf:"varint,3,opt,name=fatal,proto3" json:"fatal,omitempty"`
+	Metadata      map[string]string      `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Structured error context (e.g., trajectory_id, component, operation)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1344,6 +1345,13 @@ func (x *ErrorEvent) GetFatal() bool {
 		return x.Fatal
 	}
 	return false
+}
+
+func (x *ErrorEvent) GetMetadata() map[string]string {
+	if x != nil {
+		return x.Metadata
+	}
+	return nil
 }
 
 // StepUpdate is the primary event streamed from harness to client.
@@ -7548,12 +7556,16 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\bsessions\x18\x01 \x03(\v2\x1c.localharness.v1.SessionInfoR\bsessions\"`\n" +
 	"\fInitResponse\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12'\n" +
-	"\x0fharness_version\x18\x02 \x01(\tR\x0eharnessVersion\"P\n" +
+	"\x0fharness_version\x18\x02 \x01(\tR\x0eharnessVersion\"\xd4\x01\n" +
 	"\n" +
 	"ErrorEvent\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12\x14\n" +
-	"\x05fatal\x18\x03 \x01(\bR\x05fatal\"\x96\x13\n" +
+	"\x05fatal\x18\x03 \x01(\bR\x05fatal\x12E\n" +
+	"\bmetadata\x18\x04 \x03(\v2).localharness.v1.ErrorEvent.MetadataEntryR\bmetadata\x1a;\n" +
+	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x96\x13\n" +
 	"\n" +
 	"StepUpdate\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12#\n" +
@@ -8166,7 +8178,7 @@ func file_localharness_v1_localharness_proto_rawDescGZIP() []byte {
 }
 
 var file_localharness_v1_localharness_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_localharness_v1_localharness_proto_msgTypes = make([]protoimpl.MessageInfo, 93)
+var file_localharness_v1_localharness_proto_msgTypes = make([]protoimpl.MessageInfo, 94)
 var file_localharness_v1_localharness_proto_goTypes = []any{
 	(SessionStatus)(0),                        // 0: localharness.v1.SessionStatus
 	(StepUpdate_Source)(0),                    // 1: localharness.v1.StepUpdate.Source
@@ -8263,10 +8275,11 @@ var file_localharness_v1_localharness_proto_goTypes = []any{
 	(*TranscriptEntry)(nil),                   // 92: localharness.v1.TranscriptEntry
 	(*ActionSchedule)(nil),                    // 93: localharness.v1.ActionSchedule
 	nil,                                       // 94: localharness.v1.UserContext.ExtraEntry
-	nil,                                       // 95: localharness.v1.ActionRunCommand.EnvEntry
-	nil,                                       // 96: localharness.v1.McpServerConfig.EnvEntry
-	nil,                                       // 97: localharness.v1.McpHttpTransport.HeadersEntry
-	nil,                                       // 98: localharness.v1.ErrorInfo.MetadataEntry
+	nil,                                       // 95: localharness.v1.ErrorEvent.MetadataEntry
+	nil,                                       // 96: localharness.v1.ActionRunCommand.EnvEntry
+	nil,                                       // 97: localharness.v1.McpServerConfig.EnvEntry
+	nil,                                       // 98: localharness.v1.McpHttpTransport.HeadersEntry
+	nil,                                       // 99: localharness.v1.ErrorInfo.MetadataEntry
 }
 var file_localharness_v1_localharness_proto_depIdxs = []int32{
 	9,   // 0: localharness.v1.ClientMessage.init:type_name -> localharness.v1.InitRequest
@@ -8288,93 +8301,94 @@ var file_localharness_v1_localharness_proto_depIdxs = []int32{
 	84,  // 16: localharness.v1.ServerMessage.trace_event:type_name -> localharness.v1.TraceEvent
 	0,   // 17: localharness.v1.SessionInfo.status:type_name -> localharness.v1.SessionStatus
 	16,  // 18: localharness.v1.SessionList.sessions:type_name -> localharness.v1.SessionInfo
-	1,   // 19: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
-	2,   // 20: localharness.v1.StepUpdate.state:type_name -> localharness.v1.StepUpdate.State
-	3,   // 21: localharness.v1.StepUpdate.target:type_name -> localharness.v1.StepUpdate.Target
-	22,  // 22: localharness.v1.StepUpdate.view_file:type_name -> localharness.v1.ActionViewFile
-	24,  // 23: localharness.v1.StepUpdate.write_to_file:type_name -> localharness.v1.ActionWriteToFile
-	25,  // 24: localharness.v1.StepUpdate.replace_file_content:type_name -> localharness.v1.ActionReplaceFileContent
-	27,  // 25: localharness.v1.StepUpdate.list_dir:type_name -> localharness.v1.ActionListDir
-	29,  // 26: localharness.v1.StepUpdate.grep_search:type_name -> localharness.v1.ActionGrepSearch
-	31,  // 27: localharness.v1.StepUpdate.find_file:type_name -> localharness.v1.ActionFindFile
-	32,  // 28: localharness.v1.StepUpdate.run_command:type_name -> localharness.v1.ActionRunCommand
-	33,  // 29: localharness.v1.StepUpdate.finish:type_name -> localharness.v1.ActionFinish
-	34,  // 30: localharness.v1.StepUpdate.host_tool_call:type_name -> localharness.v1.ActionHostToolCall
-	35,  // 31: localharness.v1.StepUpdate.compaction:type_name -> localharness.v1.ActionCompaction
-	36,  // 32: localharness.v1.StepUpdate.user_question:type_name -> localharness.v1.ActionUserQuestion
-	40,  // 33: localharness.v1.StepUpdate.manage_task:type_name -> localharness.v1.ActionManageTask
-	53,  // 34: localharness.v1.StepUpdate.permission_request:type_name -> localharness.v1.ActionPermissionRequest
-	42,  // 35: localharness.v1.StepUpdate.invoke_subagent:type_name -> localharness.v1.ActionInvokeSubagent
-	50,  // 36: localharness.v1.StepUpdate.search_web:type_name -> localharness.v1.ActionSearchWeb
-	52,  // 37: localharness.v1.StepUpdate.read_url_content:type_name -> localharness.v1.ActionReadUrlContent
-	80,  // 38: localharness.v1.StepUpdate.mcp_tool:type_name -> localharness.v1.ActionMcpTool
-	93,  // 39: localharness.v1.StepUpdate.schedule:type_name -> localharness.v1.ActionSchedule
-	46,  // 40: localharness.v1.StepUpdate.define_subagent:type_name -> localharness.v1.ActionDefineSubagent
-	47,  // 41: localharness.v1.StepUpdate.manage_subagents:type_name -> localharness.v1.ActionManageSubagents
-	49,  // 42: localharness.v1.StepUpdate.send_message_action:type_name -> localharness.v1.ActionSendMessage
-	45,  // 43: localharness.v1.StepUpdate.browser_subagent:type_name -> localharness.v1.ActionBrowserSubagent
-	82,  // 44: localharness.v1.StepUpdate.error_info:type_name -> localharness.v1.ErrorInfo
-	83,  // 45: localharness.v1.StepUpdate.usage:type_name -> localharness.v1.UsageMetadata
-	4,   // 46: localharness.v1.TrajectoryState.state:type_name -> localharness.v1.TrajectoryState.TrajState
-	23,  // 47: localharness.v1.ActionWriteToFile.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
-	26,  // 48: localharness.v1.ActionReplaceFileContent.chunks:type_name -> localharness.v1.EditChunk
-	23,  // 49: localharness.v1.ActionReplaceFileContent.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
-	28,  // 50: localharness.v1.ActionListDir.entries:type_name -> localharness.v1.DirEntry
-	30,  // 51: localharness.v1.ActionGrepSearch.matches:type_name -> localharness.v1.SearchMatch
-	95,  // 52: localharness.v1.ActionRunCommand.env:type_name -> localharness.v1.ActionRunCommand.EnvEntry
-	37,  // 53: localharness.v1.ActionUserQuestion.questions:type_name -> localharness.v1.UserQuestion
-	38,  // 54: localharness.v1.ActionUserQuestion.answers:type_name -> localharness.v1.QuestionAnswer
-	38,  // 55: localharness.v1.QuestionResponse.answers:type_name -> localharness.v1.QuestionAnswer
-	41,  // 56: localharness.v1.ActionManageTask.tasks:type_name -> localharness.v1.TaskInfo
-	43,  // 57: localharness.v1.ActionInvokeSubagent.subagents:type_name -> localharness.v1.SubagentInvocation
-	44,  // 58: localharness.v1.ActionInvokeSubagent.launch_results:type_name -> localharness.v1.SubagentLaunchResult
-	83,  // 59: localharness.v1.ActionInvokeSubagent.child_usage:type_name -> localharness.v1.UsageMetadata
-	48,  // 60: localharness.v1.ActionManageSubagents.active_subagents:type_name -> localharness.v1.SubagentInfo
-	51,  // 61: localharness.v1.ActionSearchWeb.results:type_name -> localharness.v1.WebSearchResult
-	64,  // 62: localharness.v1.HarnessConfig.host_tools:type_name -> localharness.v1.ToolDef
-	65,  // 63: localharness.v1.HarnessConfig.builtin_tools:type_name -> localharness.v1.BuiltinToolsConfig
-	76,  // 64: localharness.v1.HarnessConfig.workspaces:type_name -> localharness.v1.Workspace
-	66,  // 65: localharness.v1.HarnessConfig.tool_configs:type_name -> localharness.v1.ToolConfigs
-	77,  // 66: localharness.v1.HarnessConfig.mcp_servers:type_name -> localharness.v1.McpServerConfig
-	62,  // 67: localharness.v1.HarnessConfig.structured_instructions:type_name -> localharness.v1.StructuredSystemInstructions
-	57,  // 68: localharness.v1.HarnessConfig.prompt_modules:type_name -> localharness.v1.PromptModules
-	58,  // 69: localharness.v1.HarnessConfig.slash_commands:type_name -> localharness.v1.SlashCommandDef
-	59,  // 70: localharness.v1.HarnessConfig.skills:type_name -> localharness.v1.SkillDef
-	60,  // 71: localharness.v1.HarnessConfig.plugins:type_name -> localharness.v1.PluginDef
-	61,  // 72: localharness.v1.HarnessConfig.subagent_types:type_name -> localharness.v1.SubagentTypeConfig
-	56,  // 73: localharness.v1.HarnessConfig.user_rules:type_name -> localharness.v1.UserRuleConfig
-	59,  // 74: localharness.v1.PluginDef.skills:type_name -> localharness.v1.SkillDef
-	63,  // 75: localharness.v1.StructuredSystemInstructions.sections:type_name -> localharness.v1.SystemSection
-	67,  // 76: localharness.v1.ToolConfigs.view_file:type_name -> localharness.v1.ViewFileToolConfig
-	68,  // 77: localharness.v1.ToolConfigs.run_command:type_name -> localharness.v1.RunCommandToolConfig
-	69,  // 78: localharness.v1.ToolConfigs.edit_file:type_name -> localharness.v1.FileEditToolConfig
-	70,  // 79: localharness.v1.ToolConfigs.find_file:type_name -> localharness.v1.FindToolConfig
-	71,  // 80: localharness.v1.ToolConfigs.grep_search:type_name -> localharness.v1.GrepSearchToolConfig
-	72,  // 81: localharness.v1.ToolConfigs.list_dir:type_name -> localharness.v1.ListDirToolConfig
-	73,  // 82: localharness.v1.ToolConfigs.write_file:type_name -> localharness.v1.WriteToFileToolConfig
-	74,  // 83: localharness.v1.ToolConfigs.web_search:type_name -> localharness.v1.WebSearchToolConfig
-	75,  // 84: localharness.v1.ToolConfigs.web_fetch:type_name -> localharness.v1.WebFetchToolConfig
-	78,  // 85: localharness.v1.McpServerConfig.stdio:type_name -> localharness.v1.McpStdioTransport
-	79,  // 86: localharness.v1.McpServerConfig.http:type_name -> localharness.v1.McpHttpTransport
-	96,  // 87: localharness.v1.McpServerConfig.env:type_name -> localharness.v1.McpServerConfig.EnvEntry
-	97,  // 88: localharness.v1.McpHttpTransport.headers:type_name -> localharness.v1.McpHttpTransport.HeadersEntry
-	98,  // 89: localharness.v1.ErrorInfo.metadata:type_name -> localharness.v1.ErrorInfo.MetadataEntry
-	85,  // 90: localharness.v1.TraceEvent.model_call:type_name -> localharness.v1.ModelCallTrace
-	86,  // 91: localharness.v1.TraceEvent.model_response:type_name -> localharness.v1.ModelResponseTrace
-	55,  // 92: localharness.v1.ConversationState.config:type_name -> localharness.v1.HarnessConfig
-	88,  // 93: localharness.v1.ConversationState.messages:type_name -> localharness.v1.ConversationMessage
-	83,  // 94: localharness.v1.ConversationState.total_usage:type_name -> localharness.v1.UsageMetadata
-	5,   // 95: localharness.v1.ConversationState.status:type_name -> localharness.v1.ConversationState.ConversationStatus
-	89,  // 96: localharness.v1.ConversationMessage.tool_calls:type_name -> localharness.v1.ToolCallRecord
-	90,  // 97: localharness.v1.ConversationMessage.tool_result:type_name -> localharness.v1.ToolResultRecord
-	92,  // 98: localharness.v1.TranscriptLog.entries:type_name -> localharness.v1.TranscriptEntry
-	20,  // 99: localharness.v1.TranscriptEntry.step_update:type_name -> localharness.v1.StepUpdate
-	21,  // 100: localharness.v1.TranscriptEntry.trajectory_state:type_name -> localharness.v1.TrajectoryState
-	101, // [101:101] is the sub-list for method output_type
-	101, // [101:101] is the sub-list for method input_type
-	101, // [101:101] is the sub-list for extension type_name
-	101, // [101:101] is the sub-list for extension extendee
-	0,   // [0:101] is the sub-list for field type_name
+	95,  // 19: localharness.v1.ErrorEvent.metadata:type_name -> localharness.v1.ErrorEvent.MetadataEntry
+	1,   // 20: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
+	2,   // 21: localharness.v1.StepUpdate.state:type_name -> localharness.v1.StepUpdate.State
+	3,   // 22: localharness.v1.StepUpdate.target:type_name -> localharness.v1.StepUpdate.Target
+	22,  // 23: localharness.v1.StepUpdate.view_file:type_name -> localharness.v1.ActionViewFile
+	24,  // 24: localharness.v1.StepUpdate.write_to_file:type_name -> localharness.v1.ActionWriteToFile
+	25,  // 25: localharness.v1.StepUpdate.replace_file_content:type_name -> localharness.v1.ActionReplaceFileContent
+	27,  // 26: localharness.v1.StepUpdate.list_dir:type_name -> localharness.v1.ActionListDir
+	29,  // 27: localharness.v1.StepUpdate.grep_search:type_name -> localharness.v1.ActionGrepSearch
+	31,  // 28: localharness.v1.StepUpdate.find_file:type_name -> localharness.v1.ActionFindFile
+	32,  // 29: localharness.v1.StepUpdate.run_command:type_name -> localharness.v1.ActionRunCommand
+	33,  // 30: localharness.v1.StepUpdate.finish:type_name -> localharness.v1.ActionFinish
+	34,  // 31: localharness.v1.StepUpdate.host_tool_call:type_name -> localharness.v1.ActionHostToolCall
+	35,  // 32: localharness.v1.StepUpdate.compaction:type_name -> localharness.v1.ActionCompaction
+	36,  // 33: localharness.v1.StepUpdate.user_question:type_name -> localharness.v1.ActionUserQuestion
+	40,  // 34: localharness.v1.StepUpdate.manage_task:type_name -> localharness.v1.ActionManageTask
+	53,  // 35: localharness.v1.StepUpdate.permission_request:type_name -> localharness.v1.ActionPermissionRequest
+	42,  // 36: localharness.v1.StepUpdate.invoke_subagent:type_name -> localharness.v1.ActionInvokeSubagent
+	50,  // 37: localharness.v1.StepUpdate.search_web:type_name -> localharness.v1.ActionSearchWeb
+	52,  // 38: localharness.v1.StepUpdate.read_url_content:type_name -> localharness.v1.ActionReadUrlContent
+	80,  // 39: localharness.v1.StepUpdate.mcp_tool:type_name -> localharness.v1.ActionMcpTool
+	93,  // 40: localharness.v1.StepUpdate.schedule:type_name -> localharness.v1.ActionSchedule
+	46,  // 41: localharness.v1.StepUpdate.define_subagent:type_name -> localharness.v1.ActionDefineSubagent
+	47,  // 42: localharness.v1.StepUpdate.manage_subagents:type_name -> localharness.v1.ActionManageSubagents
+	49,  // 43: localharness.v1.StepUpdate.send_message_action:type_name -> localharness.v1.ActionSendMessage
+	45,  // 44: localharness.v1.StepUpdate.browser_subagent:type_name -> localharness.v1.ActionBrowserSubagent
+	82,  // 45: localharness.v1.StepUpdate.error_info:type_name -> localharness.v1.ErrorInfo
+	83,  // 46: localharness.v1.StepUpdate.usage:type_name -> localharness.v1.UsageMetadata
+	4,   // 47: localharness.v1.TrajectoryState.state:type_name -> localharness.v1.TrajectoryState.TrajState
+	23,  // 48: localharness.v1.ActionWriteToFile.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
+	26,  // 49: localharness.v1.ActionReplaceFileContent.chunks:type_name -> localharness.v1.EditChunk
+	23,  // 50: localharness.v1.ActionReplaceFileContent.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
+	28,  // 51: localharness.v1.ActionListDir.entries:type_name -> localharness.v1.DirEntry
+	30,  // 52: localharness.v1.ActionGrepSearch.matches:type_name -> localharness.v1.SearchMatch
+	96,  // 53: localharness.v1.ActionRunCommand.env:type_name -> localharness.v1.ActionRunCommand.EnvEntry
+	37,  // 54: localharness.v1.ActionUserQuestion.questions:type_name -> localharness.v1.UserQuestion
+	38,  // 55: localharness.v1.ActionUserQuestion.answers:type_name -> localharness.v1.QuestionAnswer
+	38,  // 56: localharness.v1.QuestionResponse.answers:type_name -> localharness.v1.QuestionAnswer
+	41,  // 57: localharness.v1.ActionManageTask.tasks:type_name -> localharness.v1.TaskInfo
+	43,  // 58: localharness.v1.ActionInvokeSubagent.subagents:type_name -> localharness.v1.SubagentInvocation
+	44,  // 59: localharness.v1.ActionInvokeSubagent.launch_results:type_name -> localharness.v1.SubagentLaunchResult
+	83,  // 60: localharness.v1.ActionInvokeSubagent.child_usage:type_name -> localharness.v1.UsageMetadata
+	48,  // 61: localharness.v1.ActionManageSubagents.active_subagents:type_name -> localharness.v1.SubagentInfo
+	51,  // 62: localharness.v1.ActionSearchWeb.results:type_name -> localharness.v1.WebSearchResult
+	64,  // 63: localharness.v1.HarnessConfig.host_tools:type_name -> localharness.v1.ToolDef
+	65,  // 64: localharness.v1.HarnessConfig.builtin_tools:type_name -> localharness.v1.BuiltinToolsConfig
+	76,  // 65: localharness.v1.HarnessConfig.workspaces:type_name -> localharness.v1.Workspace
+	66,  // 66: localharness.v1.HarnessConfig.tool_configs:type_name -> localharness.v1.ToolConfigs
+	77,  // 67: localharness.v1.HarnessConfig.mcp_servers:type_name -> localharness.v1.McpServerConfig
+	62,  // 68: localharness.v1.HarnessConfig.structured_instructions:type_name -> localharness.v1.StructuredSystemInstructions
+	57,  // 69: localharness.v1.HarnessConfig.prompt_modules:type_name -> localharness.v1.PromptModules
+	58,  // 70: localharness.v1.HarnessConfig.slash_commands:type_name -> localharness.v1.SlashCommandDef
+	59,  // 71: localharness.v1.HarnessConfig.skills:type_name -> localharness.v1.SkillDef
+	60,  // 72: localharness.v1.HarnessConfig.plugins:type_name -> localharness.v1.PluginDef
+	61,  // 73: localharness.v1.HarnessConfig.subagent_types:type_name -> localharness.v1.SubagentTypeConfig
+	56,  // 74: localharness.v1.HarnessConfig.user_rules:type_name -> localharness.v1.UserRuleConfig
+	59,  // 75: localharness.v1.PluginDef.skills:type_name -> localharness.v1.SkillDef
+	63,  // 76: localharness.v1.StructuredSystemInstructions.sections:type_name -> localharness.v1.SystemSection
+	67,  // 77: localharness.v1.ToolConfigs.view_file:type_name -> localharness.v1.ViewFileToolConfig
+	68,  // 78: localharness.v1.ToolConfigs.run_command:type_name -> localharness.v1.RunCommandToolConfig
+	69,  // 79: localharness.v1.ToolConfigs.edit_file:type_name -> localharness.v1.FileEditToolConfig
+	70,  // 80: localharness.v1.ToolConfigs.find_file:type_name -> localharness.v1.FindToolConfig
+	71,  // 81: localharness.v1.ToolConfigs.grep_search:type_name -> localharness.v1.GrepSearchToolConfig
+	72,  // 82: localharness.v1.ToolConfigs.list_dir:type_name -> localharness.v1.ListDirToolConfig
+	73,  // 83: localharness.v1.ToolConfigs.write_file:type_name -> localharness.v1.WriteToFileToolConfig
+	74,  // 84: localharness.v1.ToolConfigs.web_search:type_name -> localharness.v1.WebSearchToolConfig
+	75,  // 85: localharness.v1.ToolConfigs.web_fetch:type_name -> localharness.v1.WebFetchToolConfig
+	78,  // 86: localharness.v1.McpServerConfig.stdio:type_name -> localharness.v1.McpStdioTransport
+	79,  // 87: localharness.v1.McpServerConfig.http:type_name -> localharness.v1.McpHttpTransport
+	97,  // 88: localharness.v1.McpServerConfig.env:type_name -> localharness.v1.McpServerConfig.EnvEntry
+	98,  // 89: localharness.v1.McpHttpTransport.headers:type_name -> localharness.v1.McpHttpTransport.HeadersEntry
+	99,  // 90: localharness.v1.ErrorInfo.metadata:type_name -> localharness.v1.ErrorInfo.MetadataEntry
+	85,  // 91: localharness.v1.TraceEvent.model_call:type_name -> localharness.v1.ModelCallTrace
+	86,  // 92: localharness.v1.TraceEvent.model_response:type_name -> localharness.v1.ModelResponseTrace
+	55,  // 93: localharness.v1.ConversationState.config:type_name -> localharness.v1.HarnessConfig
+	88,  // 94: localharness.v1.ConversationState.messages:type_name -> localharness.v1.ConversationMessage
+	83,  // 95: localharness.v1.ConversationState.total_usage:type_name -> localharness.v1.UsageMetadata
+	5,   // 96: localharness.v1.ConversationState.status:type_name -> localharness.v1.ConversationState.ConversationStatus
+	89,  // 97: localharness.v1.ConversationMessage.tool_calls:type_name -> localharness.v1.ToolCallRecord
+	90,  // 98: localharness.v1.ConversationMessage.tool_result:type_name -> localharness.v1.ToolResultRecord
+	92,  // 99: localharness.v1.TranscriptLog.entries:type_name -> localharness.v1.TranscriptEntry
+	20,  // 100: localharness.v1.TranscriptEntry.step_update:type_name -> localharness.v1.StepUpdate
+	21,  // 101: localharness.v1.TranscriptEntry.trajectory_state:type_name -> localharness.v1.TrajectoryState
+	102, // [102:102] is the sub-list for method output_type
+	102, // [102:102] is the sub-list for method input_type
+	102, // [102:102] is the sub-list for extension type_name
+	102, // [102:102] is the sub-list for extension extendee
+	0,   // [0:102] is the sub-list for field type_name
 }
 
 func init() { file_localharness_v1_localharness_proto_init() }
@@ -8435,7 +8449,7 @@ func file_localharness_v1_localharness_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_localharness_v1_localharness_proto_rawDesc), len(file_localharness_v1_localharness_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   93,
+			NumMessages:   94,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

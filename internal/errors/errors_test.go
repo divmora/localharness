@@ -395,3 +395,94 @@ func TestErrorCodes(t *testing.T) {
 		seen[code] = true
 	}
 }
+
+func TestToProto(t *testing.T) {
+	// Test basic error conversion
+	err := New(ErrCodeFileNotFound, "file not found").
+		WithContext("path", "/tmp/test.txt").
+		WithContext("operation", "view_file").
+		WithComponent("view_file").
+		WithRequestID("req-123")
+
+	protoEvent := err.ToProto()
+
+	if protoEvent.Code != string(ErrCodeFileNotFound) {
+		t.Errorf("expected code %s, got %s", ErrCodeFileNotFound, protoEvent.Code)
+	}
+
+	if protoEvent.Message != "file not found" {
+		t.Errorf("expected message 'file not found', got %s", protoEvent.Message)
+	}
+
+	if protoEvent.Metadata == nil {
+		t.Fatal("expected metadata to be set")
+	}
+
+	if protoEvent.Metadata["path"] != "/tmp/test.txt" {
+		t.Errorf("expected path '/tmp/test.txt', got %s", protoEvent.Metadata["path"])
+	}
+
+	if protoEvent.Metadata["operation"] != "view_file" {
+		t.Errorf("expected operation 'view_file', got %s", protoEvent.Metadata["operation"])
+	}
+
+	if protoEvent.Metadata["component"] != "view_file" {
+		t.Errorf("expected component 'view_file', got %s", protoEvent.Metadata["component"])
+	}
+
+	if protoEvent.Metadata["request_id"] != "req-123" {
+		t.Errorf("expected request_id 'req-123', got %s", protoEvent.Metadata["request_id"])
+	}
+
+	// Test error without context
+	err2 := New(ErrCodeToolExecution, "tool failed")
+	protoEvent2 := err2.ToProto()
+
+	if protoEvent2.Metadata != nil {
+		t.Errorf("expected nil metadata for error without context, got %v", protoEvent2.Metadata)
+	}
+
+	// Test error with numeric context
+	err3 := New(ErrCodeLLMTimeout, "LLM timeout").
+		WithContext("retry_count", 3).
+		WithContext("timeout_ms", 30000)
+
+	protoEvent3 := err3.ToProto()
+
+	if protoEvent3.Metadata["retry_count"] != "3" {
+		t.Errorf("expected retry_count '3', got %s", protoEvent3.Metadata["retry_count"])
+	}
+
+	if protoEvent3.Metadata["timeout_ms"] != "30000" {
+		t.Errorf("expected timeout_ms '30000', got %s", protoEvent3.Metadata["timeout_ms"])
+	}
+}
+
+func TestSerializeValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    interface{}
+		expected string
+	}{
+		{"string", "hello", "hello"},
+		{"int", 42, "42"},
+		{"int32", int32(42), "42"},
+		{"int64", int64(42), "42"},
+		{"uint", uint(42), "42"},
+		{"uint32", uint32(42), "42"},
+		{"uint64", uint64(42), "42"},
+		{"float32", float32(3.14), "3.14"},
+		{"float64", 3.14, "3.14"},
+		{"bool true", true, "true"},
+		{"bool false", false, "false"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SerializeValue(tt.value)
+			if result != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, result)
+			}
+		})
+	}
+}

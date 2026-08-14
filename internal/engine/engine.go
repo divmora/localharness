@@ -1756,6 +1756,49 @@ func (e *Engine) emitErrorStep(msg string) {
 	})
 }
 
+// emitStructuredErrorStep emits a system error step with structured error metadata.
+func (e *Engine) emitStructuredErrorStep(err error) {
+	var hErr *errors.HarnessError
+	if errors.As(err, &hErr) {
+		// Convert HarnessError to ErrorInfo with structured context
+		errorInfo := &pb.ErrorInfo{
+			Message: hErr.Message,
+			Code:    string(hErr.Code),
+		}
+
+		// Add structured context as additional metadata
+		if hErr.Context != nil && len(hErr.Context) > 0 {
+			if errorInfo.Metadata == nil {
+				errorInfo.Metadata = make(map[string]string)
+			}
+			for key, value := range hErr.Context {
+				errorInfo.Metadata[key] = errors.SerializeValue(value)
+			}
+		}
+
+		// Add component if set
+		if hErr.Component != "" {
+			if errorInfo.Metadata == nil {
+				errorInfo.Metadata = make(map[string]string)
+			}
+			errorInfo.Metadata["component"] = hErr.Component
+		}
+
+		e.emitStep(&pb.StepUpdate{
+			ConversationId: e.convID,
+			TrajectoryId:   e.trajectoryID,
+			StepIndex:      e.nextStepIndex(),
+			Source:         pb.StepUpdate_SOURCE_SYSTEM,
+			State:          pb.StepUpdate_STATE_ERROR,
+			Target:         pb.StepUpdate_TARGET_USER,
+			ErrorInfo:      errorInfo,
+		})
+	} else {
+		// Fallback to legacy error format
+		e.emitErrorStep(err.Error())
+	}
+}
+
 func (e *Engine) nextStepIndex() int32 {
 	return e.stepIndex.Add(1) - 1
 }

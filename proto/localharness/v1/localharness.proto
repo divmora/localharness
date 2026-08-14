@@ -150,6 +150,7 @@ message ErrorEvent {
   string message = 1;
   string code = 2;
   bool fatal = 3;
+  map<string, string> metadata = 4;  // Structured error context (e.g., trajectory_id, component, operation)
 }
 
 // ═══════════════════════════════════════════════════════════════════════

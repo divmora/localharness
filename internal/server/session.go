@@ -1165,6 +1165,22 @@ func (s *Session) sendError(code, message string, fatal bool) {
 	})
 }
 
+// sendStructuredError sends a structured HarnessError as a protobuf ErrorEvent
+func (s *Session) sendStructuredError(err error, fatal bool) {
+	var hErr *errors.HarnessError
+	if errors.As(err, &hErr) {
+		// Convert HarnessError to protobuf ErrorEvent with metadata
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_Error{
+				Error: hErr.ToProto(),
+			},
+		})
+	} else {
+		// Fallback to legacy error format for non-structured errors
+		s.sendError("UNKNOWN_ERROR", err.Error(), fatal)
+	}
+}
+
 func mapProtoMessageToLLM(msg *pb.ConversationMessage) llm.Message {
 	llmMsg := llm.Message{
 		Role:    msg.Role,
