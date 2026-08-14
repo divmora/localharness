@@ -5,13 +5,34 @@ import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X 
 
 export function TopBar() {
   const [platform, setPlatform] = useState<string>('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
+    const window = getCurrentWebviewWindow();
+    
+    const checkFullscreen = async () => {
+      try {
+        setIsFullscreen(await window.isFullscreen());
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    
+    checkFullscreen();
+    
+    const unlisten = window.onResized(() => {
+      checkFullscreen();
+    });
+
     try {
       setPlatform(osType()); // 'macos', 'windows', 'linux'
     } catch {
       setPlatform('unknown');
     }
+
+    return () => {
+      unlisten.then(f => f());
+    };
   }, []);
 
   const handleMinimize = () => getCurrentWebviewWindow().minimize();
@@ -27,16 +48,8 @@ export function TopBar() {
     >
       {/* Left Area (Mac traffic lights space + controls) */}
       <div className="flex items-center flex-1 h-full pointer-events-none" data-tauri-drag-region>
-        {isMac && <div className="w-[75px] shrink-0" data-tauri-drag-region />}
-        <div className="flex items-center gap-1 pointer-events-auto">
-          {/* Back / Forward */}
-          <button className="p-1 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors">
-            <ArrowLeft size={16} />
-          </button>
-          <button className="p-1 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors mr-2">
-            <ArrowRight size={16} />
-          </button>
-
+        {isMac && !isFullscreen && <div className="w-[75px] shrink-0" data-tauri-drag-region />}
+        <div className="flex items-center gap-2 pointer-events-auto pl-2">
           {/* Segmented Control */}
           <div className="flex items-center bg-bg-primary rounded-md p-0.5 border border-border-primary">
             <button className="px-3 py-1 rounded bg-bg-tertiary text-text-primary text-xs font-medium shadow-sm">
@@ -44,6 +57,26 @@ export function TopBar() {
             </button>
             <button className="px-3 py-1 rounded text-text-secondary hover:text-text-primary text-xs font-medium transition-colors">
               Editor
+            </button>
+          </div>
+
+          {/* Search Icon */}
+          <button className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors ml-1">
+            <Search size={16} />
+          </button>
+
+          {/* Toggle Sidebar Icon */}
+          <button className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors" title="Toggle Agent Sidebar (⌘B)">
+            <SplitSquareHorizontal size={16} />
+          </button>
+
+          {/* Back / Forward */}
+          <div className="flex items-center ml-1">
+            <button className="p-1 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors">
+              <ArrowLeft size={16} />
+            </button>
+            <button className="p-1 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors">
+              <ArrowRight size={16} />
             </button>
           </div>
         </div>
@@ -61,9 +94,6 @@ export function TopBar() {
       {/* Right Area (Controls and Win/Linux Window Buttons) */}
       <div className="flex items-center justify-end flex-1 gap-2 h-full pointer-events-none" data-tauri-drag-region>
         <div className="flex items-center gap-2 pointer-events-auto pr-2">
-          <button className="p-1.5 text-text-secondary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors" title="Toggle Sidebar">
-            <SplitSquareHorizontal size={16} />
-          </button>
           <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ring-bg-primary overflow-hidden">
             NG
           </div>
