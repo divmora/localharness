@@ -114,60 +114,62 @@ export function ProjectSelectionModal({ isOpen, onClose, onSelectProject }: Proj
         </div>
 
         {/* List Content */}
-        <div className="max-h-[400px] overflow-y-auto p-2">
+        <div className="max-h-[400px] overflow-y-auto p-2 flex flex-col gap-1">
           {projects.length === 0 && search === '' ? (
             <div className="text-center py-8 text-sm text-text-tertiary">
               No recent projects found
             </div>
+          ) : filteredProjects.length === 0 ? (
+            <div className="text-center py-8 text-sm text-text-tertiary">
+              No results match your search
+            </div>
           ) : (
-            <div className="flex flex-col gap-1">
-              {filteredProjects.map((project, idx) => (
-                <button
-                  key={project.id}
-                  onClick={() => {
-                    onSelectProject(project.path, project);
-                    onClose();
-                  }}
-                  onMouseEnter={() => setSelectedIndex(idx)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors ${
-                    idx === selectedIndex
-                      ? 'bg-blue-600 text-white'
-                      : 'text-text-primary hover:bg-bg-tertiary'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 overflow-hidden">
-                    <Folder size={16} className={idx === selectedIndex ? "opacity-100" : "opacity-70"} />
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="font-medium truncate">{project.path.split(/[/\\]/).pop() || project.path}</span>
-                      {project.target_kind === 'ssh' && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${idx === selectedIndex ? 'bg-blue-500 text-white border-none' : 'bg-bg-tertiary border border-border-primary'}`}>
-                          SSH: {project.target_host}
-                        </span>
-                      )}
-                      <span className={`text-xs truncate ${idx === selectedIndex ? 'text-blue-200' : 'text-text-tertiary'}`}>
-                        {project.path}
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              ))}
-
+            filteredProjects.map((project, idx) => (
               <button
-                onClick={handleBrowse}
-                onMouseEnter={() => setSelectedIndex(filteredProjects.length)}
+                key={project.id}
+                onClick={() => {
+                  onSelectProject(project.path, project);
+                  onClose();
+                }}
+                onMouseEnter={() => setSelectedIndex(idx)}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors ${
-                  selectedIndex === filteredProjects.length
+                  idx === selectedIndex
                     ? 'bg-blue-600 text-white'
                     : 'text-text-primary hover:bg-bg-tertiary'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <FolderOpen size={16} className={selectedIndex === filteredProjects.length ? "opacity-100" : "opacity-70"} />
-                  <span>Browse...</span>
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <Folder size={16} className={idx === selectedIndex ? "opacity-100" : "opacity-70"} />
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="font-medium truncate">{project.path.split(/[/\\]/).pop() || project.path}</span>
+                    {project.target_kind === 'ssh' && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${idx === selectedIndex ? 'bg-blue-500 text-white border-none' : 'bg-bg-tertiary border border-border-primary'}`}>
+                        SSH: {project.target_host}
+                      </span>
+                    )}
+                    <span className={`text-xs truncate ${idx === selectedIndex ? 'text-blue-200' : 'text-text-tertiary'}`}>
+                      {project.path}
+                    </span>
+                  </div>
                 </div>
               </button>
-            </div>
+            ))
           )}
+
+          <button
+            onClick={handleBrowse}
+            onMouseEnter={() => setSelectedIndex(filteredProjects.length)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors ${
+              selectedIndex === filteredProjects.length
+                ? 'bg-blue-600 text-white'
+                : 'text-text-primary hover:bg-bg-tertiary'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <FolderOpen size={16} className={selectedIndex === filteredProjects.length ? "opacity-100" : "opacity-70"} />
+              <span>Browse...</span>
+            </div>
+          </button>
         </div>
 
         {/* Footer */}
