@@ -114,10 +114,7 @@ function App() {
   const handleStartPromptSession = (prompt: string) => {
     const newId = crypto.randomUUID();
     setActiveSessionId(newId);
-    // Give the WebSocket a tiny moment to connect before firing off the prompt
-    setTimeout(() => {
-      sendPrompt(prompt);
-    }, 500);
+    sendPrompt(prompt);
   };
 
   const handleConnectSSH = async (target: ConnectionTarget) => {

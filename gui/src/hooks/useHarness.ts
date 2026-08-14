@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import WebSocket from '@tauri-apps/plugin-websocket';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
@@ -35,6 +35,7 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [socket, setSocket] = useState<WebSocket | null>(null);
+    const messageQueueRef = useRef<any[]>([]);
 
     useEffect(() => {
         let ws: WebSocket | null = null;
@@ -203,6 +204,16 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 
                 setSocket(ws);
                 
+                // Flush queued messages
+                while (messageQueueRef.current.length > 0) {
+                    const data = messageQueueRef.current.shift();
+                    try {
+                        await ws.send({ type: 'Binary', data });
+                    } catch (err) {
+                        console.error("Failed to send queued message", err);
+                    }
+                }
+                
             } catch (e: any) {
                 console.error("Failed to connect to harness:", e);
                 setConnectionError(e.toString());
@@ -218,8 +229,6 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
     }, [activeSessionId]);
 
     const sendPrompt = useCallback(async (text: string) => {
-        if (!socket) return;
-        
         const userMsg = create(UserMessageSchema, {
             content: text,
         });
@@ -231,17 +240,17 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             }
         });
         
-        const bytes = toBinary(ClientMessageSchema, clientMsg);
-        await socket.send({
-            type: 'Binary',
-            data: Array.from(bytes)
-        });
+        const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
+        if (!socket) {
+            messageQueueRef.current.push(data);
+            return;
+        }
+        
+        await socket.send({ type: 'Binary', data });
     }, [socket]);
 
     const submitQuestionResponse = useCallback(async (requestId: string, answers: any[], skipped: boolean) => {
-        if (!socket) return;
-        
         const qResponse = create(QuestionResponseSchema, {
             requestId: requestId,
             answers: answers,
@@ -255,16 +264,17 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             }
         });
         
-        const bytes = toBinary(ClientMessageSchema, clientMsg);
-        await socket.send({
-            type: 'Binary',
-            data: Array.from(bytes)
-        });
+        const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
+        
+        if (!socket) {
+            messageQueueRef.current.push(data);
+            return;
+        }
+        
+        await socket.send({ type: 'Binary', data });
     }, [socket]);
 
     const submitPermissionResponse = useCallback(async (requestId: string, approved: boolean, denialReason: string = "") => {
-        if (!socket) return;
-        
         const pResponse = create(PermissionResponseSchema, {
             requestId: requestId,
             approved: approved,
@@ -278,11 +288,14 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             }
         });
         
-        const bytes = toBinary(ClientMessageSchema, clientMsg);
-        await socket.send({
-            type: 'Binary',
-            data: Array.from(bytes)
-        });
+        const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
+        
+        if (!socket) {
+            messageQueueRef.current.push(data);
+            return;
+        }
+        
+        await socket.send({ type: 'Binary', data });
     }, [socket]);
 
     return { 
