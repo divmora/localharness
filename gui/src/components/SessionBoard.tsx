@@ -54,20 +54,20 @@ export function SessionBoard({ sessions, onSelectSession, onNewSession }: Sessio
       {/* Top Bar */}
       <div className="p-4 border-b border-[#0A0A0A] flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="flex bg-[#0A0A0A] rounded p-1 text-sm font-medium">
+          <div className="flex bg-bg-secondary rounded p-1 text-sm font-medium">
             <button className="px-3 py-1 bg-[#262626] text-[#F9FAFB] rounded shadow-sm">Board</button>
             <button className="px-3 py-1 text-[#6c7086] hover:text-[#F9FAFB]">List</button>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-[#0A0A0A] px-2 py-1 rounded text-xs border border-[#262626]">
+            <div className="flex items-center gap-1 bg-bg-secondary px-2 py-1 rounded text-xs border border-[#262626]">
               <Clock size={12} className="text-[#6c7086]" />
               <span className="text-[#9CA3AF]">Time is <span className="text-[#F9FAFB]">Any time</span></span>
             </div>
-            <div className="flex items-center gap-1 bg-[#0A0A0A] px-2 py-1 rounded text-xs border border-[#262626]">
+            <div className="flex items-center gap-1 bg-bg-secondary px-2 py-1 rounded text-xs border border-[#262626]">
               <Filter size={12} className="text-[#6c7086]" />
               <span className="text-[#9CA3AF]">Archived is <span className="text-[#F9FAFB]">Excluded</span></span>
             </div>
-            <button className="p-1 hover:bg-[#0A0A0A] rounded border border-transparent hover:border-[#262626] text-[#9CA3AF]">
+            <button className="p-1 hover:bg-bg-secondary rounded border border-transparent hover:border-[#262626] text-[#9CA3AF]">
               <Filter size={14} />
             </button>
           </div>
@@ -78,7 +78,7 @@ export function SessionBoard({ sessions, onSelectSession, onNewSession }: Sessio
             <input 
               type="text" 
               placeholder="Search sessions..." 
-              className="bg-[#0A0A0A] text-sm py-1.5 pl-8 pr-4 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] w-[250px]"
+              className="bg-bg-secondary text-sm py-1.5 pl-8 pr-4 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] w-[250px]"
             />
           </div>
           <div className="flex items-center gap-2 text-sm font-medium">

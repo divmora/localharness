@@ -112,7 +112,7 @@ export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, conn
                 <div 
                   key={file.path}
                   onClick={() => setActiveFilePath(file.path)}
-                  className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md cursor-pointer border-t border-l border-r border-transparent ${isActive ? 'bg-[#121212] text-[#3B82F6] border-[#262626]' : 'text-[#9CA3AF] hover:bg-[#0A0A0A]'}`}
+                  className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md cursor-pointer border-t border-l border-r border-transparent ${isActive ? 'bg-[#121212] text-[#3B82F6] border-[#262626]' : 'text-[#9CA3AF] hover:bg-bg-secondary'}`}
                 >
                   <span className="truncate max-w-[120px]">{name}</span>
                   <button onClick={(e) => closeFile(file.path, e)} className={`p-0.5 rounded-sm hover:bg-[#262626] ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -143,9 +143,9 @@ export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, conn
               />
             </Panel>
             
-            <PanelResizeHandle className="h-1 bg-[#0A0A0A] hover:bg-[#3B82F6]/50 transition-colors z-10" />
+            <PanelResizeHandle className="h-1 bg-bg-secondary hover:bg-[#3B82F6]/50 transition-colors z-10" />
             
-            <Panel defaultSize={30} minSize={10} className="relative bg-[#0A0A0A]">
+            <Panel defaultSize={30} minSize={10} className="relative bg-bg-secondary">
               <div className="absolute top-0 left-0 right-0 bg-[#000000] px-3 py-1.5 border-b border-[#262626] z-10 flex items-center gap-2">
                  <TerminalIcon size={12} className="text-[#9CA3AF]" />
                  <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">Terminal Output</span>

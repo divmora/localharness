@@ -104,7 +104,7 @@ export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }
             </div>
 
             {/* Path Breadcrumbs */}
-            <div className="px-4 py-2 bg-[#0A0A0A] border-b border-[#262626] text-xs font-mono text-[#9CA3AF] flex items-center gap-2">
+            <div className="px-4 py-2 bg-bg-secondary border-b border-[#262626] text-xs font-mono text-[#9CA3AF] flex items-center gap-2">
               <span className="text-[#3B82F6]">Workspace</span>
               {currentPath !== '.' && (
                 <>

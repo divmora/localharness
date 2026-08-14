@@ -67,7 +67,7 @@ export function EditorPanel({ steps = [], userActiveFile = null, userActiveConte
   // If empty, render the Dashboard
   if (isEmpty) {
     return (
-      <div className="h-full w-full bg-[#0A0A0A] flex flex-col items-center justify-center p-8 text-[#F9FAFB]">
+      <div className="h-full w-full bg-bg-secondary flex flex-col items-center justify-center p-8 text-[#F9FAFB]">
         <div className="w-full max-w-3xl flex flex-col items-center gap-12">
           
           <div className="flex justify-center opacity-80">
@@ -87,7 +87,7 @@ export function EditorPanel({ steps = [], userActiveFile = null, userActiveConte
               <span className="text-xs text-[#6B7280] flex items-center gap-1"><TerminalIcon size={12}/> Local Engine</span>
             </div>
             <div className="border-t border-[#262626] px-4 py-3 flex items-center gap-4 text-xs text-[#9CA3AF]">
-              <span className="flex items-center gap-1 hover:text-white cursor-pointer"><FolderOpen size={14}/> Open directory...</span>
+              <span className="flex items-center gap-1 hover:text-text-primary cursor-pointer"><FolderOpen size={14}/> Open directory...</span>
             </div>
           </div>
 
@@ -168,17 +168,17 @@ export function EditorPanel({ steps = [], userActiveFile = null, userActiveConte
           </div>
         )}
         {activeTab === 'browser' && (
-          <div className="absolute inset-0 flex flex-col bg-white">
-            <div className="flex items-center gap-2 p-2 bg-[#f1f3f4] border-b border-gray-300 shrink-0 text-gray-700">
-              <button className="p-1 hover:bg-gray-200 rounded"><ArrowLeft size={16} /></button>
-              <button className="p-1 hover:bg-gray-200 rounded"><ArrowRight size={16} /></button>
-              <button className="p-1 hover:bg-gray-200 rounded"><RotateCw size={16} /></button>
-              <button className="p-1 hover:bg-gray-200 rounded mr-2"><Home size={16} /></button>
-              <div className="flex-1 bg-white rounded-full px-4 py-1 text-sm border border-gray-300 shadow-inner overflow-hidden text-ellipsis whitespace-nowrap">
+          <div className="absolute inset-0 flex flex-col bg-bg-primary">
+            <div className="flex items-center gap-2 p-2 bg-bg-secondary border-b border-border-primary shrink-0 text-text-secondary">
+              <button className="p-1 hover:bg-bg-secondary rounded"><ArrowLeft size={16} /></button>
+              <button className="p-1 hover:bg-bg-secondary rounded"><ArrowRight size={16} /></button>
+              <button className="p-1 hover:bg-bg-secondary rounded"><RotateCw size={16} /></button>
+              <button className="p-1 hover:bg-bg-secondary rounded mr-2"><Home size={16} /></button>
+              <div className="flex-1 bg-bg-primary rounded-full px-4 py-1 text-sm border border-border-primary shadow-inner overflow-hidden text-ellipsis whitespace-nowrap">
                 {browserUrl}
               </div>
             </div>
-            <div className="flex-1 bg-white flex items-center justify-center">
+            <div className="flex-1 bg-bg-primary flex items-center justify-center">
               <iframe 
                 src={browserUrl} 
                 className="w-full h-full border-0"

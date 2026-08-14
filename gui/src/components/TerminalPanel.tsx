@@ -98,7 +98,7 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
 
   return (
     <div className="h-full flex flex-col bg-[#000000] border-t border-[#262626] overflow-hidden">
-      <div className="h-9 flex items-center justify-between px-4 text-xs bg-[#0A0A0A] border-b border-[#262626]">
+      <div className="h-9 flex items-center justify-between px-4 text-xs bg-bg-secondary border-b border-[#262626]">
         <div className="flex gap-4 h-full">
           {(['problems', 'output', 'debug', 'terminal', 'ports'] as const).map((tab) => (
             <button
@@ -115,9 +115,9 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
           ))}
         </div>
         <div className="flex items-center gap-3 text-[#6c7086]">
-          <button className="hover:text-white"><SplitSquareHorizontal size={14} /></button>
-          <button className="hover:text-white"><Trash2 size={14} /></button>
-          <button className="hover:text-white"><X size={14} /></button>
+          <button className="hover:text-text-primary"><SplitSquareHorizontal size={14} /></button>
+          <button className="hover:text-text-primary"><Trash2 size={14} /></button>
+          <button className="hover:text-text-primary"><X size={14} /></button>
         </div>
       </div>
       

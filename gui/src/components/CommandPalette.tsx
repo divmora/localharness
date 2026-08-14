@@ -206,7 +206,7 @@ export function CommandPalette() {
                   onClick={() => command.action()}
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors ${idx === selectedIndex
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-blue-600 text-text-primary'
                       : 'text-text-primary hover:bg-bg-tertiary'
                     }`}
                 >
@@ -227,7 +227,7 @@ export function CommandPalette() {
                     applyThemeToDom(theme.id);
                   }}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors ${idx === selectedIndex
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-blue-600 text-text-primary'
                       : 'text-text-primary hover:bg-bg-tertiary'
                     }`}
                 >

@@ -35,7 +35,7 @@ export function SessionsPanel({ activeSessionId, onSelectSession, onNewSession, 
           <input 
             type="text" 
             placeholder="Search sessions..." 
-            className="w-full bg-[#0A0A0A] text-[#F9FAFB] placeholder-[#6c7086] text-[13px] py-1.5 pl-8 pr-8 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] transition-colors"
+            className="w-full bg-bg-secondary text-[#F9FAFB] placeholder-[#6c7086] text-[13px] py-1.5 pl-8 pr-8 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] transition-colors"
           />
           <Filter size={14} className="absolute right-2.5 text-[#6c7086] cursor-pointer hover:text-[#F9FAFB]" />
         </div>
@@ -56,7 +56,7 @@ export function SessionsPanel({ activeSessionId, onSelectSession, onNewSession, 
                 className={`p-3 rounded-lg cursor-pointer transition-all group ${
                   activeSessionId === session.id 
                     ? 'bg-[#262626]/40 border border-[#333333]' 
-                    : 'hover:bg-[#0A0A0A] border border-transparent hover:border-[#262626]'
+                    : 'hover:bg-bg-secondary border border-transparent hover:border-[#262626]'
                 }`}
               >
                 <div className="text-[10px] uppercase font-bold text-[#EF4444] mb-1">LOCAL-HARNESS</div>

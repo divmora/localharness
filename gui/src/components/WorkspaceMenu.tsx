@@ -12,7 +12,7 @@ export function WorkspaceMenu({ onNewSession, onOpenFile, onOpenCustomizations, 
     <div className="flex flex-col h-full items-center justify-center bg-[#000000] text-[#F9FAFB] p-8">
       <div className="w-full max-w-sm flex flex-col gap-6">
         
-        <button onClick={onNewSession} className="flex gap-4 p-3 rounded-lg hover:bg-[#0A0A0A] transition-colors text-left group items-start">
+        <button onClick={onNewSession} className="flex gap-4 p-3 rounded-lg hover:bg-bg-secondary transition-colors text-left group items-start">
           <Plus size={18} className="text-[#9CA3AF] group-hover:text-[#F9FAFB] shrink-0 mt-0.5" />
           <div className="flex flex-col">
             <div className="flex items-center justify-between">
@@ -23,7 +23,7 @@ export function WorkspaceMenu({ onNewSession, onOpenFile, onOpenCustomizations, 
           </div>
         </button>
 
-        <button onClick={onOpenFile} className="flex gap-4 p-3 rounded-lg hover:bg-[#0A0A0A] transition-colors text-left group items-start">
+        <button onClick={onOpenFile} className="flex gap-4 p-3 rounded-lg hover:bg-bg-secondary transition-colors text-left group items-start">
           <FileText size={18} className="text-[#9CA3AF] group-hover:text-[#F9FAFB] shrink-0 mt-0.5" />
           <div className="flex flex-col">
             <div className="flex items-center justify-between">
@@ -34,7 +34,7 @@ export function WorkspaceMenu({ onNewSession, onOpenFile, onOpenCustomizations, 
           </div>
         </button>
 
-        <button onClick={onOpenCustomizations} className="flex gap-4 p-3 rounded-lg hover:bg-[#0A0A0A] transition-colors text-left group items-start">
+        <button onClick={onOpenCustomizations} className="flex gap-4 p-3 rounded-lg hover:bg-bg-secondary transition-colors text-left group items-start">
           <SlidersHorizontal size={18} className="text-[#9CA3AF] group-hover:text-[#F9FAFB] shrink-0 mt-0.5" />
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-[#F9FAFB]">Open customizations</span>
@@ -42,7 +42,7 @@ export function WorkspaceMenu({ onNewSession, onOpenFile, onOpenCustomizations, 
           </div>
         </button>
 
-        <button onClick={onViewDiffs} className="flex gap-4 p-3 rounded-lg hover:bg-[#0A0A0A] transition-colors text-left group items-start opacity-70">
+        <button onClick={onViewDiffs} className="flex gap-4 p-3 rounded-lg hover:bg-bg-secondary transition-colors text-left group items-start opacity-70">
           <Diff size={18} className="text-[#9CA3AF] group-hover:text-[#F9FAFB] shrink-0 mt-0.5" />
           <div className="flex flex-col">
             <span className="text-sm font-semibold text-[#F9FAFB]">View diffs</span>

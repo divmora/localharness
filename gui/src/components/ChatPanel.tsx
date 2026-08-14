@@ -21,7 +21,7 @@ function QuestionForm({ action, state, onSubmit }: { action: any, state: StepUpd
   const isDone = state === StepUpdate_State.DONE;
 
   if (isDone) {
-    if (action.skipped) return <div className="text-gray-400 italic text-xs mt-2">Skipped question.</div>;
+    if (action.skipped) return <div className="text-text-tertiary italic text-xs mt-2">Skipped question.</div>;
     return (
       <div className="mt-2 flex flex-col gap-2">
         {action.questions?.map((q: any, i: number) => (
@@ -174,7 +174,7 @@ export function ChatPanel({
                 </div>
                 <div className="flex flex-col">
                   <span className="text-xs font-semibold text-blue-200">Spawned Subagent</span>
-                  <span className="text-[10px] text-gray-400">{sub.role || sub.typeName}</span>
+                  <span className="text-[10px] text-text-tertiary">{sub.role || sub.typeName}</span>
                 </div>
                 {msg.state !== StepUpdate_State.DONE && (
                   <div className="ml-auto flex items-center justify-center w-4 h-4">
@@ -194,7 +194,7 @@ export function ChatPanel({
             </div>
             <div className="flex flex-col">
               <span className="text-xs font-semibold text-purple-200">Browser Agent</span>
-              <span className="text-[10px] text-gray-400">{taskName}</span>
+              <span className="text-[10px] text-text-tertiary">{taskName}</span>
             </div>
             {msg.state !== StepUpdate_State.DONE && (
               <div className="ml-auto flex items-center justify-center w-4 h-4">
@@ -250,7 +250,7 @@ export function ChatPanel({
               </div>
               <div className="flex flex-col flex-1 overflow-hidden">
                 <span className="text-xs font-semibold text-blue-300 truncate">Artifact: {fileName}</span>
-                <span className="text-[11px] text-gray-400 truncate">{summary}</span>
+                <span className="text-[11px] text-text-tertiary truncate">{summary}</span>
               </div>
             </div>
           );
