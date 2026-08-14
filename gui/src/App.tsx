@@ -223,57 +223,69 @@ function App() {
             </>
           )}
 
-          {/* Center Pane: Main Content & Terminal */}
-          <Panel defaultSize={60} minSize={30} className="flex flex-col bg-bg-primary">
+          {/* Main Workspace Area (Chat + Editor + Terminal) */}
+          <Panel className="flex flex-col bg-bg-primary">
             <PanelGroup orientation="vertical">
+              {/* Top Section: Chat + Editor */}
               <Panel defaultSize={70} minSize={20} className="flex flex-col">
-                {currentView === 'customizations' ? (
-                  <CustomizationsPage 
-                    onClose={() => setCurrentView('main')} 
-                    connectionTarget={connectionTarget}
-                  />
-                ) : currentView === 'sessions' ? (
-                  <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
-                ) : !activeSessionId ? (
-                  <CenteredEmptyState 
-                    sessions={sessions} 
-                    onSelectSession={handleSelectSession} 
-                    onSubmitPrompt={handleStartPromptSession}
-                    onOpenSSHModal={() => setSshModalOpen(true)}
-                    onOpenSessionsManager={() => setCurrentView('sessions')}
-                    connectionTarget={connectionTarget}
-                    workspace={workspace}
-                    onSelectWorkspace={setWorkspace}
-                  />
-                ) : (
-                  <ChatPanel 
-                    connected={connected} 
-                    connectionError={connectionError}
-                    steps={steps} 
-                    onSend={sendPrompt} 
-                    onSubmitQuestionResponse={submitQuestionResponse} 
-                    onSubmitPermissionResponse={submitPermissionResponse}
-                  />
-                )}
+                <PanelGroup orientation="horizontal">
+                  {/* Chat / Main Content */}
+                  <Panel defaultSize={50} minSize={30} className="flex flex-col">
+                    {currentView === 'customizations' ? (
+                      <CustomizationsPage 
+                        onClose={() => setCurrentView('main')} 
+                        connectionTarget={connectionTarget}
+                      />
+                    ) : currentView === 'sessions' ? (
+                      <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
+                    ) : !activeSessionId ? (
+                      <CenteredEmptyState 
+                        sessions={sessions} 
+                        onSelectSession={handleSelectSession} 
+                        onSubmitPrompt={handleStartPromptSession}
+                        onOpenSSHModal={() => setSshModalOpen(true)}
+                        onOpenSessionsManager={() => setCurrentView('sessions')}
+                        connectionTarget={connectionTarget}
+                        workspace={workspace}
+                        onSelectWorkspace={setWorkspace}
+                      />
+                    ) : (
+                      <ChatPanel 
+                        connected={connected} 
+                        connectionError={connectionError}
+                        steps={steps} 
+                        onSend={sendPrompt} 
+                        onSubmitQuestionResponse={submitQuestionResponse} 
+                        onSubmitPermissionResponse={submitPermissionResponse}
+                      />
+                    )}
+                  </Panel>
+
+                  <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+
+                  {/* Editor */}
+                  <Panel defaultSize={50} minSize={20} className="flex flex-col">
+                    <WorkspacePanel 
+                      steps={steps} 
+                      onNewSession={handleNewSession} 
+                      onOpenCustomizations={() => setCurrentView('customizations')}
+                    />
+                  </Panel>
+                </PanelGroup>
               </Panel>
               
               <PanelResizeHandle className="h-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
               
-              <Panel defaultSize={30} minSize={10}>
-                <TerminalPanel steps={steps} />
+              {/* Bottom Section: Terminal */}
+              <Panel defaultSize={30} minSize={10} className="relative bg-bg-secondary">
+                 <div className="absolute top-0 left-0 right-0 bg-[#000000] px-3 py-1.5 border-b border-[#262626] z-10 flex items-center gap-2">
+                   <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">Terminal Output</span>
+                 </div>
+                 <div className="pt-8 h-full">
+                   <TerminalPanel steps={steps} />
+                 </div>
               </Panel>
             </PanelGroup>
-          </Panel>
-
-          <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
-
-          {/* Right Pane: Workspace */}
-          <Panel defaultSize={20} minSize={15} className="flex flex-col">
-            <WorkspacePanel 
-              steps={steps} 
-              onNewSession={handleNewSession} 
-              onOpenCustomizations={() => setCurrentView('customizations')}
-            />
           </Panel>
         </PanelGroup>
       </div>

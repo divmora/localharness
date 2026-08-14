@@ -839,10 +839,13 @@ async fn start_harness(
                         }
 
                         // Keep processing stderr logs in background so sidecar's pipes aren't closed
+                        let app_clone = app.clone();
                         tauri::async_runtime::spawn(async move {
                             while let Some(event) = rx.recv().await {
                                 if let CommandEvent::Stderr(line) = event {
-                                    eprintln!("SIDECAR STDERR: {}", String::from_utf8_lossy(&line));
+                                    let log_str = String::from_utf8_lossy(&line).to_string();
+                                    eprintln!("SIDECAR STDERR: {}", log_str);
+                                    let _ = app_clone.emit("sidecar-log", log_str);
                                 }
                             }
                         });

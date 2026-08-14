@@ -1,11 +1,11 @@
 import { useState, useMemo } from 'react';
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+
 import { EditorPanel } from './EditorPanel';
-import { TerminalPanel } from './TerminalPanel';
+
 import { WorkspaceMenu } from './WorkspaceMenu';
 import { FileExplorer } from './FileExplorer';
 
-import { FileCode2, Terminal as TerminalIcon, X } from 'lucide-react';
+import { FileCode2, X } from 'lucide-react';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 import { ConnectionTarget } from '../hooks/useHarness';
 
@@ -134,27 +134,11 @@ export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, conn
             onViewDiffs={() => {}} 
           />
         ) : (
-          <PanelGroup orientation="vertical">
-            <Panel defaultSize={70} className="relative bg-[#121212]">
-              <EditorPanel 
-                steps={steps} 
-                userActiveFile={activeFilePath} 
-                userActiveContent={activeFileContent} 
-              />
-            </Panel>
-            
-            <PanelResizeHandle className="h-1 bg-bg-secondary hover:bg-[#3B82F6]/50 transition-colors z-10" />
-            
-            <Panel defaultSize={30} minSize={10} className="relative bg-bg-secondary">
-              <div className="absolute top-0 left-0 right-0 bg-[#000000] px-3 py-1.5 border-b border-[#262626] z-10 flex items-center gap-2">
-                 <TerminalIcon size={12} className="text-[#9CA3AF]" />
-                 <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">Terminal Output</span>
-              </div>
-              <div className="pt-8 h-full">
-                <TerminalPanel steps={steps} />
-              </div>
-            </Panel>
-          </PanelGroup>
+          <EditorPanel 
+            steps={steps} 
+            userActiveFile={activeFilePath} 
+            userActiveContent={activeFileContent} 
+          />
         )}
       </div>
     </div>

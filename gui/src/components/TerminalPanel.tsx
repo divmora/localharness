@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SplitSquareHorizontal, Trash2, X } from 'lucide-react';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 import '@xterm/xterm/css/xterm.css';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
 interface TerminalPanelProps {
   steps?: StepUpdate[];
@@ -48,7 +49,15 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
     });
     resizeObserver.observe(terminalRef.current);
     
+    let unlistenFn: UnlistenFn | null = null;
+    listen<string>('sidecar-log', (event) => {
+      term.writeln(`\x1b[36m[Sidecar]\x1b[0m ${event.payload}`);
+    }).then(unlisten => {
+      unlistenFn = unlisten;
+    });
+
     return () => {
+      if (unlistenFn) unlistenFn();
       resizeObserver.disconnect();
       term.dispose();
       termInstanceRef.current = null;
