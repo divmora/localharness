@@ -17,6 +17,7 @@ import (
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/conversation"
 	"github.com/divmora/localharness/internal/engine"
+	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/llm"
 	mcpbridge "github.com/divmora/localharness/internal/mcp"
 	"github.com/divmora/localharness/internal/discovery"
@@ -643,7 +644,12 @@ func (s *Session) hostToolHandler(ctx context.Context, tc llm.ToolCall, step *pb
 	case <-ctx.Done():
 		return "", true, ctx.Err()
 	case <-time.After(5 * time.Minute):
-		return "", true, fmt.Errorf("host tool %q timed out waiting for result (5m)", tc.Name)
+		return "", true, errors.New(errors.ErrCodeToolTimeout,
+			"host tool timed out waiting for result").
+			WithContext("tool", tc.Name).
+			WithContext("timeout", "5m").
+			WithContext("conversation_id", s.conv.ID).
+			WithComponent("session")
 	}
 }
 
@@ -796,7 +802,11 @@ func (s *Session) createProvider(cfg *pb.HarnessConfig) (llm.Provider, error) {
 			model = endpoint.DefaultModel
 			s.logger.Info("using LiteLLM endpoint from global config", "endpoint", endpointName)
 		} else if cfg.LitellmEndpoint != "" {
-			return nil, fmt.Errorf("litellm endpoint %q not found in ~/.divmora/config/litellm.json", endpointName)
+			return nil, errors.New(errors.ErrCodeConfiguration,
+				"LiteLLM endpoint not found in configuration").
+				WithContext("endpoint", endpointName).
+				WithContext("config_file", "~/.divmora/config/litellm.json").
+				WithComponent("session")
 		}
 	}
 
@@ -812,7 +822,10 @@ func (s *Session) createProvider(cfg *pb.HarnessConfig) (llm.Provider, error) {
 	}
 
 	if baseURL == "" {
-		return nil, fmt.Errorf("no LiteLLM base URL configured (missing in ADK config and no valid default endpoint in ~/.divmora/config/litellm.json)")
+		return nil, errors.New(errors.ErrCodeConfiguration,
+			"no LiteLLM base URL configured").
+			WithContext("config_source", "ADK config and ~/.divmora/config/litellm.json").
+			WithComponent("session")
 	}
 
 	primary, err := llm.NewOpenAIProvider(llm.OpenAIConfig{

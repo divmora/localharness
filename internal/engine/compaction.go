@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/llm"
 )
 
@@ -209,7 +210,10 @@ func doCompaction(
 
 	summaryResp, err := provider.Generate(ctx, summaryReq)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compaction LLM call: %w", err)
+		return nil, nil, errors.Wrap(err, errors.ErrCodeLLMProvider,
+			"compaction LLM call failed").
+			WithContext("operation", "compaction").
+			WithComponent("engine")
 	}
 
 	summary := summaryResp.Content

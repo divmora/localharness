@@ -16,6 +16,7 @@ import (
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/conversation"
+	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/llm"
 	mcpbridge "github.com/divmora/localharness/internal/mcp"
 	"github.com/divmora/localharness/internal/tools"
@@ -558,7 +559,12 @@ drained:
 		if err != nil {
 			e.emitErrorStep(fmt.Sprintf("LLM error: %v", err))
 			e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
-			return fmt.Errorf("engine: LLM call failed: %w", err)
+			return errors.Wrap(err, errors.ErrCodeLLMProvider,
+				"LLM call failed").
+				WithContext("model", e.provider.ModelName()).
+				WithContext("trajectory_id", e.trajectoryID).
+				WithContext("conversation_id", e.convID).
+				WithComponent("engine")
 		}
 
 		// Emit usage
@@ -668,7 +674,12 @@ drained:
 	// Exceeded max turns
 	e.emitErrorStep("exceeded maximum agentic loop iterations")
 	e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
-	return fmt.Errorf("engine: exceeded max turns (%d)", e.maxTurns)
+	return errors.New(errors.ErrCodeMaxTurnsExceeded,
+		"exceeded maximum agentic loop iterations").
+		WithContext("max_turns", e.maxTurns).
+		WithContext("trajectory_id", e.trajectoryID).
+		WithContext("conversation_id", e.convID).
+		WithComponent("engine")
 }
 
 // llmCallTimeout is the maximum time allowed for a single LLM API call
@@ -918,7 +929,13 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				err = fmt.Errorf("tool %q panicked: %v", tc.Name, r)
+				err = errors.New(errors.ErrCodeToolExecution,
+					"tool panicked").
+					WithContext("tool", tc.Name).
+					WithContext("panic", r).
+					WithContext("trajectory_id", e.trajectoryID).
+					WithContext("conversation_id", e.convID).
+					WithComponent("engine")
 				e.logger.Error("tool panic recovered", "tool", tc.Name, "panic", r)
 			}
 		}()
@@ -958,7 +975,12 @@ func (e *Engine) executeHostTool(ctx context.Context, tc llm.ToolCall, step *pb.
 			Code:    "HOST_TOOL_NO_HANDLER",
 		}
 		e.emitStep(step)
-		return fmt.Errorf("host tool %q: no handler registered", tc.Name)
+		return errors.New(errors.ErrCodeToolExecution,
+			"no handler registered for host tool").
+			WithContext("tool", tc.Name).
+			WithContext("trajectory_id", e.trajectoryID).
+			WithContext("conversation_id", e.convID).
+			WithComponent("engine")
 	}
 
 	// Transition to WAITING — tells the SDK client to execute the tool
@@ -977,7 +999,12 @@ func (e *Engine) executeHostTool(ctx context.Context, tc llm.ToolCall, step *pb.
 			Code:    "HOST_TOOL_ERROR",
 		}
 		e.emitStep(step)
-		return fmt.Errorf("host tool %q: %w", tc.Name, err)
+		return errors.Wrap(err, errors.ErrCodeToolExecution,
+			"host tool execution failed").
+			WithContext("tool", tc.Name).
+			WithContext("trajectory_id", e.trajectoryID).
+			WithContext("conversation_id", e.convID).
+			WithComponent("engine")
 	}
 
 	e.logger.Info("host tool result received", "tool", tc.Name, "is_error", isError, "result_len", len(resultJSON))
