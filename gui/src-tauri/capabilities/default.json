@@ -11,6 +11,9 @@
     "opener:default",
     "shell:default",
     "websocket:default",
-    "dialog:default"
+    "dialog:default",
+    "core:webview:allow-create-webview-window",
+    "notification:default",
+    "core:tray:default"
   ]
 }

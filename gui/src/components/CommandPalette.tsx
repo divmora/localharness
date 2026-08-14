@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Moon, Sun, Settings, ChevronRight } from 'lucide-react';
+import { Search, Moon, Sun, Settings, ChevronRight, Bell } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { useTheme, THEMES, Theme } from '../hooks/useTheme';
 
 type PaletteMode = 'root' | 'theme';
@@ -29,6 +30,22 @@ export function CommandPalette() {
       action: () => {
         setMode('theme');
         setSearch('');
+      }
+    },
+    {
+      id: 'test-notification',
+      name: 'System: Send Test Notification',
+      icon: <Bell size={16} className="opacity-70" />,
+      action: async () => {
+        let permissionGranted = await isPermissionGranted();
+        if (!permissionGranted) {
+          const permission = await requestPermission();
+          permissionGranted = permission === 'granted';
+        }
+        if (permissionGranted) {
+          sendNotification({ title: 'Hello from LocalHarness', body: 'This is a test notification!' });
+        }
+        setIsOpen(false);
       }
     }
   ];

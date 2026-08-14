@@ -1,9 +1,9 @@
-use std::path::PathBuf;
+use flate2::read::GzDecoder;
+use serde_json::Value;
 use std::fs;
 use std::io::Cursor;
-use flate2::read::GzDecoder;
+use std::path::PathBuf;
 use tar::Archive;
-use serde_json::Value;
 
 pub async fn resolve_localharness() -> Result<PathBuf, String> {
     // 1. Check LOCALHARNESS_BIN env var
@@ -36,8 +36,12 @@ pub async fn resolve_localharness() -> Result<PathBuf, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let release_url = format!("https://api.github.com/repos/divmora/localharness/releases/tags/{}", tag_name);
-    let resp: Value = client.get(&release_url)
+    let release_url = format!(
+        "https://api.github.com/repos/divmora/localharness/releases/tags/{}",
+        tag_name
+    );
+    let resp: Value = client
+        .get(&release_url)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -80,13 +84,17 @@ pub async fn resolve_localharness() -> Result<PathBuf, String> {
         }
     }
 
-    let download_url = download_url.ok_or(format!("Could not find asset {} in latest release", expected_asset))?;
+    let download_url = download_url.ok_or(format!(
+        "Could not find asset {} in latest release",
+        expected_asset
+    ))?;
 
     // Download and extract
     println!("Downloading localharness {} from {}", version, download_url);
     fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
-    let tarball_bytes = client.get(&download_url)
+    let tarball_bytes = client
+        .get(&download_url)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -118,7 +126,9 @@ pub async fn resolve_localharness() -> Result<PathBuf, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&binary_path).map_err(|e| e.to_string())?.permissions();
+        let mut perms = fs::metadata(&binary_path)
+            .map_err(|e| e.to_string())?
+            .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&binary_path, perms).map_err(|e| e.to_string())?;
     }

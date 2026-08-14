@@ -120,9 +120,12 @@ function App() {
       
       new WebviewWindow(`ssh-${Date.now()}`, {
         url: `/?${searchParams.toString()}`,
-        title: `SSH: ${target.host}`,
+        title: `SSH: ${target.host || 'Local'}`,
         width: 1200,
         height: 800
+      }).once('tauri://error', function (e) {
+        console.error("Window creation error:", e);
+        alert("Failed to open window: " + JSON.stringify(e));
       });
     }
   };

@@ -59,7 +59,10 @@ pub struct Space {
 impl DbState {
     pub fn create_space(&self, id: &str, name: &str, installation_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         conn.execute(
             "INSERT INTO spaces (id, name, installation_id, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![id, name, installation_id, now],
@@ -70,7 +73,7 @@ impl DbState {
     pub fn get_spaces(&self, installation_id: &str) -> Result<Vec<Space>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT id, name, installation_id FROM spaces WHERE installation_id = ?1 ORDER BY created_at ASC")?;
-        
+
         let mut spaces = Vec::new();
         let mut rows = stmt.query(params![installation_id])?;
         while let Some(row) = rows.next()? {
@@ -80,7 +83,7 @@ impl DbState {
                 installation_id: row.get(2)?,
             });
         }
-        
+
         Ok(spaces)
     }
 
@@ -129,9 +132,9 @@ impl DbState {
         let mut stmt = conn.prepare(
             "SELECT s.id, s.name FROM session_spaces ss 
              JOIN spaces s ON ss.space_id = s.id 
-             WHERE ss.session_id = ?1"
+             WHERE ss.session_id = ?1",
         )?;
-        
+
         let mut rows = stmt.query(params![session_id])?;
         if let Some(row) = rows.next()? {
             Ok(Some((row.get(0)?, row.get(1)?)))
@@ -144,7 +147,7 @@ impl DbState {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT session_id, space_id FROM session_spaces")?;
         let mut rows = stmt.query([])?;
-        
+
         let mut map = std::collections::HashMap::new();
         while let Some(row) = rows.next()? {
             map.insert(row.get(0)?, row.get(1)?);
