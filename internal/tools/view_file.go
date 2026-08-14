@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/errors"
 )
 
 func registerViewFile(r *Registry) {
@@ -37,18 +38,26 @@ func registerViewFile(r *Registry) {
 func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) error {
 	vf := step.GetViewFile()
 	if vf == nil {
-		return fmt.Errorf("view_file: missing action")
+		return errors.New(errors.ErrCodeToolValidation,
+			"view_file tool missing action").
+			WithContext("component", "view_file")
 	}
 
 	path := vf.Path
 	if path == "" {
-		return fmt.Errorf("view_file: path is required")
+		return errors.New(errors.ErrCodeToolValidation,
+			"view_file path is required").
+			WithContext("component", "view_file")
 	}
 
 	// Workspace validation
 	validPath, err := r.ValidatePath(path)
 	if err != nil {
-		return fmt.Errorf("view_file: %w", err)
+		return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+			"workspace validation failed").
+			WithContext("path", path).
+			WithContext("operation", "view_file").
+			WithComponent("view_file")
 	}
 	path = validPath
 	vf.Path = path
@@ -56,17 +65,29 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	// Check if file exists
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("view_file: %w", err)
+		return errors.Wrap(err, errors.ErrCodeFileNotFound,
+			"file not found").
+			WithContext("path", path).
+			WithContext("operation", "view_file").
+			WithComponent("view_file")
 	}
 
 	if info.IsDir() {
-		return fmt.Errorf("view_file: %s is a directory, use list_dir instead", path)
+		return errors.New(errors.ErrCodeToolValidation,
+			"path is a directory, use list_dir instead").
+			WithContext("path", path).
+			WithContext("operation", "view_file").
+			WithComponent("view_file")
 	}
 
 	// Detect binary files
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("view_file: %w", err)
+		return errors.Wrap(err, errors.ErrCodeFileNotFound,
+			"failed to open file").
+			WithContext("path", path).
+			WithContext("operation", "view_file").
+			WithComponent("view_file")
 	}
 	defer f.Close()
 
@@ -88,7 +109,11 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 	// Rewind and read lines
 	if _, err := f.Seek(0, 0); err != nil {
-		return fmt.Errorf("view_file: seek error: %w", err)
+		return errors.Wrap(err, errors.ErrCodeToolExecution,
+			"failed to seek in file").
+			WithContext("path", path).
+			WithContext("operation", "view_file").
+			WithComponent("view_file")
 	}
 
 	var lines []string
@@ -99,7 +124,11 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		lines = append(lines, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("view_file: read error: %w", err)
+		return errors.Wrap(err, errors.ErrCodeToolExecution,
+			"failed to read file").
+			WithContext("path", path).
+			WithContext("operation", "view_file").
+			WithComponent("view_file")
 	}
 
 	totalLines := len(lines)

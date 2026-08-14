@@ -2,11 +2,11 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/errors"
 )
 
 func registerCreateFile(r *Registry) {
@@ -42,36 +42,57 @@ func registerCreateFile(r *Registry) {
 func executeCreateFile(ctx context.Context, step *pb.StepUpdate, r *Registry) error {
 	cf := step.GetWriteToFile()
 	if cf == nil {
-		return fmt.Errorf("write_to_file: missing action")
+		return errors.New(errors.ErrCodeToolValidation,
+			"write_to_file tool missing action").
+			WithContext("component", "write_to_file")
 	}
 
 	path := cf.Path
 	if path == "" {
-		return fmt.Errorf("write_to_file: path is required")
+		return errors.New(errors.ErrCodeToolValidation,
+			"write_to_file path is required").
+			WithContext("component", "write_to_file")
 	}
 
 	// Workspace validation
 	validPath, err := r.ValidatePath(path)
 	if err != nil {
-		return fmt.Errorf("write_to_file: %w", err)
+		return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+			"workspace validation failed").
+			WithContext("path", path).
+			WithContext("operation", "write_to_file").
+			WithComponent("write_to_file")
 	}
 	path = validPath
 	cf.Path = path
 
 	// Check if file already exists
 	if _, err := os.Stat(path); err == nil && !cf.Overwrite {
-		return fmt.Errorf("write_to_file: file %s already exists (set overwrite=true to replace)", path)
+		return errors.New(errors.ErrCodeToolValidation,
+			"file already exists").
+			WithContext("path", path).
+			WithContext("operation", "write_to_file").
+			WithComponent("write_to_file")
 	}
 
 	// Create parent directories
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("write_to_file: cannot create directory %s: %w", dir, err)
+		return errors.Wrap(err, errors.ErrCodeToolExecution,
+			"failed to create directory").
+			WithContext("directory", dir).
+			WithContext("path", path).
+			WithContext("operation", "write_to_file").
+			WithComponent("write_to_file")
 	}
 
 	// Write file
 	if err := os.WriteFile(path, []byte(cf.Content), 0644); err != nil {
-		return fmt.Errorf("write_to_file: %w", err)
+		return errors.Wrap(err, errors.ErrCodeToolExecution,
+			"failed to write file").
+			WithContext("path", path).
+			WithContext("operation", "write_to_file").
+			WithComponent("write_to_file")
 	}
 
 	cf.Created = true
@@ -82,7 +103,12 @@ func executeCreateFile(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		meta := r.conversationMeta(cf.ArtifactMetadata)
 		if err := r.conversation.SaveArtifactMetadata(filename, meta); err != nil {
 			// Non-fatal: artifact was created, metadata save failed
-			return fmt.Errorf("write_to_file: artifact created but metadata save failed: %w", err)
+			return errors.Wrap(err, errors.ErrCodeToolExecution,
+				"artifact created but metadata save failed").
+				WithContext("path", path).
+				WithContext("filename", filename).
+				WithContext("operation", "write_to_file").
+				WithComponent("write_to_file")
 		}
 
 		// Dispatch artifact feedback if requested

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/errors"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -47,11 +48,15 @@ func registerRunCommand(r *Registry) {
 func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) error {
 	rc := step.GetRunCommand()
 	if rc == nil {
-		return fmt.Errorf("run_command: missing action")
+		return errors.New(errors.ErrCodeToolValidation,
+			"run_command tool missing action").
+			WithContext("component", "run_command")
 	}
 
 	if rc.Command == "" {
-		return fmt.Errorf("run_command: command is required")
+		return errors.New(errors.ErrCodeToolValidation,
+			"run_command command is required").
+			WithContext("component", "run_command")
 	}
 
 	// Validate working directory
@@ -59,7 +64,12 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	if cwd != "" {
 		validCwd, err := r.ValidatePath(cwd)
 		if err != nil {
-			return fmt.Errorf("run_command: invalid cwd: %w", err)
+			return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+				"invalid working directory").
+				WithContext("cwd", cwd).
+				WithContext("command", rc.Command).
+				WithContext("operation", "run_command").
+				WithComponent("run_command")
 		}
 		cwd = validCwd
 	}
@@ -67,14 +77,21 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	// ── Persistent terminal mode ──
 	if rc.Persistent {
 		if r.taskMgr == nil {
-			return fmt.Errorf("run_command: task manager not available for persistent mode")
+			return errors.New(errors.ErrCodeToolExecution,
+				"task manager not available for persistent mode").
+				WithContext("component", "run_command")
 		}
 
 		termID, stdout, exitCode, err := r.taskMgr.RunInTerminal(
 			ctx, rc.Command, cwd, rc.TerminalId, rc.Env, int(rc.TimeoutMs), step,
 		)
 		if err != nil {
-			return fmt.Errorf("run_command: persistent: %w", err)
+			return errors.Wrap(err, errors.ErrCodeToolExecution,
+				"persistent terminal execution failed").
+				WithContext("command", rc.Command).
+				WithContext("cwd", cwd).
+				WithContext("operation", "run_command").
+				WithComponent("run_command")
 		}
 
 		rc.Stdout = truncateOutput(stdout, 100000)
@@ -86,14 +103,21 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	// ── Background mode ──
 	if rc.Background {
 		if r.taskMgr == nil {
-			return fmt.Errorf("run_command: task manager not available for background mode")
+			return errors.New(errors.ErrCodeToolExecution,
+				"task manager not available for background mode").
+				WithContext("component", "run_command")
 		}
 
 		taskID, stdout, err := r.taskMgr.StartBackground(
 			ctx, rc.Command, cwd, rc.Env, int(rc.WaitMsBeforeAsync), step,
 		)
 		if err != nil {
-			return fmt.Errorf("run_command: background: %w", err)
+			return errors.Wrap(err, errors.ErrCodeToolExecution,
+				"background task start failed").
+				WithContext("command", rc.Command).
+				WithContext("cwd", cwd).
+				WithContext("operation", "run_command").
+				WithComponent("run_command")
 		}
 
 		rc.TaskId = taskID
@@ -172,7 +196,12 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			rc.ExitCode = int32(exitErr.ExitCode())
 		} else {
-			return fmt.Errorf("run_command: %w", err)
+			return errors.Wrap(err, errors.ErrCodeToolExecution,
+				"command execution failed").
+				WithContext("command", rc.Command).
+				WithContext("cwd", cwd).
+				WithContext("operation", "run_command").
+				WithComponent("run_command")
 		}
 	} else {
 		rc.ExitCode = 0

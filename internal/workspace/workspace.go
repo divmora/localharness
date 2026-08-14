@@ -3,10 +3,11 @@
 package workspace
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/divmora/localharness/internal/errors"
 )
 
 // Manager validates file paths against configured workspace directories.
@@ -21,15 +22,24 @@ func NewManager(dirs []string) (*Manager, error) {
 	for _, d := range dirs {
 		abs, err := filepath.Abs(d)
 		if err != nil {
-			return nil, fmt.Errorf("invalid workspace path %q: %w", d, err)
+			return nil, errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+				"invalid workspace path").
+				WithContext("path", d).
+				WithContext("component", "workspace")
 		}
 		// Verify directory exists
 		info, err := os.Stat(abs)
 		if err != nil {
-			return nil, fmt.Errorf("workspace %q: %w", abs, err)
+			return nil, errors.Wrap(err, errors.ErrCodeFileNotFound,
+				"workspace directory not found").
+				WithContext("path", abs).
+				WithContext("component", "workspace")
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("workspace %q is not a directory", abs)
+			return nil, errors.New(errors.ErrCodeWorkspaceValidation,
+				"workspace path is not a directory").
+				WithContext("path", abs).
+				WithContext("component", "workspace")
 		}
 		m.workspaces = append(m.workspaces, abs)
 	}
@@ -43,7 +53,10 @@ func NewManager(dirs []string) (*Manager, error) {
 func (m *Manager) AddAllowedPath(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return fmt.Errorf("invalid allowed path %q: %w", path, err)
+		return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+			"invalid allowed path").
+			WithContext("path", path).
+			WithContext("component", "workspace")
 	}
 	m.allowedPaths = append(m.allowedPaths, abs)
 	return nil
@@ -64,7 +77,10 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 			var err error
 			abs, err = filepath.Abs(path)
 			if err != nil {
-				return "", fmt.Errorf("invalid path %q: %w", path, err)
+				return "", errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+					"invalid path resolution").
+					WithContext("path", path).
+					WithContext("component", "workspace")
 			}
 		}
 	}
@@ -95,7 +111,11 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("path %q is outside all configured workspaces", path)
+	return "", errors.New(errors.ErrCodePathTraversal,
+		"path is outside all configured workspaces").
+		WithContext("path", path).
+		WithContext("resolved_path", resolved).
+		WithContext("component", "workspace")
 }
 
 // isSubPath checks if child is within (or equal to) parent directory.

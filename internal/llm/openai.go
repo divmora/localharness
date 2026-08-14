@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/divmora/localharness/internal/errors"
 )
 
 const (
@@ -52,7 +54,11 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 
 	// API key is optional for local providers (Ollama, vLLM, etc.)
 	if cfg.APIKey == "" && strings.Contains(baseURL, "openai.com") {
-		return nil, fmt.Errorf("openai: api_key required for OpenAI API")
+		return nil, errors.New(errors.ErrCodeInvalidAPIKey,
+			"API key required for OpenAI API").
+			WithContext("provider", "openai").
+			WithContext("base_url", baseURL).
+			WithComponent("llm_provider")
 	}
 
 	p := &OpenAIProvider{
@@ -83,14 +89,23 @@ func (o *OpenAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: marshal error: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeLLMProvider,
+			"failed to marshal request").
+			WithContext("model", o.model).
+			WithContext("provider", "openai").
+			WithComponent("llm_provider")
 	}
 
 	url := fmt.Sprintf("%s/chat/completions", o.baseURL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("openai: request error: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork,
+			"failed to create HTTP request").
+			WithContext("url", url).
+			WithContext("model", o.model).
+			WithContext("provider", "openai").
+			WithComponent("llm_provider")
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if o.apiKey != "" {
@@ -101,17 +116,34 @@ func (o *OpenAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 
 	httpResp, err := o.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai: API call failed: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeConnectionFailed,
+			"API call failed").
+			WithContext("url", url).
+			WithContext("model", o.model).
+			WithContext("provider", "openai").
+			WithComponent("llm_provider")
 	}
 	defer httpResp.Body.Close()
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("openai: read response: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork,
+			"failed to read response").
+			WithContext("url", url).
+			WithContext("model", o.model).
+			WithContext("provider", "openai").
+			WithComponent("llm_provider")
 	}
 
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai: API error (status %d): %s", httpResp.StatusCode, string(respBody))
+		return nil, errors.New(errors.ErrCodeLLMProvider,
+			"API error").
+			WithContext("status_code", httpResp.StatusCode).
+			WithContext("response_body", string(respBody)).
+			WithContext("url", url).
+			WithContext("model", o.model).
+			WithContext("provider", "openai").
+			WithComponent("llm_provider")
 	}
 
 	return o.parseResponse(respBody)
