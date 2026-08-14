@@ -30,4 +30,25 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-tauri': [
+            '@tauri-apps/api',
+            '@tauri-apps/plugin-dialog',
+            '@tauri-apps/plugin-notification',
+            '@tauri-apps/plugin-opener',
+            '@tauri-apps/plugin-shell',
+            '@tauri-apps/plugin-websocket'
+          ],
+          'vendor-monaco': ['@monaco-editor/react'],
+          'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-motion': ['framer-motion'],
+        },
+      },
+    },
+  },
 }));
