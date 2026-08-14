@@ -1,4 +1,4 @@
-// Example: Basic Go ADK usage.
+// Example: Basic Go ADK usage with structured error handling.
 //
 // Creates an agent with default settings (ConfirmRunCommand policy),
 // sends a prompt, and prints the response.
@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/divmora/localharness/adk"
 )
@@ -40,15 +41,56 @@ func main() {
 
 	fmt.Println("Agent started. Conversation ID:", agent.ConversationID())
 
-	// Chat with the agent
+	// Chat with the agent with structured error handling
 	// Note: Chat() will internally evaluate policies before each tool call.
 	// run_command calls will be denied; file reads/writes will be allowed.
 	resp, err := agent.Chat(ctx, "List the files in the current directory")
 	if err != nil {
-		log.Fatalf("Chat failed: %v", err)
+		// Demonstrate structured error handling
+		handleError(err)
+		return
 	}
 
 	fmt.Println("\n--- Response ---")
 	fmt.Println(resp.Text)
 	fmt.Printf("\nSteps taken: %d\n", len(resp.Steps))
+
+	// Demonstrate error handling from step updates
+	fmt.Println("\n--- Step Error Handling ---")
+	handleStepErrors(resp.Steps)
+}
+
+// handleError demonstrates generic error processing
+func handleError(err error) {
+	log.Printf("Error occurred: %v", err)
+	// In a real application, you would implement specific error recovery
+	// based on the error type and context
+}
+
+// handleStepErrors demonstrates processing errors from step updates
+func handleStepErrors(steps []adk.Step) {
+	for _, step := range steps {
+		if step.State == adk.StateError && step.ErrorMessage != "" {
+			fmt.Printf("Step %d error: %s\n", step.Index, step.ErrorMessage)
+
+			// In a real application, you would parse the error message
+			// to extract error codes and context for programmatic handling
+			// The full ErrorInfo with code and metadata is available
+			// in the underlying protobuf StepUpdate if needed
+
+			// Example error recovery based on error message content
+			switch {
+			case strings.Contains(step.ErrorMessage, "timeout"):
+				fmt.Println("  → Tool timed out - could retry with longer timeout")
+			case strings.Contains(step.ErrorMessage, "not found"):
+				fmt.Println("  → Resource not found - check path or create resource")
+			case strings.Contains(step.ErrorMessage, "rate limit"):
+				fmt.Println("  → API rate limit exceeded - implement retry with backoff")
+			case strings.Contains(step.ErrorMessage, "maximum turns"):
+				fmt.Println("  → Maximum turns exceeded - request may need refinement")
+			default:
+				fmt.Println("  → Non-recoverable error")
+			}
+		}
+	}
 }

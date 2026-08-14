@@ -215,6 +215,14 @@ See the [Examples](examples/) folder for advanced SDK usage patterns:
 
 Detailed architectural specifications can be found in [docs/architecture.md](docs/architecture.md).
 
+## Error Handling
+
+LocalHarness uses a structured error handling system with machine-readable error codes and contextual metadata. See:
+
+- **[Error Handling Guide](docs/error-handling.md)** - SDK developer guide for handling structured errors
+- **[Proto Schema Changes](docs/proto-schema-changes.md)** - Schema migration guide for SDK maintainers
+- **[Architecture - Error Handling](docs/architecture.md#error-handling)** - System-level error handling architecture
+
 ## CLI Flags
 
 The binary is managed by the SDK via pipe handshake. These flags are for the binary:

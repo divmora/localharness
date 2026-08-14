@@ -469,6 +469,213 @@ Timer/cron IDs (`sched-*`, `cron-*`) are killable via `manage_task`.
 
 See [docs/schedule.md](schedule.md) for full details.
 
+## Error Handling
+
+LocalHarness uses a structured error handling system that provides programmatic error classification, enhanced debugging information, and wire protocol transmission of error context.
+
+### Error Type System
+
+The core error type is `HarnessError` in `internal/errors/errors.go`:
+
+```go
+type HarnessError struct {
+    Code      ErrorCode              // Categorizable error code
+    Message   string                 // Human-readable message
+    Cause     error                  // Underlying error (for unwrapping)
+    Context   map[string]interface{} // Structured context
+    Component string                 // Component that generated the error
+    RequestID string                 // Correlation ID for request tracking
+}
+```
+
+### Error Codes
+
+Error codes are categorized by subsystem:
+
+| Category | Error Codes |
+|:---|:---|
+| **Workspace** | `WORKSPACE_VALIDATION`, `PATH_TRAVERSAL`, `SYMLINK_ATTACK`, `FILE_NOT_FOUND`, `PERMISSION_DENIED` |
+| **Tool Execution** | `TOOL_EXECUTION`, `TOOL_TIMEOUT`, `TOOL_VALIDATION`, `COMMAND_INJECTION` |
+| **LLM Provider** | `LLM_PROVIDER`, `LLM_TIMEOUT`, `LLM_RATE_LIMIT`, `LLM_TOKEN_LIMIT` |
+| **Resource** | `RESOURCE_EXHAUSTION`, `MEMORY_LIMIT`, `TASK_LIMIT` |
+| **Configuration** | `CONFIGURATION`, `INVALID_CONFIG`, `MISSING_CONFIG` |
+| **Network** | `NETWORK`, `CONNECTION_FAILED`, `CONNECTION_TIMEOUT` |
+| **Authentication** | `AUTHENTICATION`, `UNAUTHORIZED`, `INVALID_API_KEY` |
+| **Engine** | `ENGINE_ERROR`, `MAX_TURNS_EXCEEDED`, `COMPACTION_FAILED`, `SUBAGENT_DEPTH_LIMIT` |
+
+### Error Creation
+
+**New error:**
+```go
+err := errors.New(errors.ErrCodeFileNotFound, "file not found").
+    WithContext("path", "/tmp/test.txt").
+    WithContext("operation", "view_file").
+    WithComponent("view_file").
+    WithRequestID("req-123")
+```
+
+**Wrapped error:**
+```go
+err := errors.Wrap(originalErr, errors.ErrCodeLLMProvider, "LLM call failed").
+    WithContext("model", "gpt-4").
+    WithContext("provider", "openai").
+    WithComponent("engine")
+```
+
+### Error Inspection
+
+**Check error code:**
+```go
+if errors.IsErrorCode(err, errors.ErrCodeLLMRateLimit) {
+    // Implement retry logic
+}
+```
+
+**Extract context:**
+```go
+if ctx := errors.GetContext(err); ctx != nil {
+    path := ctx["path"]
+    operation := ctx["operation"]
+}
+```
+
+**Standard Go error handling:**
+```go
+var hErr *errors.HarnessError
+if errors.As(err, &hErr) {
+    fmt.Printf("Error code: %s\n", hErr.Code)
+    fmt.Printf("Component: %s\n", hErr.Component)
+    fmt.Printf("Request ID: %s\n", hErr.RequestID)
+}
+```
+
+### Wire Protocol Transmission
+
+Structured errors are transmitted over WebSocket via protobuf:
+
+**ErrorEvent message:**
+```protobuf
+message ErrorEvent {
+  string message = 1;
+  string code = 2;
+  bool fatal = 3;
+  map<string, string> metadata = 4;  // Structured error context
+}
+```
+
+**ErrorInfo message (in StepUpdate):**
+```protobuf
+message ErrorInfo {
+  string message = 1;
+  string code = 2;
+  map<string, string> metadata = 3;
+}
+```
+
+**Conversion:**
+```go
+// Convert HarnessError to protobuf ErrorEvent
+protoEvent := hErr.ToProto()
+// Metadata includes: path, operation, component, request_id, etc.
+```
+
+### Error Flow
+
+```
+Component Error
+  ↓
+HarnessError with code + context
+  ↓
+Session.sendStructuredError() / Engine.emitStructuredErrorStep()
+  ↓
+Protobuf ErrorEvent / ErrorInfo over WebSocket
+  ↓
+SDK Client receives structured error
+  ↓
+Programmatic error handling based on code
+```
+
+### Error Context Fields
+
+Common context fields by error type:
+
+| Error Type | Typical Context Fields |
+|:---|:---|
+| **File operations** | `path`, `operation`, `workspace`, `line_range` |
+| **Tool execution** | `tool`, `args`, `cwd`, `timeout`, `exit_code` |
+| **LLM calls** | `model`, `provider`, `retry_count`, `finish_reason` |
+| **Network** | `url`, `status_code`, `timeout_ms`, `attempt` |
+| **Authentication** | `provider`, `credential_type` |
+| **Engine** | `trajectory_id`, `conversation_id`, `step_index`, `max_turns` |
+
+### Backward Compatibility
+
+The error system maintains backward compatibility:
+
+- **Legacy string errors**: Non-structured errors fallback to legacy format
+- **Human-readable messages**: Error messages remain readable for logs
+- **SDK compatibility**: Existing SDK clients continue to work
+- **Proto evolution**: New metadata field is optional in proto schema
+
+### Error Recovery Patterns
+
+SDK clients can implement intelligent error recovery:
+
+```go
+switch errors.GetCode(err) {
+case errors.ErrCodeLLMRateLimit:
+    // Wait and retry with exponential backoff
+    time.Sleep(time.Second * time.Duration(retryCount * 2))
+    return retry()
+case errors.ErrCodeLLMTimeout:
+    // Retry with longer timeout
+    return retryWithTimeout(extendedTimeout)
+case errors.ErrCodeToolTimeout:
+    // Continue with default handling
+    return continueWithoutTool()
+case errors.ErrCodeMaxTurnsExceeded:
+    // Request user intervention
+    return requestUserHelp()
+default:
+    // Fail with user-friendly message
+    return showUserError(err)
+}
+```
+
+### Implementation Coverage
+
+Structured errors are currently implemented in:
+
+- ✅ `internal/errors/` - Core error type system
+- ✅ `internal/workspace/` - Workspace validation errors
+- ✅ `internal/tools/` - Tool execution errors (view_file, run_command, write_to_file)
+- ✅ `internal/llm/` - LLM provider errors (OpenAI)
+- ✅ `internal/engine/` - Engine orchestration errors
+- ✅ `internal/server/` - Session management errors
+
+### Migration Guide
+
+To migrate existing error handling:
+
+1. **Replace `fmt.Errorf`** with `errors.New` or `errors.Wrap`
+2. **Add error codes** from the appropriate category
+3. **Include context** using `WithContext()` for debugging
+4. **Set component** using `WithComponent()` for tracking
+5. **Update error checking** from string matching to `errors.IsErrorCode()`
+
+**Before:**
+```go
+return fmt.Errorf("file not found: %s", path)
+```
+
+**After:**
+```go
+return errors.New(errors.ErrCodeFileNotFound, "file not found").
+    WithContext("path", path).
+    WithContext("operation", "view_file").
+    WithComponent("view_file")
+```
+
 ## Dependencies
 
 | Package | License | Purpose |
