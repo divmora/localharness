@@ -64,7 +64,7 @@ func main() {
 func handleError(err error) {
 	log.Printf("Error occurred: %v", err)
 	// In a real application, you would implement specific error recovery
-	// based on the error type and context
+	// based on the error type and context from the SDK
 }
 
 // handleStepErrors demonstrates processing errors from step updates

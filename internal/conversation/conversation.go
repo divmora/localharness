@@ -33,6 +33,7 @@ import (
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/util"
 )
 
@@ -50,7 +51,11 @@ func NewManager(appDataDir string) (*Manager, error) {
 
 	for _, d := range []string{convDir, brainDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
-			return nil, fmt.Errorf("conversation: cannot create %s: %w", d, err)
+			return nil, errors.Wrap(err, errors.ErrCodeConfiguration,
+				"cannot create conversation directory").
+				WithContext("directory", d).
+				WithContext("app_data_dir", appDataDir).
+				WithComponent("conversation")
 		}
 	}
 
@@ -77,7 +82,11 @@ func (m *Manager) CreateWithID(id string, cfg *pb.HarnessConfig) (*Conversation,
 func (m *Manager) Resume(id string) (*Conversation, error) {
 	pbPath := filepath.Join(m.conversationsDir, id+".pb")
 	if _, err := os.Stat(pbPath); err != nil {
-		return nil, fmt.Errorf("conversation %s not found: %w", id, err)
+		return nil, errors.Wrap(err, errors.ErrCodeConversationNotFound,
+			"conversation not found").
+			WithContext("conversation_id", id).
+			WithContext("path", pbPath).
+			WithComponent("conversation")
 	}
 
 	conv := m.newConversation(id)
@@ -85,12 +94,20 @@ func (m *Manager) Resume(id string) (*Conversation, error) {
 	// Load state from conversations/<uuid>.pb
 	data, err := os.ReadFile(pbPath)
 	if err != nil {
-		return nil, fmt.Errorf("conversation %s: cannot read .pb: %w", id, err)
+		return nil, errors.Wrap(err, errors.ErrCodeFileNotFound,
+			"cannot read conversation state").
+			WithContext("conversation_id", id).
+			WithContext("path", pbPath).
+			WithComponent("conversation")
 	}
 
 	state := &pb.ConversationState{}
 	if err := proto.Unmarshal(data, state); err != nil {
-		return nil, fmt.Errorf("conversation %s: corrupt .pb: %w", id, err)
+		return nil, errors.Wrap(err, errors.ErrCodeStateCorruption,
+			"corrupt conversation state").
+			WithContext("conversation_id", id).
+			WithContext("path", pbPath).
+			WithComponent("conversation")
 	}
 	conv.State = state
 
@@ -114,7 +131,11 @@ func (m *Manager) init(id string, cfg *pb.HarnessConfig) (*Conversation, error) 
 
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
-			return nil, fmt.Errorf("conversation: cannot create %s: %w", d, err)
+			return nil, errors.Wrap(err, errors.ErrCodeConfiguration,
+				"cannot create conversation directory").
+				WithContext("directory", d).
+				WithContext("conversation_id", id).
+				WithComponent("conversation")
 		}
 	}
 
@@ -131,7 +152,10 @@ func (m *Manager) init(id string, cfg *pb.HarnessConfig) (*Conversation, error) 
 
 	// Persist initial state to conversations/<uuid>.pb
 	if err := conv.SaveState(); err != nil {
-		return nil, fmt.Errorf("conversation: cannot save initial state: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeConfiguration,
+			"cannot save initial conversation state").
+			WithContext("conversation_id", id).
+			WithComponent("conversation")
 	}
 
 	return conv, nil
@@ -275,17 +299,28 @@ func (c *Conversation) LogStep(entry *TranscriptJSONEntry) error {
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("transcript: marshal error: %w", err)
+		return errors.Wrap(err, errors.ErrCodeConfiguration,
+			"transcript marshal error").
+			WithContext("conversation_id", c.ID).
+			WithComponent("conversation")
 	}
 
 	f, err := os.OpenFile(c.TranscriptPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("transcript: open error: %w", err)
+		return errors.Wrap(err, errors.ErrCodeFileNotFound,
+			"transcript open error").
+			WithContext("conversation_id", c.ID).
+			WithContext("path", c.TranscriptPath).
+			WithComponent("conversation")
 	}
 	defer f.Close()
 
 	if _, err := f.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("transcript: write error: %w", err)
+		return errors.Wrap(err, errors.ErrCodeConfiguration,
+			"transcript write error").
+			WithContext("conversation_id", c.ID).
+			WithContext("path", c.TranscriptPath).
+			WithComponent("conversation")
 	}
 
 	return nil
@@ -375,7 +410,10 @@ func (c *Conversation) saveStateLocked() error {
 
 	data, err := proto.Marshal(c.State)
 	if err != nil {
-		return fmt.Errorf("state: marshal error: %w", err)
+		return errors.Wrap(err, errors.ErrCodeConfiguration,
+			"state marshal error").
+			WithContext("conversation_id", c.ID).
+			WithComponent("conversation")
 	}
 
 	return atomicWriteFile(c.StatePath, data, 0644)
@@ -390,7 +428,11 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("atomic write: create temp: %w", err)
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"atomic write: create temp").
+			WithContext("directory", dir).
+			WithContext("path", path).
+			WithComponent("conversation")
 	}
 	tmpPath := tmp.Name()
 
@@ -404,27 +446,44 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return fmt.Errorf("atomic write: write temp: %w", err)
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"atomic write: write temp").
+			WithContext("temp_path", tmpPath).
+			WithContext("path", path).
+			WithComponent("conversation")
 	}
 
 	// Sync to disk before rename to ensure durability.
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return fmt.Errorf("atomic write: sync: %w", err)
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"atomic write: sync").
+			WithContext("temp_path", tmpPath).
+			WithComponent("conversation")
 	}
 
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("atomic write: close: %w", err)
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"atomic write: close").
+			WithContext("temp_path", tmpPath).
+			WithComponent("conversation")
 	}
 
 	// Set desired permissions (CreateTemp uses 0600 by default).
 	if err := os.Chmod(tmpPath, perm); err != nil {
-		return fmt.Errorf("atomic write: chmod: %w", err)
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"atomic write: chmod").
+			WithContext("temp_path", tmpPath).
+			WithComponent("conversation")
 	}
 
 	// Atomic rename — guaranteed on same filesystem (same directory).
 	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("atomic write: rename: %w", err)
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"atomic write: rename").
+			WithContext("temp_path", tmpPath).
+			WithContext("target_path", path).
+			WithComponent("conversation")
 	}
 
 	success = true

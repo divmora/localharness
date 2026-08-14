@@ -56,6 +56,26 @@ const (
 	ErrCodeMaxTurnsExceeded   ErrorCode = "MAX_TURNS_EXCEEDED"
 	ErrCodeCompactionFailed   ErrorCode = "COMPACTION_FAILED"
 	ErrCodeSubagentDepthLimit ErrorCode = "SUBAGENT_DEPTH_LIMIT"
+
+	// Conversation errors
+	ErrCodeConversationNotFound ErrorCode = "CONVERSATION_NOT_FOUND"
+	ErrCodeStateCorruption      ErrorCode = "STATE_CORRUPTION"
+	ErrCodePersistenceError     ErrorCode = "PERSISTENCE_ERROR"
+
+	// MCP errors
+	ErrCodeMCPConnectionFailed ErrorCode = "MCP_CONNECTION_FAILED"
+	ErrCodeMCPToolConflict     ErrorCode = "MCP_TOOL_CONFLICT"
+	ErrCodeMCPExecutionError   ErrorCode = "MCP_EXECUTION_ERROR"
+
+	// Protocol errors
+	ErrCodeProtocolError  ErrorCode = "PROTOCOL_ERROR"
+	ErrCodeHandshakeError ErrorCode = "HANDSHAKE_ERROR"
+
+	// SDK/Connection errors
+	ErrCodeBinaryNotFound   ErrorCode = "BINARY_NOT_FOUND"
+	ErrCodeConnectionError  ErrorCode = "CONNECTION_ERROR"
+	ErrCodeDownloadFailed   ErrorCode = "DOWNLOAD_FAILED"
+	ErrCodeInvalidPlatform  ErrorCode = "INVALID_PLATFORM"
 )
 
 // HarnessError is the structured error type for LocalHarness.

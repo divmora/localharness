@@ -7,7 +7,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -17,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/llm"
 )
 
@@ -60,7 +60,10 @@ func (m *Manager) Connect(ctx context.Context, servers []*pb.McpServerConfig) er
 		if err := m.connectServer(ctx, cfg); err != nil {
 			// Clean up any already-connected servers
 			m.Close()
-			return fmt.Errorf("mcp: failed to connect server %q: %w", cfg.Name, err)
+			return errors.Wrap(err, errors.ErrCodeMCPConnectionFailed,
+				"failed to connect MCP server").
+				WithContext("server_name", cfg.Name).
+				WithComponent("mcp")
 		}
 	}
 	return nil
@@ -92,7 +95,10 @@ func (m *Manager) connectServer(ctx context.Context, cfg *pb.McpServerConfig) er
 		transport = &mcp.StreamableClientTransport{Endpoint: t.Http.Url}
 
 	default:
-		return fmt.Errorf("no transport configured")
+		return errors.New(errors.ErrCodeConfiguration,
+			"no transport configured for MCP server").
+			WithContext("server_name", cfg.Name).
+			WithComponent("mcp")
 	}
 
 	// Connect
@@ -100,7 +106,10 @@ func (m *Manager) connectServer(ctx context.Context, cfg *pb.McpServerConfig) er
 	session, err := client.Connect(serverCtx, transport, nil)
 	if err != nil {
 		cancel()
-		return fmt.Errorf("connect: %w", err)
+		return errors.Wrap(err, errors.ErrCodeMCPConnectionFailed,
+			"MCP connection failed").
+			WithContext("server_name", cfg.Name).
+			WithComponent("mcp")
 	}
 
 	m.logger.Info("MCP server connected", "name", cfg.Name)
@@ -127,7 +136,10 @@ func (m *Manager) connectServer(ctx context.Context, cfg *pb.McpServerConfig) er
 	// Discover tools
 	if err := m.discoverTools(ctx, cfg.Name, session, enabledTools); err != nil {
 		m.logger.Error("failed to discover tools", "server", cfg.Name, "error", err)
-		return fmt.Errorf("discover tools: %w", err)
+		return errors.Wrap(err, errors.ErrCodeMCPConnectionFailed,
+			"failed to discover MCP tools").
+			WithContext("server_name", cfg.Name).
+			WithComponent("mcp")
 	}
 
 	return nil
@@ -137,7 +149,10 @@ func (m *Manager) connectServer(ctx context.Context, cfg *pb.McpServerConfig) er
 func (m *Manager) discoverTools(ctx context.Context, serverName string, session *mcp.ClientSession, enabled map[string]bool) error {
 	result, err := session.ListTools(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("list tools: %w", err)
+		return errors.Wrap(err, errors.ErrCodeMCPConnectionFailed,
+			"failed to list MCP tools").
+			WithContext("server_name", serverName).
+			WithComponent("mcp")
 	}
 
 	m.mu.Lock()
@@ -152,7 +167,12 @@ func (m *Manager) discoverTools(ctx context.Context, serverName string, session 
 
 		// Check for conflicts with already-registered tools
 		if existing, ok := m.tools[tool.Name]; ok {
-			return fmt.Errorf("tool name conflict: %q is already registered by server %q", tool.Name, existing.serverName)
+			return errors.New(errors.ErrCodeMCPToolConflict,
+				"MCP tool name conflict").
+				WithContext("tool_name", tool.Name).
+				WithContext("existing_server", existing.serverName).
+				WithContext("new_server", serverName).
+				WithComponent("mcp")
 		}
 
 		// Convert MCP tool schema to our FunctionDeclaration
@@ -210,13 +230,19 @@ func (m *Manager) CallTool(ctx context.Context, name string, args map[string]any
 	entry, ok := m.tools[name]
 	if !ok {
 		m.mu.RUnlock()
-		return "", false, fmt.Errorf("unknown MCP tool: %s", name)
+		return "", false, errors.New(errors.ErrCodeToolValidation,
+			"unknown MCP tool").
+			WithContext("tool_name", name).
+			WithComponent("mcp")
 	}
 
 	sess, ok := m.sessions[entry.serverName]
 	if !ok {
 		m.mu.RUnlock()
-		return "", false, fmt.Errorf("MCP server %q not connected", entry.serverName)
+		return "", false, errors.New(errors.ErrCodeMCPConnectionFailed,
+			"MCP server not connected").
+			WithContext("server_name", entry.serverName).
+			WithComponent("mcp")
 	}
 	m.mu.RUnlock()
 
@@ -227,7 +253,11 @@ func (m *Manager) CallTool(ctx context.Context, name string, args map[string]any
 		Arguments: args,
 	})
 	if err != nil {
-		return "", false, fmt.Errorf("MCP CallTool %q: %w", name, err)
+		return "", false, errors.Wrap(err, errors.ErrCodeMCPExecutionError,
+			"MCP tool execution failed").
+			WithContext("tool_name", name).
+			WithContext("server_name", entry.serverName).
+			WithComponent("mcp")
 	}
 
 	// Extract text content from result

@@ -138,6 +138,21 @@ fn get_session_spaces(
 }
 
 #[tauri::command]
+fn add_recent_project(
+    state: tauri::State<db::DbState>,
+    project: db::RecentProject,
+) -> Result<(), String> {
+    state.add_recent_project(&project).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_recent_projects(
+    state: tauri::State<db::DbState>,
+) -> Result<Vec<db::RecentProject>, String> {
+    state.get_recent_projects().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_setting(state: tauri::State<db::DbState>, key: String) -> Result<Option<String>, String> {
     state.get_setting(&key).map_err(|e| e.to_string())
 }
@@ -996,6 +1011,8 @@ pub fn run() {
             get_spaces,
             move_session_to_space,
             get_session_spaces,
+            add_recent_project,
+            get_recent_projects,
             get_installation_id,
             get_setting,
             set_setting

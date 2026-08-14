@@ -502,6 +502,10 @@ Error codes are categorized by subsystem:
 | **Network** | `NETWORK`, `CONNECTION_FAILED`, `CONNECTION_TIMEOUT` |
 | **Authentication** | `AUTHENTICATION`, `UNAUTHORIZED`, `INVALID_API_KEY` |
 | **Engine** | `ENGINE_ERROR`, `MAX_TURNS_EXCEEDED`, `COMPACTION_FAILED`, `SUBAGENT_DEPTH_LIMIT` |
+| **Conversation** | `CONVERSATION_NOT_FOUND`, `STATE_CORRUPTION`, `PERSISTENCE_ERROR` |
+| **MCP** | `MCP_CONNECTION_FAILED`, `MCP_TOOL_CONFLICT`, `MCP_EXECUTION_ERROR` |
+| **Protocol** | `PROTOCOL_ERROR`, `HANDSHAKE_ERROR` |
+| **SDK/Connection** | `BINARY_NOT_FOUND`, `CONNECTION_ERROR`, `DOWNLOAD_FAILED`, `INVALID_PLATFORM` |
 
 ### Error Creation
 
@@ -652,6 +656,10 @@ Structured errors are currently implemented in:
 - ✅ `internal/llm/` - LLM provider errors (OpenAI)
 - ✅ `internal/engine/` - Engine orchestration errors
 - ✅ `internal/server/` - Session management errors
+- ✅ `internal/conversation/` - Conversation persistence errors
+- ✅ `internal/config/` - Configuration validation errors
+- ✅ `internal/mcp/` - MCP bridge errors
+- ✅ `cmd/localharness/` - CLI and protocol handshake errors
 
 ### Migration Guide
 

@@ -5,13 +5,13 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/errors"
 )
 
 // DefaultDivmoraConfigDir is the shared config directory for all Divmora products.
@@ -30,7 +30,9 @@ type GlobalSettings struct {
 func DivmoraConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("cannot determine home dir: %w", err)
+		return "", errors.Wrap(err, errors.ErrCodeConfiguration,
+			"cannot determine home directory").
+			WithComponent("config")
 	}
 	return filepath.Join(home, DefaultDivmoraConfigDir), nil
 }

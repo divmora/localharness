@@ -224,10 +224,21 @@ func NewLocalConnection(ctx context.Context, cfg LocalConfig, logger *slog.Logge
 		logger.Debug("LocalHarness connection initialized successfully", "conversation_id", c.conversationID, "version", c.harnessVersion)
 	case *pb.ServerMessage_Error:
 		c.Close()
-		return nil, fmt.Errorf("harness initialization failed: [%s] %s", p.Error.Code, p.Error.Message)
+		// Extract structured error information from protobuf
+		errorCode := p.Error.Code
+		errorMessage := p.Error.Message
+		errorMetadata := p.Error.Metadata
+
+		logger.Error("harness initialization failed",
+			"error_code", errorCode,
+			"error_message", errorMessage,
+			"error_metadata", errorMetadata)
+
+		// Return error with code and context
+		return fmt.Errorf("harness initialization failed: [%s] %s", errorCode, errorMessage)
 	default:
 		c.Close()
-		return nil, fmt.Errorf("unexpected message type received during initialization: %T", initResp.Payload)
+		return fmt.Errorf("unexpected message type received during initialization: %T", initResp.Payload)
 	}
 
 	// 10. Configure WebSocket keepalive.
@@ -491,7 +502,14 @@ func (c *LocalConnection) handleErrorEvent(ee *pb.ErrorEvent) {
 		State:        StateError,
 		ErrorMessage: ee.Message,
 		ErrorCode:    ee.Code,
+		ErrorMetadata: ee.Metadata, // Add metadata to step
 	}
+
+	c.logger.Error("harness error event",
+		"error_code", ee.Code,
+		"error_message", ee.Message,
+		"error_fatal", ee.Fatal,
+		"error_metadata", ee.Metadata)
 
 	c.stepsMu.Lock()
 	ch := c.stepsCh

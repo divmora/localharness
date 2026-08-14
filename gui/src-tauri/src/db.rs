@@ -44,6 +44,20 @@ pub fn init_db() -> Result<DbState> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS recent_projects (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            target_kind TEXT NOT NULL,
+            target_host TEXT,
+            target_user TEXT,
+            target_port INTEGER,
+            target_key_path TEXT,
+            last_opened_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
     Ok(DbState {
         conn: std::sync::Mutex::new(conn),
     })
@@ -54,6 +68,18 @@ pub struct Space {
     pub id: String,
     pub name: String,
     pub installation_id: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct RecentProject {
+    pub id: String,
+    pub path: String,
+    pub target_kind: String,
+    pub target_host: Option<String>,
+    pub target_user: Option<String>,
+    pub target_port: Option<i32>,
+    pub target_key_path: Option<String>,
+    pub last_opened_at: i64,
 }
 
 impl DbState {
@@ -153,5 +179,54 @@ impl DbState {
             map.insert(row.get(0)?, row.get(1)?);
         }
         Ok(map)
+    }
+
+    pub fn add_recent_project(&self, project: &RecentProject) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+            
+        // Use an id format like "kind:user@host:port:path" or just let frontend send a unique string
+        conn.execute(
+            "INSERT INTO recent_projects (id, path, target_kind, target_host, target_user, target_port, target_key_path, last_opened_at) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET last_opened_at = excluded.last_opened_at",
+            params![
+                project.id,
+                project.path,
+                project.target_kind,
+                project.target_host,
+                project.target_user,
+                project.target_port,
+                project.target_key_path,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_recent_projects(&self) -> Result<Vec<RecentProject>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, path, target_kind, target_host, target_user, target_port, target_key_path, last_opened_at FROM recent_projects ORDER BY last_opened_at DESC LIMIT 50")?;
+        
+        let mut projects = Vec::new();
+        let mut rows = stmt.query([])?;
+        
+        while let Some(row) = rows.next()? {
+            projects.push(RecentProject {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                target_kind: row.get(2)?,
+                target_host: row.get(3)?,
+                target_user: row.get(4)?,
+                target_port: row.get(5)?,
+                target_key_path: row.get(6)?,
+                last_opened_at: row.get(7)?,
+            });
+        }
+        
+        Ok(projects)
     }
 }

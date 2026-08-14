@@ -31,6 +31,7 @@ import (
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/server"
 )
 
@@ -153,22 +154,32 @@ func readInputConfig(r io.Reader) (*pb.InputConfig, error) {
 	// Read 4-byte length prefix
 	var length uint32
 	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
-		return nil, fmt.Errorf("read length prefix: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeHandshakeError,
+			"read length prefix failed").
+			WithComponent("localharness")
 	}
 
 	if length > 1024*1024 { // 1MB sanity limit
-		return nil, fmt.Errorf("InputConfig too large: %d bytes", length)
+		return nil, errors.New(errors.ErrCodeHandshakeError,
+			"InputConfig too large").
+			WithContext("length", length).
+			WithContext("max_length", 1048576).
+			WithComponent("localharness")
 	}
 
 	// Read protobuf payload
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, fmt.Errorf("read payload: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeHandshakeError,
+			"read payload failed").
+			WithComponent("localharness")
 	}
 
 	var cfg pb.InputConfig
 	if err := proto.Unmarshal(buf, &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal InputConfig: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeProtocolError,
+			"unmarshal InputConfig failed").
+			WithComponent("localharness")
 	}
 
 	return &cfg, nil
@@ -179,18 +190,24 @@ func readInputConfig(r io.Reader) (*pb.InputConfig, error) {
 func writeOutputConfig(w io.Writer, cfg *pb.OutputConfig) error {
 	data, err := proto.Marshal(cfg)
 	if err != nil {
-		return fmt.Errorf("marshal OutputConfig: %w", err)
+		return errors.Wrap(err, errors.ErrCodeProtocolError,
+			"marshal OutputConfig failed").
+			WithComponent("localharness")
 	}
 
 	// Write 4-byte length prefix
 	length := uint32(len(data))
 	if err := binary.Write(w, binary.LittleEndian, length); err != nil {
-		return fmt.Errorf("write length prefix: %w", err)
+		return errors.Wrap(err, errors.ErrCodeHandshakeError,
+			"write length prefix failed").
+			WithComponent("localharness")
 	}
 
 	// Write protobuf payload
 	if _, err := w.Write(data); err != nil {
-		return fmt.Errorf("write payload: %w", err)
+		return errors.Wrap(err, errors.ErrCodeHandshakeError,
+			"write payload failed").
+			WithComponent("localharness")
 	}
 
 	return nil

@@ -382,6 +382,18 @@ func TestErrorCodes(t *testing.T) {
 		ErrCodeMaxTurnsExceeded,
 		ErrCodeCompactionFailed,
 		ErrCodeSubagentDepthLimit,
+		ErrCodeConversationNotFound,
+		ErrCodeStateCorruption,
+		ErrCodePersistenceError,
+		ErrCodeMCPConnectionFailed,
+		ErrCodeMCPToolConflict,
+		ErrCodeMCPExecutionError,
+		ErrCodeProtocolError,
+		ErrCodeHandshakeError,
+		ErrCodeBinaryNotFound,
+		ErrCodeConnectionError,
+		ErrCodeDownloadFailed,
+		ErrCodeInvalidPlatform,
 	}
 
 	seen := make(map[ErrorCode]bool)
