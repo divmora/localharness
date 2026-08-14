@@ -43,7 +43,10 @@ if [ ! -f "$file" ]; then
 fi
 cat "$file"
 "#;
-            let mut args = vec![];
+            let mut args = vec![
+                "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+                "-o".to_string(), "BatchMode=yes".to_string(),
+            ];
             if let Some(port) = ct.port {
                 args.push("-p".to_string());
                 args.push(port.to_string());
@@ -246,7 +249,10 @@ async fn read_target_file(
     if let Some(t) = target {
         if t.kind == "ssh" {
             let host = t.host.as_ref().ok_or("SSH host required")?;
-            let mut args = vec![];
+            let mut args = vec![
+                "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+                "-o".to_string(), "BatchMode=yes".to_string(),
+            ];
             if let Some(port) = t.port {
                 args.push("-p".to_string());
                 args.push(port.to_string());
@@ -293,7 +299,10 @@ async fn write_target_file(
     if let Some(t) = target {
         if t.kind == "ssh" {
             let host = t.host.as_ref().ok_or("SSH host required")?;
-            let mut args = vec![];
+            let mut args = vec![
+                "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+                "-o".to_string(), "BatchMode=yes".to_string(),
+            ];
             if let Some(port) = t.port {
                 args.push("-p".to_string());
                 args.push(port.to_string());
@@ -348,7 +357,10 @@ async fn list_target_files(
     if let Some(t) = target {
         if t.kind == "ssh" {
             let host = t.host.as_ref().ok_or("SSH host required")?;
-            let mut args = vec![];
+            let mut args = vec![
+                "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+                "-o".to_string(), "BatchMode=yes".to_string(),
+            ];
             if let Some(port) = t.port {
                 args.push("-p".to_string());
                 args.push(port.to_string());
@@ -430,7 +442,11 @@ async fn list_sessions(
         let t = target.as_ref().unwrap();
         let host = t.host.as_ref().ok_or("SSH host required")?;
 
-        let mut args = vec!["-T".to_string(), "-q".to_string()];
+        let mut args = vec![
+            "-T".to_string(), "-q".to_string(),
+            "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+            "-o".to_string(), "BatchMode=yes".to_string(),
+        ];
         if let Some(port) = t.port {
             args.push("-p".to_string());
             args.push(port.to_string());
@@ -692,7 +708,11 @@ async fn start_harness(
     let (mut rx, mut child) = if target.kind == "ssh" {
         let host = target.host.as_ref().ok_or("SSH host required")?;
 
-        let mut args = vec!["-T".to_string(), "-q".to_string()];
+        let mut args = vec![
+            "-T".to_string(), "-q".to_string(),
+            "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+            "-o".to_string(), "BatchMode=yes".to_string(),
+        ];
 
         if let Some(ssh_port) = target.port {
             args.push("-p".to_string());
@@ -867,6 +887,8 @@ async fn setup_ssh_tunnel(
         "-N".to_string(),
         "-L".to_string(),
         format!("{}:127.0.0.1:{}", local_port, remote_port),
+        "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+        "-o".to_string(), "BatchMode=yes".to_string(),
     ];
 
     if let Some(ssh_port) = target.port {
