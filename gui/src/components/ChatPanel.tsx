@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { TerminalSquare, User, Bot, Users, Globe, FileCode, ShieldAlert, Check, X, Send } from 'lucide-react';
+import { TerminalSquare, Bot, Users, Globe, FileCode, ShieldAlert, Check, X, Brain, ThumbsUp, ThumbsDown, Copy, GitFork, BarChart2, MoreHorizontal, Square, ChevronDown, Plus, MessageCircle, Mic, ArrowUp, Monitor, Folder, Server, Wand2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { clone } from '@bufbuild/protobuf';
 import { StepUpdate, StepUpdate_Source, StepUpdate_State, StepUpdateSchema } from '../gen/localharness/v1/localharness_pb';
@@ -206,32 +206,50 @@ export function ChatPanel({
       case 'permissionRequest':
         const pr = msg.action.value as any;
         return (
-          <div className="mt-2 bg-[#EF4444]/10 border border-[#EF4444]/30 rounded p-3">
-            <div className="flex items-center gap-2 text-[#EF4444] mb-2 font-semibold text-xs">
-              <ShieldAlert size={16} />
-              Permission Required: {pr.toolName}
-            </div>
-            <div className="text-[11px] text-text-primary bg-bg-primary p-2 rounded mb-3 font-mono">
-              {pr.argsSummary || pr.argsJson}
-            </div>
-            {msg.state !== StepUpdate_State.DONE ? (
+          <div className="mt-3 border border-blue-400 rounded-xl overflow-hidden shadow-sm max-w-full bg-blue-500/5">
+            <div className="flex items-center justify-between px-3 py-2 text-xs text-text-primary bg-blue-500/10 border-b border-blue-400/30 font-medium">
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, true)}
-                  className="flex items-center gap-1 bg-green-600/20 hover:bg-green-600/40 text-green-400 px-3 py-1 rounded text-xs transition-colors"
-                >
-                  <Check size={12} /> Approve
-                </button>
-                <button 
-                  onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, false, "Denied by user")}
-                  className="flex items-center gap-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 px-3 py-1 rounded text-xs transition-colors"
-                >
-                  <X size={12} /> Deny
-                </button>
+                <Square size={12} className="text-blue-500" />
+                <span className="truncate">Command {pr.toolName}</span>
               </div>
-            ) : (
-              <div className="text-[11px] text-text-secondary italic">Response submitted.</div>
-            )}
+              <div className="flex items-center gap-2 text-text-tertiary">
+                <Copy size={12} className="cursor-pointer hover:text-text-primary transition-colors" />
+                <X size={12} className="cursor-pointer hover:text-text-primary transition-colors" />
+              </div>
+            </div>
+            <div className="p-4 text-[11px] font-mono overflow-x-auto">
+              <div className="flex items-center gap-2 mb-2 text-blue-400 font-semibold">
+                <div className="w-2 h-2 rounded-full border border-blue-400 bg-transparent"></div>
+                {pr.argsSummary || pr.argsJson}
+              </div>
+              {msg.state !== StepUpdate_State.DONE ? (
+                <div className="flex justify-end items-center gap-2 mt-4 text-xs font-sans">
+                  <button className="p-1.5 rounded-md bg-gray-200 dark:bg-gray-700/50 text-text-secondary hover:text-text-primary hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors">
+                    <Wand2 size={14} />
+                  </button>
+                  <div className="flex items-center rounded-md overflow-hidden bg-blue-500 hover:bg-blue-600 text-white font-medium shadow-sm cursor-pointer transition-colors">
+                    <button 
+                      onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, true)}
+                      className="px-3 py-1.5 flex items-center gap-1 flex-1"
+                    >
+                      Allow <Check size={12} className="ml-1 opacity-70" />
+                    </button>
+                    <div className="w-px h-full min-h-[28px] bg-blue-400/50"></div>
+                    <button className="px-1.5 py-1.5 hover:bg-blue-700 transition-colors flex items-center justify-center">
+                      <ChevronDown size={14} />
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, false, "Denied by user")}
+                    className="flex items-center gap-1 bg-gray-200 dark:bg-gray-700/80 text-gray-800 dark:text-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium shadow-sm"
+                  >
+                    Reject <X size={12} className="opacity-70" />
+                  </button>
+                </div>
+              ) : (
+                <div className="text-[11px] text-text-secondary italic mt-2 text-right opacity-70">Response submitted</div>
+              )}
+            </div>
           </div>
         );
       case 'writeToFile':
@@ -256,6 +274,43 @@ export function ChatPanel({
           );
         }
         return <div className="text-[10px] text-text-tertiary italic mt-1 font-mono">Edited {fileAction.targetFile || fileAction.path}</div>;
+      case 'runCommand':
+        const cmdAction = msg.action.value as any;
+        return (
+          <div className="mt-3 border border-border-primary rounded-xl overflow-hidden shadow-sm max-w-full">
+            <div className="flex items-center justify-between px-3 py-2 text-xs text-text-secondary bg-bg-primary border-b border-border-primary font-medium">
+              <div className="flex items-center gap-2">
+                <Square size={12} className="text-text-tertiary" />
+                <span className="truncate">Command {cmdAction.commandLine?.split(' ')[0]} in {cmdAction.cwd || '~'}</span>
+              </div>
+              <button className="text-text-tertiary hover:text-text-primary transition-colors"><Copy size={12} /></button>
+            </div>
+            <div className="p-4 bg-bg-secondary text-[11px] font-mono overflow-x-auto relative">
+              <div className="flex items-center gap-2 mb-2 text-blue-400 font-semibold">
+                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                {cmdAction.commandLine}
+              </div>
+              <div className="text-text-secondary whitespace-pre-wrap">
+                {/* Command output typically not present in StepUpdate action, 
+                    but if it is streamed back, it would be in msg.text, which is rendered outside. 
+                    If it's a finished step, we might just show a placeholder or truncate. */}
+                {msg.state === StepUpdate_State.ACTIVE ? <span className="animate-pulse">Running...</span> : "Executed successfully"}
+              </div>
+              <div className="absolute bottom-2 right-3 text-text-tertiary bg-bg-secondary p-1 rounded-full shadow border border-border-primary">
+                <ChevronDown size={14} />
+              </div>
+            </div>
+          </div>
+        );
+      case 'viewFile':
+        const readAction = msg.action.value as any;
+        const readFileName = readAction.targetFile?.split('/').pop() || readAction.path?.split('/').pop() || "file";
+        return (
+          <div className="flex items-center gap-2 mt-2 text-xs text-text-secondary">
+            <FileCode size={14} className="text-text-tertiary" />
+            <span>Read <span className="text-blue-400 cursor-pointer hover:underline">{readFileName}</span></span>
+          </div>
+        );
       default:
         return <div className="text-xs text-text-tertiary italic mt-1">[Tool: {msg.action.case}]</div>;
     }
@@ -286,38 +341,56 @@ export function ChatPanel({
           const isUser = msg.source === StepUpdate_Source.USER;
           const hasText = !!msg.text;
           
+          if (isUser) {
+            return (
+              <motion.div 
+                key={msg.stepIndex}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="max-w-[85%] self-end flex flex-col gap-1 mt-4"
+              >
+                <div className="bg-bg-tertiary text-text-primary px-4 py-2.5 rounded-2xl rounded-tr-sm text-[13px] shadow-sm whitespace-pre-wrap leading-relaxed">
+                  {msg.text}
+                </div>
+              </motion.div>
+            );
+          }
+
           return (
             <motion.div 
               key={msg.stepIndex}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`p-3 rounded-lg max-w-[95%] text-sm shadow-md flex flex-col gap-1 ${
-                isUser 
-                  ? 'bg-blue-600/20 text-blue-100 self-end border border-blue-500/30' 
-                  : 'bg-border-primary self-start border border-border-highlight/50'
-              }`}
+              className="max-w-[95%] self-start flex flex-col gap-2 mt-6 w-full"
             >
-              <div className="flex items-center gap-2 mb-1 text-[11px] font-semibold opacity-70 uppercase tracking-wider">
-                {isUser ? <User size={12} /> : <Bot size={12} />}
-                {isUser ? 'You' : 'Agent'}
-              </div>
-              
               {msg.thinking && (
                 <details className="mt-1 mb-2 group">
-                  <summary className="text-[11px] font-semibold text-text-secondary cursor-pointer hover:text-text-primary transition-colors select-none flex items-center gap-1">
-                    <span className="w-1 h-1 rounded-full bg-blue-400 opacity-50 group-hover:opacity-100 transition-opacity"></span>
-                    Thought Process
+                  <summary className="text-xs font-semibold text-text-secondary cursor-pointer hover:text-text-primary transition-colors select-none flex items-center gap-2">
+                    <Brain size={14} className="text-text-tertiary" />
+                    Thoughts
                   </summary>
-                  <div className="mt-2 text-[11px] text-[#bac2de] bg-bg-primary/50 p-3 rounded border border-border-primary whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scrollbar-thin">
+                  <div className="mt-2 ml-5 text-[12px] text-text-secondary bg-bg-primary/30 p-3 rounded-lg border border-border-primary/50 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto scrollbar-thin">
                     {msg.thinking}
                   </div>
                 </details>
               )}
               
-              {hasText && <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>}
+              {hasText && <div className="whitespace-pre-wrap leading-relaxed text-[13px] text-text-primary">{msg.text}</div>}
               
               {renderAction(msg)}
               
+              <div className="flex items-center justify-between mt-3 text-text-tertiary">
+                <div className="flex items-center gap-3">
+                  <button className="hover:text-text-secondary transition-colors"><ThumbsUp size={14} /></button>
+                  <button className="hover:text-text-secondary transition-colors"><ThumbsDown size={14} /></button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button className="hover:text-text-secondary transition-colors"><Copy size={14} /></button>
+                  <button className="hover:text-text-secondary transition-colors"><GitFork size={14} /></button>
+                  <button className="hover:text-text-secondary transition-colors"><BarChart2 size={14} /></button>
+                  <button className="hover:text-text-secondary transition-colors"><MoreHorizontal size={14} /></button>
+                </div>
+              </div>
             </motion.div>
           );
         })}
@@ -338,10 +411,9 @@ export function ChatPanel({
         )}
       </div>
       
-      <div className="p-4 border-t border-border-primary">
-        <div className="flex items-center bg-bg-tertiary rounded-md border border-border-primary focus-within:border-blue-500 transition-colors px-3 py-2 shadow-inner">
-          <input 
-            type="text"
+      <div className="p-4 relative mt-auto">
+        <div className="flex flex-col bg-bg-primary rounded-xl border border-border-primary focus-within:border-blue-500/50 transition-colors shadow-sm mb-2">
+          <textarea 
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -351,16 +423,43 @@ export function ChatPanel({
               }
             }}
             disabled={!connected || !!connectionError}
-            placeholder={connected ? "Ask anything..." : connectionError ? "Cannot send messages due to error" : "Connecting..."}
-            className={`flex-1 bg-transparent border-none outline-none text-sm text-text-primary placeholder:text-text-tertiary ${connected ? '' : 'opacity-50'}`}
+            placeholder={connected ? "Tip: Drag a session in the sidebar into a space to group it" : connectionError ? "Cannot send messages due to error" : "Connecting..."}
+            className={`w-full bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-tertiary p-3 min-h-[60px] resize-none ${connected ? '' : 'opacity-50'}`}
           />
-          <button 
-            onClick={handleSend}
-            disabled={!connected || !input.trim() || !!connectionError}
-            className="text-blue-400 hover:text-blue-300 ml-2 p-1 rounded hover:bg-border-primary transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
-          >
-            <Send size={16} />
-          </button>
+          <div className="flex items-center justify-between px-3 py-2 border-t border-border-primary/30">
+            <div className="flex items-center gap-1.5">
+              <button className="p-1 hover:bg-bg-tertiary rounded-md text-text-tertiary hover:text-text-primary transition-colors">
+                <Plus size={16} />
+              </button>
+              <div className="flex items-center gap-1.5 text-green-500 font-medium text-xs px-2 py-1 rounded-md hover:bg-bg-tertiary cursor-pointer transition-colors">
+                <MessageCircle size={14} />
+                Ask
+              </div>
+              <div className="flex items-center text-xs text-text-secondary px-2 py-1 rounded-md hover:bg-bg-tertiary cursor-pointer transition-colors font-medium">
+                SWE-1.6 Slow
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 text-xs text-text-tertiary font-medium">
+                <Server size={14} />
+                Devin Local
+              </div>
+              <button className="text-text-tertiary hover:text-text-primary transition-colors">
+                <Mic size={16} />
+              </button>
+              <button 
+                onClick={handleSend}
+                disabled={!connected || !input.trim() || !!connectionError}
+                className="w-7 h-7 flex items-center justify-center bg-gray-500 hover:bg-gray-400 text-white rounded-full transition-colors disabled:opacity-30 disabled:hover:bg-gray-500"
+              >
+                <ArrowUp size={14} strokeWidth={3} />
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 text-[11px] text-text-tertiary px-1 font-medium">
+          <span className="flex items-center gap-1.5 hover:text-text-secondary cursor-pointer transition-colors"><Monitor size={12} /> Local</span>
+          <span className="flex items-center gap-1.5 hover:text-text-secondary cursor-pointer transition-colors"><Folder size={12} /> otel-aws-log-parser</span>
         </div>
       </div>
     </div>

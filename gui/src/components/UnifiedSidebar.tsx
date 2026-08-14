@@ -51,25 +51,7 @@ export function UnifiedSidebar({
           New session
         </button>
       </div>
-      
-      <div className="px-3 pb-3">
-        <button 
-          onClick={() => {
-            import('@tauri-apps/api/webviewWindow').then(m => {
-              new m.WebviewWindow(`local-${Date.now()}`, {
-                url: `/?new_session=true`,
-                title: `Local Workspace`,
-                width: 1200,
-                height: 800
-              });
-            }).catch(console.error);
-          }}
-          className="w-full flex items-center gap-2 bg-transparent hover:bg-bg-secondary text-text-secondary px-3 py-1.5 rounded-md text-xs font-medium transition-colors border border-transparent hover:border-border-highlight"
-        >
-          <Plus size={14} className="text-text-tertiary" /> 
-          New window
-        </button>
-      </div>
+
 
       {/* Main Nav */}
       <div className="px-2">
