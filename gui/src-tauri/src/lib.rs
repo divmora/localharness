@@ -785,14 +785,21 @@ async fn start_harness(
                             .map_err(|e| format!("Failed to decode OutputConfig: {}", e))?;
 
                         let mut local_port = output_cfg.port;
+                        let mut tunnel_child_opt = None;
                         if target.kind == "ssh" {
-                            local_port = setup_ssh_tunnel(&app, &target, output_cfg.port).await?;
+                            let (port, tunnel_child) = setup_ssh_tunnel(&app, &target, output_cfg.port).await?;
+                            local_port = port;
+                            tunnel_child_opt = Some(tunnel_child);
                         }
 
                         // Store child to prevent it from being dropped and killed
                         use tauri::Manager;
                         if let Some(state) = app.try_state::<AppState>() {
-                            state.children.lock().unwrap().push(child);
+                            let mut children = state.children.lock().unwrap();
+                            children.push(child);
+                            if let Some(tc) = tunnel_child_opt {
+                                children.push(tc);
+                            }
                         }
 
                         // Keep processing stderr logs in background so sidecar's pipes aren't closed
@@ -832,7 +839,7 @@ async fn setup_ssh_tunnel(
     app: &tauri::AppHandle,
     target: &ConnectionTarget,
     remote_port: i32,
-) -> Result<i32, String> {
+) -> Result<(i32, CommandChild), String> {
     let listener =
         std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("Bind failed: {}", e))?;
     let local_port = listener.local_addr().unwrap().port() as i32;
@@ -868,15 +875,23 @@ async fn setup_ssh_tunnel(
         args.push(host.clone());
     }
 
-    app.shell()
+    let (mut rx, child) = app.shell()
         .command("ssh")
         .args(args)
         .spawn()
         .map_err(|e| format!("Failed to spawn ssh tunnel: {}", e))?;
 
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if let CommandEvent::Stderr(line) = event {
+                eprintln!("SSH TUNNEL STDERR: {}", String::from_utf8_lossy(&line));
+            }
+        }
+    });
+
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    Ok(local_port)
+    Ok((local_port, child))
 }
 use std::sync::Mutex;
 use tauri::{
