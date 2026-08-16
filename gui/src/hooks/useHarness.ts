@@ -197,7 +197,15 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                         
                         if (serverMsg.payload.case === "stepUpdate") {
                             const step = serverMsg.payload.value;
-                            setSteps(prev => [...prev, step]);
+                            setSteps(prev => {
+                                const index = prev.findIndex(s => s.stepIndex === step.stepIndex);
+                                if (index >= 0) {
+                                    const next = [...prev];
+                                    next[index] = step;
+                                    return next;
+                                }
+                                return [...prev, step];
+                            });
                         }
                     }
                 });

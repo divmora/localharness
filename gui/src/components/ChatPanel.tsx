@@ -349,7 +349,7 @@ export function ChatPanel({
                 animate={{ opacity: 1, y: 0 }}
                 className="max-w-[85%] self-end flex flex-col gap-1 mt-4"
               >
-                <div className="bg-bg-tertiary text-text-primary px-4 py-2.5 rounded-2xl rounded-tr-sm text-[13px] shadow-sm whitespace-pre-wrap leading-relaxed">
+                <div className="bg-blue-600 text-white px-4 py-2.5 rounded-2xl rounded-tr-sm text-[13px] shadow-sm whitespace-pre-wrap leading-relaxed">
                   {msg.text}
                 </div>
               </motion.div>
