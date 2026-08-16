@@ -950,6 +950,12 @@ struct AppState {
 pub fn run() {
     let db = db::init_db().expect("Failed to initialize database");
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .manage(db)
