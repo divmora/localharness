@@ -66,6 +66,7 @@ func NewLocalConnection(ctx context.Context, cfg LocalConfig, logger *slog.Logge
 	}
 	binaryPath, err := resolver.Resolve(cfg.BinaryPath)
 	if err != nil {
+		logger.Error("cannot find localharness binary", "error", err)
 		return nil, fmt.Errorf("cannot find localharness binary: %w", err)
 	}
 
@@ -116,6 +117,7 @@ func NewLocalConnection(ctx context.Context, cfg LocalConfig, logger *slog.Logge
 	if err := writeInputConfig(stdinPipe, inputCfg); err != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
+		logger.Error("failed to write InputConfig to stdin", "error", err)
 		return nil, fmt.Errorf("failed to write InputConfig to stdin: %w", err)
 	}
 
@@ -125,6 +127,7 @@ func NewLocalConnection(ctx context.Context, cfg LocalConfig, logger *slog.Logge
 		stderrTail := stderrBuf.String()
 		cmd.Process.Kill()
 		cmd.Wait()
+		logger.Error("failed to read OutputConfig from stdout", "error", err, "harness_stderr", stderrTail)
 		return nil, fmt.Errorf("failed to read OutputConfig from stdout: %w\nHarness stderr:\n%s", err, stderrTail)
 	}
 
@@ -170,6 +173,7 @@ func NewLocalConnection(ctx context.Context, cfg LocalConfig, logger *slog.Logge
 		stdinPipe.Close()
 		cmd.Process.Kill()
 		cmd.Wait()
+		logger.Error("failed to connect to localharness WebSocket", "url", url, "error", dialErr, "harness_stderr", stderrTail)
 		return nil, fmt.Errorf("failed to connect to localharness at %s after retries: %w\nHarness stderr:\n%s", url, dialErr, stderrTail)
 	}
 
@@ -235,10 +239,10 @@ func NewLocalConnection(ctx context.Context, cfg LocalConfig, logger *slog.Logge
 			"error_metadata", errorMetadata)
 
 		// Return error with code and context
-		return fmt.Errorf("harness initialization failed: [%s] %s", errorCode, errorMessage)
+		return nil, fmt.Errorf("harness initialization failed: [%s] %s", errorCode, errorMessage)
 	default:
 		c.Close()
-		return fmt.Errorf("unexpected message type received during initialization: %T", initResp.Payload)
+		return nil, fmt.Errorf("unexpected message type received during initialization: %T", initResp.Payload)
 	}
 
 	// 10. Configure WebSocket keepalive.
@@ -357,6 +361,7 @@ func (c *LocalConnection) handleStepUpdate(su *pb.StepUpdate) {
 	if su.ErrorInfo != nil {
 		step.ErrorMessage = su.ErrorInfo.Message
 		step.ErrorCode = su.ErrorInfo.Code
+		step.ErrorMetadata = su.ErrorInfo.Metadata
 	}
 
 	if su.Usage != nil {
@@ -502,7 +507,7 @@ func (c *LocalConnection) handleErrorEvent(ee *pb.ErrorEvent) {
 		State:        StateError,
 		ErrorMessage: ee.Message,
 		ErrorCode:    ee.Code,
-		ErrorMetadata: ee.Metadata, // Add metadata to step
+		ErrorMetadata: ee.Metadata,
 	}
 
 	c.logger.Error("harness error event",

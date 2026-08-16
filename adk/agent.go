@@ -169,6 +169,20 @@ func (a *Agent) ChatWithContext(ctx context.Context, prompt string, msgCtx *Mess
 	}
 
 	if lastErr != nil {
+		// Enhance error with structured information if available
+		if resp != nil && len(resp.Steps) > 0 {
+			// Check if there's an error step with structured error information
+			for _, step := range resp.Steps {
+				if step.State == StateError && step.ErrorCode != "" {
+					a.logger.Error("agent chat completed with structured error",
+						"error_code", step.ErrorCode,
+						"error_message", step.ErrorMessage,
+						"error_metadata", step.ErrorMetadata)
+					// Return enhanced error with code and context
+					return resp, fmt.Errorf("agent error [%s]: %s", step.ErrorCode, step.ErrorMessage)
+				}
+			}
+		}
 		return resp, lastErr
 	}
 	if resp == nil {
@@ -432,15 +446,23 @@ func (a *Agent) emitStreamEvents(ch chan<- StreamEvent, raw connection.Step, pro
 				CallID:  raw.ToolArgsJSON, // best available ID
 			})
 		case connection.StateError:
+			a.logger.Error("tool execution error",
+				"tool", raw.ToolName,
+				"error_code", raw.ErrorCode,
+				"error_message", raw.ErrorMessage,
+				"error_metadata", raw.ErrorMetadata,
+				"step_index", raw.Index)
 			a.emitEvent(ch, StreamEvent{
 				Type: EventError,
 				Step: processed,
 			}, raw)
 			// Dispatch ToolError hook — may provide recovery
 			errResult := a.hookRunner.DispatchToolError(hooks.ToolError{
-				ToolName: raw.ToolName,
-				Error:    fmt.Errorf("%s", raw.ErrorMessage),
-				Args:     raw.ToolArgs,
+				ToolName:      raw.ToolName,
+				Error:         fmt.Errorf("%s", raw.ErrorMessage),
+				Args:          raw.ToolArgs,
+				ErrorCode:     raw.ErrorCode,
+				ErrorMetadata: raw.ErrorMetadata,
 			})
 			if errResult.Handled {
 				a.logger.Info("tool error recovered by hook",
@@ -451,6 +473,11 @@ func (a *Agent) emitStreamEvents(ch chan<- StreamEvent, raw connection.Step, pro
 		}
 	} else if raw.State == connection.StateError {
 		// Non-tool errors (e.g., model errors)
+		a.logger.Error("non-tool error",
+			"error_code", raw.ErrorCode,
+			"error_message", raw.ErrorMessage,
+			"error_metadata", raw.ErrorMetadata,
+			"step_index", raw.Index)
 		a.emitEvent(ch, StreamEvent{
 			Type: EventError,
 			Step: processed,

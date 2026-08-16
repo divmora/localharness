@@ -211,6 +211,8 @@ func TestHookRunner_ToolError_Handled(t *testing.T) {
 		ToolName: "run_command",
 		Error:    fmt.Errorf("command not found"),
 		Args:     map[string]any{"command": "ls"},
+		ErrorCode: "COMMAND_NOT_FOUND",
+		ErrorMetadata: map[string]string{"command": "ls"},
 	}
 
 	result := runner.DispatchToolError(te)
@@ -231,7 +233,12 @@ func TestHookRunner_ToolError_Unhandled(t *testing.T) {
 	hook := &mockToolErrorHook{result: ToolErrorResult{Handled: false}}
 	runner.RegisterHook(hook)
 
-	te := ToolError{ToolName: "view_file", Error: fmt.Errorf("file not found")}
+	te := ToolError{
+		ToolName: "view_file",
+		Error:    fmt.Errorf("file not found"),
+		ErrorCode: "FILE_NOT_FOUND",
+		ErrorMetadata: map[string]string{"path": "/tmp/test.txt"},
+	}
 	result := runner.DispatchToolError(te)
 
 	if result.Handled {
@@ -242,7 +249,12 @@ func TestHookRunner_ToolError_Unhandled(t *testing.T) {
 func TestHookRunner_ToolError_NoHooks(t *testing.T) {
 	runner := NewHookRunner()
 
-	te := ToolError{ToolName: "view_file", Error: fmt.Errorf("fail")}
+	te := ToolError{
+		ToolName: "view_file",
+		Error:    fmt.Errorf("fail"),
+		ErrorCode: "UNKNOWN_ERROR",
+		ErrorMetadata: map[string]string{"operation": "view_file"},
+	}
 	result := runner.DispatchToolError(te)
 
 	if result.Handled {

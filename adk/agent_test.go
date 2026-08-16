@@ -498,6 +498,8 @@ func TestAgent_ChatStreamError(t *testing.T) {
 				State:        connection.StateError,
 				Source:       connection.SourceModel,
 				ErrorMessage: "permission denied",
+				ErrorCode:    "PERMISSION_DENIED",
+				ErrorMetadata: map[string]string{"tool": "run_command", "policy": "safe_defaults"},
 			},
 			{
 				Index:   2,

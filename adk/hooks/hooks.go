@@ -95,6 +95,12 @@ type ToolError struct {
 
 	// CallID is the LLM-assigned call identifier.
 	CallID string
+
+	// ErrorCode is the structured error code (if available).
+	ErrorCode string
+
+	// ErrorMetadata contains structured error context (if available).
+	ErrorMetadata map[string]string
 }
 
 // ToolErrorResult is the outcome of an OnToolErrorHook.

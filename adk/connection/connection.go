@@ -125,6 +125,9 @@ type Step struct {
 	// ErrorCode is the error code when State is StateError.
 	ErrorCode string
 
+	// ErrorMetadata contains structured error context when State is StateError.
+	ErrorMetadata map[string]string
+
 	// IsFinal indicates this is the last step in the turn.
 	IsFinal bool
 

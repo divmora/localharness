@@ -78,18 +78,45 @@ func handleStepErrors(steps []adk.Step) {
 			// The full ErrorInfo with code and metadata is available
 			// in the underlying protobuf StepUpdate if needed
 
-			// Example error recovery based on error message content
-			switch {
-			case strings.Contains(step.ErrorMessage, "timeout"):
+			// Use structured error codes for programmatic handling
+			if step.ErrorCode != "" {
+				fmt.Printf("  Error code: %s\n", step.ErrorCode)
+			}
+
+			// Display error metadata for debugging
+			if len(step.ErrorMetadata) > 0 {
+				fmt.Println("  Error metadata:")
+				for key, value := range step.ErrorMetadata {
+					fmt.Printf("    %s: %s\n", key, value)
+				}
+			}
+
+			// Example error recovery based on error code
+			switch step.ErrorCode {
+			case "TOOL_TIMEOUT":
 				fmt.Println("  → Tool timed out - could retry with longer timeout")
-			case strings.Contains(step.ErrorMessage, "not found"):
+			case "FILE_NOT_FOUND":
 				fmt.Println("  → Resource not found - check path or create resource")
-			case strings.Contains(step.ErrorMessage, "rate limit"):
+			case "LLM_RATE_LIMIT":
 				fmt.Println("  → API rate limit exceeded - implement retry with backoff")
-			case strings.Contains(step.ErrorMessage, "maximum turns"):
+			case "MAX_TURNS_EXCEEDED":
 				fmt.Println("  → Maximum turns exceeded - request may need refinement")
+			case "PERMISSION_DENIED":
+				fmt.Println("  → Permission denied - check policies or add approval")
 			default:
-				fmt.Println("  → Non-recoverable error")
+				// Fallback to message-based handling for backward compatibility
+				switch {
+				case strings.Contains(step.ErrorMessage, "timeout"):
+					fmt.Println("  → Tool timed out - could retry with longer timeout")
+				case strings.Contains(step.ErrorMessage, "not found"):
+					fmt.Println("  → Resource not found - check path or create resource")
+				case strings.Contains(step.ErrorMessage, "rate limit"):
+					fmt.Println("  → API rate limit exceeded - implement retry with backoff")
+				case strings.Contains(step.ErrorMessage, "maximum turns"):
+					fmt.Println("  → Maximum turns exceeded - request may need refinement")
+				default:
+					fmt.Println("  → Non-recoverable error or unknown code")
+				}
 			}
 		}
 	}

@@ -256,6 +256,12 @@ type Step struct {
 
 	// ErrorMessage is set when State is StateError.
 	ErrorMessage string
+
+	// ErrorCode is the structured error code (when State is StateError).
+	ErrorCode string
+
+	// ErrorMetadata contains structured error context (when State is StateError).
+	ErrorMetadata map[string]string
 }
 
 // StepState represents the lifecycle state of a step.
