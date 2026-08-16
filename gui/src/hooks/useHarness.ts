@@ -55,9 +55,10 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             setSteps([]);
             setServerReady(false);
             
+            let conn: HarnessConnection | null = null;
+            
             try {
                 console.log("Requesting sidecar from Rust with target:", connectionTarget);
-                let conn: HarnessConnection;
                 try {
                     conn = await invoke<HarnessConnection>('start_harness', { target: connectionTarget });
                     console.log("Got sidecar port:", conn.port);
@@ -146,7 +147,7 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                     console.log("No previous transcript found or failed to load", e);
                 }
                 
-                ws = await WebSocket.connect(`ws://localhost:${conn.port}/`, {
+                ws = await WebSocket.connect(`ws://127.0.0.1:${conn.port}/`, {
                     headers: {
                         'x-localharness-api-key': conn.api_key
                     }
@@ -220,6 +221,8 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 
             } catch (e: any) {
                 console.error("Failed to connect to harness:", e);
+                console.error("Connection target:", connectionTarget);
+                console.error("Port:", conn?.port);
                 setConnectionError(e.toString());
             }
         }
