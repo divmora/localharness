@@ -85,9 +85,9 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-[500px] h-[550px] flex flex-col rounded-xl border border-border-primary bg-bg-secondary text-text-primary shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#222] p-4 bg-[#111]">
+        <div className="flex items-center justify-between border-b border-border-primary p-4 bg-bg-tertiary">
           <div className="flex items-center gap-2 text-lg font-semibold">
-            <Terminal size={20} className="text-blue-400" />
+            <Terminal size={20} className="text-accent-primary" style={{ color: 'var(--accent-primary)' }} />
             Connect via SSH
           </div>
           <button onClick={onClose} className="text-text-tertiary hover:text-text-primary transition-colors">
@@ -96,7 +96,7 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
         </div>
 
         {/* Tabs */}
-        <div className="flex px-4 pt-3 border-b border-[#222] gap-4">
+        <div className="flex px-4 pt-3 border-b border-border-primary gap-4">
           <button
             onClick={() => setMode('select')}
             className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
@@ -148,15 +148,15 @@ export function ConnectSSHModal({ isOpen, onClose, onConnect }: ConnectSSHModalP
                     <button
                       key={host}
                       onClick={() => handleConnect(host)}
-                      className="w-full flex items-center justify-between p-3 rounded-lg border border-[#222] bg-[#111] hover:bg-[#1A1A1A] hover:border-border-primary transition-all group text-left"
+                      className="w-full flex items-center justify-between p-3 rounded-lg border border-border-primary bg-bg-tertiary hover:bg-bg-secondary hover:border-border-primary transition-all group text-left"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded bg-bg-tertiary flex items-center justify-center text-text-tertiary group-hover:text-blue-400 transition-colors">
+                        <div className="w-8 h-8 rounded bg-bg-tertiary flex items-center justify-center text-text-tertiary group-hover:text-accent-primary transition-colors" style={{ '--tw-text-opacity': '1' } as any}>
                           <Server size={16} />
                         </div>
                         <span className="font-medium text-text-primary group-hover:text-text-primary">{host}</span>
                       </div>
-                      <ChevronRight size={18} className="text-text-tertiary group-hover:text-blue-400 transition-colors" />
+                      <ChevronRight size={18} className="text-text-tertiary group-hover:text-accent-primary transition-colors" />
                     </button>
                   ))}
                 </div>

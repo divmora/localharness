@@ -85,30 +85,30 @@ export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
             transition={{ duration: 0.15 }}
-            className="w-full max-w-2xl bg-[#121212] border border-[#262626] rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            className="w-full max-w-2xl bg-bg-tertiary border border-border-primary rounded-xl shadow-2xl overflow-hidden flex flex-col"
           >
             {/* Search Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-[#262626] bg-[#000000]">
-              <Search size={18} className="text-[#9CA3AF]" />
-              <input 
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-border-primary bg-bg-primary">
+              <Search size={18} className="text-text-tertiary" />
+              <input
                 autoFocus
-                type="text" 
+                type="text"
                 placeholder="Search files by name..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="flex-1 bg-transparent text-[#F9FAFB] outline-none text-sm placeholder:text-[#6c7086]"
+                className="flex-1 bg-transparent text-text-primary outline-none text-sm placeholder:text-text-tertiary"
               />
-              <button onClick={onClose} className="p-1 hover:bg-[#262626] rounded text-[#9CA3AF]">
+              <button onClick={onClose} className="p-1 hover:bg-bg-tertiary rounded text-text-tertiary">
                 <X size={16} />
               </button>
             </div>
 
             {/* Path Breadcrumbs */}
-            <div className="px-4 py-2 bg-bg-secondary border-b border-[#262626] text-xs font-mono text-[#9CA3AF] flex items-center gap-2">
-              <span className="text-[#3B82F6]">Workspace</span>
+            <div className="px-4 py-2 bg-bg-secondary border-b border-border-primary text-xs font-mono text-text-tertiary flex items-center gap-2">
+              <span className="text-accent-primary" style={{ color: 'var(--accent-primary)' }}>Workspace</span>
               {currentPath !== '.' && (
                 <>
-                  <span className="text-[#6c7086]">/</span>
+                  <span className="text-text-tertiary">/</span>
                   <span>{currentPath}</span>
                 </>
               )}
@@ -117,36 +117,36 @@ export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }
             {/* File List */}
             <div className="max-h-[50vh] overflow-y-auto">
               {loading ? (
-                <div className="p-8 text-center text-[#6c7086] text-sm animate-pulse">Loading...</div>
+                <div className="p-8 text-center text-text-tertiary text-sm animate-pulse">Loading...</div>
               ) : (
                 <div className="py-2">
                   {currentPath !== '.' && !search && (
-                    <button 
+                    <button
                       onClick={handleBack}
-                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#262626]/50 text-[#F9FAFB] text-sm transition-colors text-left"
+                      className="w-full flex items-center gap-3 px-4 py-2 hover:bg-bg-tertiary/50 text-text-primary text-sm transition-colors text-left"
                     >
-                      <Folder size={16} className="text-[#3B82F6]" />
+                      <Folder size={16} className="text-accent-primary" style={{ color: 'var(--accent-primary)' }} />
                       <span>..</span>
                     </button>
                   )}
-                  
+
                   {filteredFiles.length === 0 ? (
-                    <div className="p-8 text-center text-[#6c7086] text-sm">No files found.</div>
+                    <div className="p-8 text-center text-text-tertiary text-sm">No files found.</div>
                   ) : (
                     filteredFiles.map((file, i) => {
                       const isDir = file.endsWith('/');
                       const name = isDir ? file.slice(0, -1) : file;
                       
                       return (
-                        <button 
+                        <button
                           key={i}
                           onClick={() => handleSelect(file)}
-                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-[#262626]/50 text-[#F9FAFB] text-sm transition-colors text-left group"
+                          className="w-full flex items-center gap-3 px-4 py-2 hover:bg-bg-tertiary/50 text-text-primary text-sm transition-colors text-left group"
                         >
                           {isDir ? (
-                            <Folder size={16} className="text-[#3B82F6]" />
+                            <Folder size={16} className="text-accent-primary" style={{ color: 'var(--accent-primary)' }} />
                           ) : (
-                            <File size={16} className="text-[#9CA3AF] group-hover:text-[#F9FAFB]" />
+                            <File size={16} className="text-text-tertiary group-hover:text-text-primary" />
                           )}
                           <span>{name}</span>
                         </button>

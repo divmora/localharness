@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Loader, AlertCircle, CheckCircle, Share2 } from 'lucide-react';
+import { SkeletonCard } from './SkeletonLoader';
 
 interface SessionsManagerProps {
   sessions: ProtoSessionInfo[];
@@ -10,6 +11,14 @@ interface SessionsManagerProps {
 export function SessionsManager({ sessions, onSelectSession }: SessionsManagerProps) {
   const [viewType, setViewType] = useState<'board' | 'list'>('board');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Simulate loading state
+  useEffect(() => {
+    setIsLoading(true);
+    const timer = setTimeout(() => setIsLoading(false), 500);
+    return () => clearTimeout(timer);
+  }, [sessions]);
 
   const filteredSessions = useMemo(() => {
     return sessions.filter(session => {
@@ -89,7 +98,27 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
 
       {/* Content Area */}
       <div className="flex-1 overflow-auto">
-        {viewType === 'board' ? (
+        {isLoading ? (
+          <div className="p-4">
+            {viewType === 'board' ? (
+              <div className="flex gap-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex-1 min-w-[300px] flex flex-col gap-3">
+                    <SkeletonCard lines={2} />
+                    <SkeletonCard lines={2} />
+                    <SkeletonCard lines={2} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <SkeletonCard key={i} lines={1} />
+                ))}
+              </div>
+            )}
+          </div>
+        ) : viewType === 'board' ? (
           <div className="flex h-full min-w-max">
             {/* Running Column */}
             <div className="flex-1 min-w-[300px] border-r border-border-primary p-4 flex flex-col gap-3">

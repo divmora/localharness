@@ -331,7 +331,7 @@ export function ChatPanel({
       
       <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col scroll-smooth">
         {messages.length === 0 && (
-          <div className="text-center text-[#585b70] mt-10 text-sm flex flex-col items-center gap-2 opacity-50">
+          <div className="text-center text-text-tertiary mt-10 text-sm flex flex-col items-center gap-2 opacity-50">
             <Bot size={32} />
             Ready to chat. Ask me anything!
           </div>
@@ -395,15 +395,15 @@ export function ChatPanel({
           );
         })}
         {connectionError && (
-          <div className="bg-[#7f1d1d]/20 border border-[#991b1b] rounded p-4 flex flex-col gap-2 my-2">
-            <div className="flex items-center gap-2 text-red-400 font-semibold text-sm">
+          <div className="rounded p-4 flex flex-col gap-2 my-2 border" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: 'rgba(239, 68, 68, 0.5)' }}>
+            <div className="flex items-center gap-2 font-semibold text-sm" style={{ color: 'rgba(239, 68, 68, 0.9)' }}>
               <ShieldAlert size={16} /> Connection Error
             </div>
-            <div className="text-xs text-red-300 font-mono whitespace-pre-wrap break-all">
+            <div className="text-xs font-mono whitespace-pre-wrap break-all" style={{ color: 'rgba(239, 68, 68, 0.7)' }}>
               {connectionError}
             </div>
             {connectionError.includes("No valid LLM configuration found") && (
-              <div className="text-xs text-[#D1D5DB] mt-1 border-t border-[#991b1b]/50 pt-2">
+              <div className="text-xs text-text-secondary mt-1 pt-2" style={{ borderTop: '1px solid rgba(239, 68, 68, 0.3)' }}>
                 Tip: Use the Customizations panel (gear icon) to configure your LLM endpoint.
               </div>
             )}

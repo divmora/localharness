@@ -62,9 +62,9 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
         <div className="mb-12 flex items-center justify-center">
           {/* A simple placeholder logo resembling three hexagons */}
           <div className="relative w-12 h-12 flex items-center justify-center opacity-40">
-            <div className="absolute top-0 w-4 h-4 bg-[#6B7280] rounded-sm transform rotate-45" />
-            <div className="absolute bottom-2 left-1 w-4 h-4 bg-[#6B7280] rounded-sm transform rotate-45" />
-            <div className="absolute bottom-2 right-1 w-4 h-4 bg-[#6B7280] rounded-sm transform rotate-45" />
+            <div className="absolute top-0 w-4 h-4 bg-text-tertiary rounded-sm transform rotate-45" style={{ backgroundColor: 'var(--text-tertiary)' }} />
+            <div className="absolute bottom-2 left-1 w-4 h-4 bg-text-tertiary rounded-sm transform rotate-45" style={{ backgroundColor: 'var(--text-tertiary)' }} />
+            <div className="absolute bottom-2 right-1 w-4 h-4 bg-text-tertiary rounded-sm transform rotate-45" style={{ backgroundColor: 'var(--text-tertiary)' }} />
           </div>
         </div>
 
@@ -80,7 +80,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="What would you like to build?"
-              className="w-full bg-transparent text-text-primary placeholder-[#6B7280] resize-none outline-none min-h-[60px]"
+              className="w-full bg-transparent text-text-primary placeholder:text-text-tertiary resize-none outline-none min-h-[60px]"
               autoFocus
             />
 
@@ -89,7 +89,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
                 <button className="p-1.5 rounded-md hover:bg-border-primary text-text-secondary transition-colors">
                   <Plus size={16} />
                 </button>
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-border-primary rounded-md text-xs font-semibold text-[#10B981]">
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-border-primary rounded-md text-xs font-semibold text-success" style={{ color: 'var(--success)' }}>
                   <MessageSquare size={12} /> Ask
                 </div>
                 <span className="text-xs text-text-tertiary font-medium ml-2">SWE-1.6 Slow</span>
@@ -106,9 +106,10 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
                   onClick={handleSubmit}
                   disabled={!prompt.trim()}
                   className={`p-1.5 rounded-full flex items-center justify-center transition-colors ${prompt.trim()
-                      ? 'bg-[#F9FAFB] text-[#000000] hover:bg-[#E5E7EB]'
+                      ? 'bg-text-primary text-bg-primary hover:bg-text-secondary'
                       : 'bg-border-primary text-text-tertiary cursor-not-allowed'
                     }`}
+                  style={prompt.trim() ? { backgroundColor: 'var(--text-primary)', color: 'var(--bg-primary)' } : {}}
                 >
                   <ArrowUp size={16} strokeWidth={3} />
                 </button>
@@ -162,7 +163,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
         <div className="w-full max-w-2xl">
           <div className="flex items-center justify-between text-xs text-text-secondary mb-4">
             <span className="font-semibold">Recent sessions</span>
-            <span className="text-[#3B82F6] cursor-pointer hover:underline">View all</span>
+            <span className="text-accent-primary cursor-pointer hover:underline" style={{ color: 'var(--accent-primary)' }}>View all</span>
           </div>
 
           <div className="flex flex-col border border-border-primary rounded-lg bg-bg-secondary overflow-hidden">
@@ -198,7 +199,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
 
         {/* Footer Link */}
         <div className="mt-auto pt-8 flex items-center text-xs text-text-tertiary font-medium gap-1">
-          Free • <span className="text-[#3B82F6] cursor-pointer hover:underline">Settings</span>
+          Free • <span className="text-accent-primary cursor-pointer hover:underline" style={{ color: 'var(--accent-primary)' }}>Settings</span>
         </div>
       </div>
       

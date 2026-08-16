@@ -10,6 +10,7 @@ import { SessionsManager } from './components/SessionsManager';
 import { CommandPalette } from './components/CommandPalette';
 import { TopBar } from './components/TopBar';
 import { TerminalPanel } from './components/TerminalPanel';
+import { ToastProvider } from './components/Toast';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
 import { invoke } from '@tauri-apps/api/core';
@@ -190,17 +191,18 @@ function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
-      <TopBar />
-      <div className="flex flex-1 overflow-hidden relative">
-        <CommandPalette />
-        <ConnectSSHModal
-          isOpen={sshModalOpen}
-          onClose={() => setSshModalOpen(false)}
-          onConnect={handleConnectSSH}
-        />
+    <ToastProvider>
+      <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
+        <TopBar />
+        <div className="flex flex-1 overflow-hidden relative">
+          <CommandPalette />
+          <ConnectSSHModal
+            isOpen={sshModalOpen}
+            onClose={() => setSshModalOpen(false)}
+            onConnect={handleConnectSSH}
+          />
 
-        <PanelGroup orientation="horizontal" className="flex-1">
+          <PanelGroup orientation="horizontal" className="flex-1">
           {/* Left Pane: Agent Sidebar */}
           {showAgentSidebar && (
             <>
@@ -219,7 +221,7 @@ function App() {
                   mcpServerCount={0}
                 />
               </Panel>
-              <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+              <PanelResizeHandle className="w-[1px] bg-border-primary transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--border-primary)' }} />
             </>
           )}
 
@@ -261,7 +263,7 @@ function App() {
                     )}
                   </Panel>
 
-                  <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+                  <PanelResizeHandle className="w-[1px] bg-border-primary transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--border-primary)' }} />
 
                   {/* Editor */}
                   <Panel defaultSize={50} minSize={20} className="flex flex-col">
@@ -274,12 +276,12 @@ function App() {
                 </PanelGroup>
               </Panel>
               
-              <PanelResizeHandle className="h-[1px] bg-border-primary hover:bg-[#3B82F6]/50 transition-colors" />
+              <PanelResizeHandle className="h-[1px] bg-border-primary transition-colors hover:opacity-80" />
               
               {/* Bottom Section: Terminal */}
               <Panel defaultSize={30} minSize={10} className="relative bg-bg-secondary">
-                 <div className="absolute top-0 left-0 right-0 bg-[#000000] px-3 py-1.5 border-b border-[#262626] z-10 flex items-center gap-2">
-                   <span className="text-[10px] font-semibold text-[#9CA3AF] uppercase tracking-wider">Terminal Output</span>
+                 <div className="absolute top-0 left-0 right-0 bg-bg-primary px-3 py-1.5 border-b border-border-primary z-10 flex items-center gap-2">
+                   <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">Terminal Output</span>
                  </div>
                  <div className="pt-8 h-full">
                    <TerminalPanel steps={steps} />
@@ -290,6 +292,7 @@ function App() {
         </PanelGroup>
       </div>
     </div>
+    </ToastProvider>
   );
 }
 

@@ -84,24 +84,24 @@ export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, conn
   const showEditor = openFiles.length > 0 || hasAgentActions;
 
   return (
-    <div className="flex flex-col h-full bg-[#000000] border-l border-[#0A0A0A]">
-      <FileExplorer 
-        isOpen={explorerOpen} 
-        onClose={() => setExplorerOpen(false)} 
-        onFileSelect={handleOpenFile} 
+    <div className="flex flex-col h-full bg-bg-primary border-l border-border-primary">
+      <FileExplorer
+        isOpen={explorerOpen}
+        onClose={() => setExplorerOpen(false)}
+        onFileSelect={handleOpenFile}
         connectionTarget={connectionTarget}
       />
 
 
       {/* Workspace Header & Tabs */}
-      <div className="border-b border-[#0A0A0A] flex flex-col shadow-sm z-10 bg-[#000000]">
+      <div className="border-b border-border-primary flex flex-col shadow-sm z-10 bg-bg-primary">
         <div className="p-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileCode2 size={16} className="text-[#3B82F6]" />
-            <span className="font-semibold text-xs tracking-wide text-[#F9FAFB]">Workspace</span>
+            <FileCode2 size={16} className="text-accent-primary" style={{ color: 'var(--accent-primary)' }} />
+            <span className="font-semibold text-xs tracking-wide text-text-primary">Workspace</span>
           </div>
         </div>
-        
+
         {/* File Tabs */}
         {openFiles.length > 0 && (
           <div className="flex items-center px-2 gap-1 overflow-x-auto scrollbar-none">
@@ -109,13 +109,14 @@ export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, conn
               const name = file.path.split('/').pop() || file.path;
               const isActive = activeFilePath === file.path;
               return (
-                <div 
+                <div
                   key={file.path}
                   onClick={() => setActiveFilePath(file.path)}
-                  className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md cursor-pointer border-t border-l border-r border-transparent ${isActive ? 'bg-[#121212] text-[#3B82F6] border-[#262626]' : 'text-[#9CA3AF] hover:bg-bg-secondary'}`}
+                  className={`group flex items-center gap-2 px-3 py-1.5 text-xs rounded-t-md cursor-pointer border-t border-l border-r border-transparent ${isActive ? 'bg-bg-tertiary text-accent-primary border-border-primary' : 'text-text-tertiary hover:bg-bg-secondary'}`}
+                  style={isActive ? { color: 'var(--accent-primary)' } : {}}
                 >
                   <span className="truncate max-w-[120px]">{name}</span>
-                  <button onClick={(e) => closeFile(file.path, e)} className={`p-0.5 rounded-sm hover:bg-[#262626] ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                  <button onClick={(e) => closeFile(file.path, e)} className={`p-0.5 rounded-sm hover:bg-bg-tertiary ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                     <X size={12} />
                   </button>
                 </div>

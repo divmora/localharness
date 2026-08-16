@@ -19,11 +19,11 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
     if (!terminalRef.current || activeTab !== 'terminal') return;
     
     const term = new Terminal({
-      theme: { 
-        background: '#000000', 
-        foreground: '#F9FAFB',
-        cursor: '#f5e0dc',
-        selectionBackground: '#585b70'
+      theme: {
+        background: 'var(--bg-primary, #000000)',
+        foreground: 'var(--text-primary, #F9FAFB)',
+        cursor: 'var(--accent-primary, #f5e0dc)',
+        selectionBackground: 'var(--border-highlight, #585b70)'
       },
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: 13,
@@ -106,35 +106,36 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
   }, [steps]);
 
   return (
-    <div className="h-full flex flex-col bg-[#000000] border-t border-[#262626] overflow-hidden">
-      <div className="h-9 flex items-center justify-between px-4 text-xs bg-bg-secondary border-b border-[#262626]">
+    <div className="h-full flex flex-col bg-bg-primary border-t border-border-primary overflow-hidden">
+      <div className="h-9 flex items-center justify-between px-4 text-xs bg-bg-secondary border-b border-border-primary">
         <div className="flex gap-4 h-full">
           {(['problems', 'output', 'debug', 'terminal', 'ports'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`h-full uppercase tracking-wider font-semibold transition-colors border-b-2 ${
-                activeTab === tab 
-                  ? 'text-[#F9FAFB] border-blue-400' 
-                  : 'text-[#6c7086] border-transparent hover:text-[#9CA3AF]'
+                activeTab === tab
+                  ? 'text-text-primary border-accent-primary'
+                  : 'text-text-tertiary border-transparent hover:text-text-secondary'
               }`}
+              style={activeTab === tab ? { borderColor: 'var(--accent-primary)' } : {}}
             >
               {tab === 'debug' ? 'Debug Console' : tab}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-3 text-[#6c7086]">
+        <div className="flex items-center gap-3 text-text-tertiary">
           <button className="hover:text-text-primary"><SplitSquareHorizontal size={14} /></button>
           <button className="hover:text-text-primary"><Trash2 size={14} /></button>
           <button className="hover:text-text-primary"><X size={14} /></button>
         </div>
       </div>
-      
+
       <div className="flex-1 relative">
         {activeTab === 'terminal' ? (
           <div className="absolute inset-0 p-2 overflow-hidden" ref={terminalRef} />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-[#6B7280] text-sm">
+          <div className="absolute inset-0 flex items-center justify-center text-text-tertiary text-sm">
             No {activeTab} available.
           </div>
         )}

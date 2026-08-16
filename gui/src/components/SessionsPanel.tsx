@@ -11,59 +11,60 @@ interface SessionsPanelProps {
 export function SessionsPanel({ activeSessionId, onSelectSession, onNewSession, sessions }: SessionsPanelProps) {
 
   return (
-    <div className="h-full bg-[#000000] border-r border-[#0A0A0A] flex flex-col text-[#F9FAFB]">
+    <div className="h-full bg-bg-primary border-r border-border-primary flex flex-col text-text-primary">
       {/* Header section */}
-      <div className="p-4 flex items-center justify-between border-b border-[#0A0A0A]">
+      <div className="p-4 flex items-center justify-between border-b border-border-primary">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-[#3B82F6] rounded-sm opacity-80" />
-          <span className="font-semibold text-[13px] tracking-wide text-[#3B82F6]">Sessions</span>
+          <div className="w-4 h-4 bg-accent-primary rounded-sm opacity-80" style={{ backgroundColor: 'var(--accent-primary)' }} />
+          <span className="font-semibold text-[13px] tracking-wide text-accent-primary" style={{ color: 'var(--accent-primary)' }}>Sessions</span>
         </div>
         <div className="flex items-center gap-1">
-          <button className="p-1 hover:bg-[#262626] rounded text-[#9CA3AF] transition-colors">
+          <button className="p-1 hover:bg-bg-tertiary rounded text-text-tertiary transition-colors">
             <MoreHorizontal size={16} />
           </button>
-          <button onClick={onNewSession} className="flex items-center gap-1 bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] px-2 py-1 rounded text-[13px] font-medium transition-colors">
+          <button onClick={onNewSession} className="flex items-center gap-1 bg-accent-primary hover:bg-accent-secondary text-bg-primary px-2 py-1 rounded text-[13px] font-medium transition-colors" style={{ backgroundColor: 'var(--accent-primary)', color: 'var(--bg-primary)' }}>
             <Plus size={14} /> New
           </button>
         </div>
       </div>
 
       {/* Search section */}
-      <div className="p-3 border-b border-[#0A0A0A]">
+      <div className="p-3 border-b border-border-primary">
         <div className="relative flex items-center">
-          <Search size={14} className="absolute left-2.5 text-[#6c7086]" />
-          <input 
-            type="text" 
-            placeholder="Search sessions..." 
-            className="w-full bg-bg-secondary text-[#F9FAFB] placeholder-[#6c7086] text-[13px] py-1.5 pl-8 pr-8 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] transition-colors"
+          <Search size={14} className="absolute left-2.5 text-text-tertiary" />
+          <input
+            type="text"
+            placeholder="Search sessions..."
+            className="w-full bg-bg-secondary text-text-primary placeholder:text-text-tertiary text-[13px] py-1.5 pl-8 pr-8 rounded border border-border-primary focus:outline-none focus:border-accent-primary transition-colors"
+            style={{ '--tw-focus-ring-color': 'var(--accent-primary)' } as any}
           />
-          <Filter size={14} className="absolute right-2.5 text-[#6c7086] cursor-pointer hover:text-[#F9FAFB]" />
+          <Filter size={14} className="absolute right-2.5 text-text-tertiary cursor-pointer hover:text-text-primary" />
         </div>
       </div>
 
       {/* Sessions list */}
       <div className="flex-1 overflow-y-auto">
         {sessions.length === 0 ? (
-          <div className="p-4 text-center text-xs text-[#9CA3AF] opacity-70">
+          <div className="p-4 text-center text-xs text-text-tertiary opacity-70">
             No active sessions found.
           </div>
         ) : (
           <div className="space-y-1 p-2">
             {sessions.map((session) => (
-              <div 
+              <div
                 key={session.id}
                 onClick={() => onSelectSession(session.id)}
                 className={`p-3 rounded-lg cursor-pointer transition-all group ${
-                  activeSessionId === session.id 
-                    ? 'bg-[#262626]/40 border border-[#333333]' 
-                    : 'hover:bg-bg-secondary border border-transparent hover:border-[#262626]'
+                  activeSessionId === session.id
+                    ? 'bg-bg-tertiary/40 border border-border-primary'
+                    : 'hover:bg-bg-secondary border border-transparent hover:border-border-primary'
                 }`}
               >
-                <div className="text-[10px] uppercase font-bold text-[#EF4444] mb-1">LOCAL-HARNESS</div>
-                <div className="text-[13px] font-medium text-[#F9FAFB] truncate mb-1">
+                <div className="text-[10px] uppercase font-bold text-error mb-1" style={{ color: 'var(--error)' }}>LOCAL-HARNESS</div>
+                <div className="text-[13px] font-medium text-text-primary truncate mb-1">
                   {session.name}
                 </div>
-                <div className="text-[11px] text-[#6c7086] flex items-center justify-between">
+                <div className="text-[11px] text-text-tertiary flex items-center justify-between">
                   <span className="truncate">{session.id.substring(0, 8)}...</span>
                   <span className="flex items-center gap-1">
                     <Clock size={10} />

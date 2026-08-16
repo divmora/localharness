@@ -16,20 +16,20 @@ export function SessionBoard({ sessions, onSelectSession, onNewSession }: Sessio
     <div className="flex-1 flex flex-col min-w-[300px]">
       <div className="flex items-center gap-2 mb-4 px-2">
         <span className={colorClass}>{icon}</span>
-        <span className="font-semibold text-sm text-[#F9FAFB]">{title}</span>
-        <span className="text-xs text-[#6c7086] font-medium">{count}</span>
+        <span className="font-semibold text-sm text-text-primary">{title}</span>
+        <span className="text-xs text-text-tertiary font-medium">{count}</span>
       </div>
       <div className="flex-1 flex flex-col gap-3 overflow-y-auto px-2 pb-6">
         {sessionsList.map(session => (
-          <div 
+          <div
             key={session.id}
             onClick={() => onSelectSession(session.id)}
-            className="bg-[#121212] border border-[#262626] hover:border-[#333333] p-4 rounded-lg cursor-pointer transition-all shadow-sm flex flex-col gap-3"
+            className="bg-bg-tertiary border border-border-primary hover:border-border-highlight p-4 rounded-lg cursor-pointer transition-all shadow-sm flex flex-col gap-3"
           >
-            <div className="text-[13px] font-medium text-[#F9FAFB] leading-relaxed">
+            <div className="text-[13px] font-medium text-text-primary leading-relaxed">
               {session.name}
             </div>
-            <div className="flex items-center justify-between text-[11px] text-[#6c7086] font-medium">
+            <div className="flex items-center justify-between text-[11px] text-text-tertiary font-medium">
               <span className="flex items-center gap-1">
                 <Clock size={12} />
                 {new Date(Number(session.updatedAt) * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
@@ -41,7 +41,7 @@ export function SessionBoard({ sessions, onSelectSession, onNewSession }: Sessio
           </div>
         ))}
         {sessionsList.length === 0 && (
-          <div className="border border-dashed border-[#262626] rounded-lg p-6 flex items-center justify-center text-xs text-[#585b70]">
+          <div className="border border-dashed border-border-primary rounded-lg p-6 flex items-center justify-center text-xs text-text-tertiary">
             No sessions
           </div>
         )}
@@ -50,40 +50,41 @@ export function SessionBoard({ sessions, onSelectSession, onNewSession }: Sessio
   );
 
   return (
-    <div className="flex-1 bg-[#000000] text-[#F9FAFB] flex flex-col h-full overflow-hidden">
+    <div className="flex-1 bg-bg-primary text-text-primary flex flex-col h-full overflow-hidden">
       {/* Top Bar */}
-      <div className="p-4 border-b border-[#0A0A0A] flex items-center justify-between">
+      <div className="p-4 border-b border-border-primary flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="flex bg-bg-secondary rounded p-1 text-sm font-medium">
-            <button className="px-3 py-1 bg-[#262626] text-[#F9FAFB] rounded shadow-sm">Board</button>
-            <button className="px-3 py-1 text-[#6c7086] hover:text-[#F9FAFB]">List</button>
+            <button className="px-3 py-1 bg-bg-tertiary text-text-primary rounded shadow-sm">Board</button>
+            <button className="px-3 py-1 text-text-tertiary hover:text-text-primary">List</button>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-bg-secondary px-2 py-1 rounded text-xs border border-[#262626]">
-              <Clock size={12} className="text-[#6c7086]" />
-              <span className="text-[#9CA3AF]">Time is <span className="text-[#F9FAFB]">Any time</span></span>
+            <div className="flex items-center gap-1 bg-bg-secondary px-2 py-1 rounded text-xs border border-border-primary">
+              <Clock size={12} className="text-text-tertiary" />
+              <span className="text-text-tertiary">Time is <span className="text-text-primary">Any time</span></span>
             </div>
-            <div className="flex items-center gap-1 bg-bg-secondary px-2 py-1 rounded text-xs border border-[#262626]">
-              <Filter size={12} className="text-[#6c7086]" />
-              <span className="text-[#9CA3AF]">Archived is <span className="text-[#F9FAFB]">Excluded</span></span>
+            <div className="flex items-center gap-1 bg-bg-secondary px-2 py-1 rounded text-xs border border-border-primary">
+              <Filter size={12} className="text-text-tertiary" />
+              <span className="text-text-tertiary">Archived is <span className="text-text-primary">Excluded</span></span>
             </div>
-            <button className="p-1 hover:bg-bg-secondary rounded border border-transparent hover:border-[#262626] text-[#9CA3AF]">
+            <button className="p-1 hover:bg-bg-secondary rounded border border-transparent hover:border-border-primary text-text-tertiary">
               <Filter size={14} />
             </button>
           </div>
         </div>
         <div className="flex items-center gap-4">
           <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-2 text-[#6c7086]" />
-            <input 
-              type="text" 
-              placeholder="Search sessions..." 
-              className="bg-bg-secondary text-sm py-1.5 pl-8 pr-4 rounded border border-[#262626] focus:outline-none focus:border-[#3B82F6] w-[250px]"
+            <Search size={14} className="absolute left-2.5 top-2 text-text-tertiary" />
+            <input
+              type="text"
+              placeholder="Search sessions..."
+              className="bg-bg-secondary text-sm py-1.5 pl-8 pr-4 rounded border border-border-primary focus:outline-none focus:border-accent-primary w-[250px]"
+              style={{ '--tw-focus-ring-color': 'var(--accent-primary)' } as any}
             />
           </div>
           <div className="flex items-center gap-2 text-sm font-medium">
-            <span className="text-[#6c7086]">Display</span>
-            <button onClick={onNewSession} className="flex items-center gap-1 bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] px-3 py-1.5 rounded text-xs font-semibold transition-colors">
+            <span className="text-text-tertiary">Display</span>
+            <button onClick={onNewSession} className="flex items-center gap-1 bg-accent-primary hover:bg-accent-secondary text-bg-primary px-3 py-1.5 rounded text-xs font-semibold transition-colors" style={{ backgroundColor: 'var(--accent-primary)', color: 'var(--bg-primary)' }}>
               <Plus size={14} /> New Session
             </button>
           </div>
