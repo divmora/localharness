@@ -46,6 +46,8 @@ type Session struct {
 	maxAutoWakeTurns      int                                 // Max synthetic turns before needing real user message (0 = disabled)
 	autoWakeCount         int                                 // Current count of consecutive auto-wake turns
 	turnWg                sync.WaitGroup                      // Tracks in-flight handleUserMessage goroutines
+	earlyUserMessages     []*pb.UserMessage                   // User messages received before engine initialization
+	earlyUserMessagesMu   sync.Mutex                          // Protects earlyUserMessages
 }
 
 // NewSession creates a new session for a WebSocket connection.
@@ -57,6 +59,7 @@ func NewSession(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *sl
 		pendingToolResults: make(map[string]chan *pb.ToolResult),
 		pendingPermissions: make(map[string]chan *pb.PermissionResponse),
 		pendingQuestions:   make(map[string]chan *pb.QuestionResponse),
+		earlyUserMessages:  make([]*pb.UserMessage, 0),
 	}
 }
 
@@ -552,17 +555,36 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		"model", provider.ModelName(),
 		"workspaces", workspaceDirs,
 	)
+
+	// Process any user messages that arrived before initialization
+	s.earlyUserMessagesMu.Lock()
+	earlyMessages := s.earlyUserMessages
+	s.earlyUserMessages = nil
+	s.earlyUserMessagesMu.Unlock()
+
+	if len(earlyMessages) > 0 {
+		s.logger.Info("processing early user messages", "count", len(earlyMessages))
+		for _, msg := range earlyMessages {
+			s.turnWg.Add(1)
+			go s.handleUserMessage(ctx, msg)
+		}
+	}
 }
 
 // handleUserMessage processes a user prompt and runs the agentic loop.
 // Caller must call turnWg.Add(1) before launching this in a goroutine.
 func (s *Session) handleUserMessage(ctx context.Context, msg *pb.UserMessage) {
-	defer s.turnWg.Done()
-
 	if s.engine == nil {
-		s.sendError("NOT_INITIALIZED", "send InitRequest first", false)
+		// Queue the message for processing after initialization
+		s.earlyUserMessagesMu.Lock()
+		s.earlyUserMessages = append(s.earlyUserMessages, msg)
+		s.earlyUserMessagesMu.Unlock()
+		s.logger.Info("user message received before initialization, queued", "content_len", len(msg.Content), "queued_count", len(s.earlyUserMessages))
+		s.turnWg.Done() // We're done with this goroutine
 		return
 	}
+
+	defer s.turnWg.Done()
 
 	s.logger.Info("user message received", "content_len", len(msg.Content))
 

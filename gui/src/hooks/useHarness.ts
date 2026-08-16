@@ -35,6 +35,7 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [socket, setSocket] = useState<WebSocket | null>(null);
+    const [serverReady, setServerReady] = useState(false);
     const messageQueueRef = useRef<any[]>([]);
 
     useEffect(() => {
@@ -45,12 +46,14 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             setConnectionError(null);
             setSteps([]);
             setSocket(null);
+            setServerReady(false);
             return;
         }
 
         async function initHarness() {
             setConnectionError(null);
             setSteps([]);
+            setServerReady(false);
             
             try {
                 console.log("Requesting sidecar from Rust with target:", connectionTarget);
@@ -195,7 +198,10 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                         const buffer = new Uint8Array(msg.data);
                         const serverMsg = fromBinary(ServerMessageSchema, buffer);
                         
-                        if (serverMsg.payload.case === "stepUpdate") {
+                        if (serverMsg.payload.case === "initResponse") {
+                            console.log("Server init response received, marking server as ready");
+                            setServerReady(true);
+                        } else if (serverMsg.payload.case === "stepUpdate") {
                             const step = serverMsg.payload.value;
                             setSteps(prev => {
                                 const index = prev.findIndex(s => s.stepIndex === step.stepIndex);
@@ -212,16 +218,6 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 
                 setSocket(ws);
                 
-                // Flush queued messages
-                while (messageQueueRef.current.length > 0) {
-                    const data = messageQueueRef.current.shift();
-                    try {
-                        await ws.send({ type: 'Binary', data });
-                    } catch (err) {
-                        console.error("Failed to send queued message", err);
-                    }
-                }
-                
             } catch (e: any) {
                 console.error("Failed to connect to harness:", e);
                 setConnectionError(e.toString());
@@ -235,6 +231,25 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             setConnected(false);
         };
     }, [activeSessionId]);
+
+    // Flush queued messages when server is ready
+    useEffect(() => {
+        if (serverReady && socket) {
+            const flushQueue = async () => {
+                console.log("Flushing message queue, items:", messageQueueRef.current.length);
+                while (messageQueueRef.current.length > 0) {
+                    const data = messageQueueRef.current.shift();
+                    try {
+                        await socket.send({ type: 'Binary', data });
+                        console.log("Sent queued message successfully");
+                    } catch (err) {
+                        console.error("Failed to send queued message", err);
+                    }
+                }
+            };
+            flushQueue();
+        }
+    }, [serverReady, socket]);
 
     const sendPrompt = useCallback(async (text: string) => {
         const userMsg = create(UserMessageSchema, {
@@ -250,13 +265,14 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
         
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
-        if (!socket) {
+        if (!socket || !serverReady) {
+            console.log("Queueing message - socket:", !!socket, "serverReady:", serverReady);
             messageQueueRef.current.push(data);
             return;
         }
         
         await socket.send({ type: 'Binary', data });
-    }, [socket]);
+    }, [socket, serverReady]);
 
     const submitQuestionResponse = useCallback(async (requestId: string, answers: any[], skipped: boolean) => {
         const qResponse = create(QuestionResponseSchema, {
@@ -274,13 +290,13 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
         
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
-        if (!socket) {
+        if (!socket || !serverReady) {
             messageQueueRef.current.push(data);
             return;
         }
         
         await socket.send({ type: 'Binary', data });
-    }, [socket]);
+    }, [socket, serverReady]);
 
     const submitPermissionResponse = useCallback(async (requestId: string, approved: boolean, denialReason: string = "") => {
         const pResponse = create(PermissionResponseSchema, {
@@ -298,13 +314,13 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
         
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
-        if (!socket) {
+        if (!socket || !serverReady) {
             messageQueueRef.current.push(data);
             return;
         }
         
         await socket.send({ type: 'Binary', data });
-    }, [socket]);
+    }, [socket, serverReady]);
 
     return { 
         connected, 
