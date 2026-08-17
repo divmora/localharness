@@ -537,7 +537,7 @@ drained:
 		if e.conv != nil && e.conv.State.BudgetAllocated > 0 {
 			if e.conv.State.BudgetSpent >= e.conv.State.BudgetAllocated {
 				e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
-				return fmt.Errorf("budget exhausted: spent $%.4f / $%.4f", e.conv.State.BudgetSpent, e.conv.State.BudgetAllocated)
+				return fmt.Errorf("budget exhausted: spent %.2f / %.2f DC", e.conv.State.BudgetSpent, e.conv.State.BudgetAllocated)
 			}
 		}
 
