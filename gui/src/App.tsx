@@ -243,7 +243,7 @@ function App() {
                     ) : currentView === 'sessions' ? (
                       <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
                     ) : currentView === 'office' ? (
-                      <OfficeView />
+                      <OfficeView sessions={sessions} onSelectSession={handleSelectSession} />
                     ) : !activeSessionId ? (
                       <CenteredEmptyState 
                         sessions={sessions} 
