@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.3.0](https://github.com/divmora/localharness/compare/v1.2.0...v1.3.0) (2026-08-17)
+
+
+### Features
+
+* add 2D isometric office view foundation ([52e54ea](https://github.com/divmora/localharness/commit/52e54ea2c3132f07cc74f8d43f4febe319ffc517))
+* add command palette and theme switcher with db persistence ([47d3c62](https://github.com/divmora/localharness/commit/47d3c62f5e7e95c0be8df53332bf3a43c5146854))
+* add generic command palette with live theme preview and remove sidebar toggle ([dfbeb4a](https://github.com/divmora/localharness/commit/dfbeb4a64b6b9c79a40b6a2ec0ab286743c11bce))
+* Add interruption API (pause/resume) with UI integration ([61ecf6f](https://github.com/divmora/localharness/commit/61ecf6f96f23309549083aa34c5bf837865cc892))
+* add structured metadata to ErrorEvent protobuf and wire up HarnessError ([4c7e9dc](https://github.com/divmora/localharness/commit/4c7e9dc90e85b9050cdb7bc62d0f8b31983db099))
+* add system tray, desktop notifications, and fix window spawning ([457801a](https://github.com/divmora/localharness/commit/457801a6f1d36309638ec35341ed054788c13796))
+* add workspace selection dropdown with recent workspaces and fix native folder dialog ([9a2d54f](https://github.com/divmora/localharness/commit/9a2d54f92358c88625910839691f9a155f43b14e))
+* **adk:** add ErrorCode and ErrorMetadata to Step and ToolError ([abc48d8](https://github.com/divmora/localharness/commit/abc48d802160a269a22095a1b5372aa9d361db62))
+* agent budget allocation via manager UI ([21038c1](https://github.com/divmora/localharness/commit/21038c1fbfc8f8e7ea7920003ca2ffaec9ca3ce9))
+* **gui:** add Toast component and update UI utilities ([3b089c1](https://github.com/divmora/localharness/commit/3b089c19ad488e04a8690b644769321d2b00050b))
+* **gui:** combine chat and workspace panes, stream sidecar stderr logs to terminal ([735590b](https://github.com/divmora/localharness/commit/735590bb992726c0e8d2a620c3c37c54b9919d71))
+* **gui:** run app in background by hiding window on close ([479ad11](https://github.com/divmora/localharness/commit/479ad1196ce650ef888776da21f9cf9fec74e01b))
+* implement 4-pane resizable layout and rename AgentSidebar ([95dbd67](https://github.com/divmora/localharness/commit/95dbd672f94bda32502980b6b1762d20c2e08c0e))
+* implement frameless custom top toolbar layout ([97e8d94](https://github.com/divmora/localharness/commit/97e8d946383aef0579aa3d171e706f1ffbaac6ed))
+* implement persistent recent projects modal and backend updates ([e014a4e](https://github.com/divmora/localharness/commit/e014a4eef7d1c41490d95938a55b9039cc95882f))
+* implement SessionsManager UI with board and list views ([80bdcf5](https://github.com/divmora/localharness/commit/80bdcf59f8d20e080448048b83b49ba6cc2e1cac))
+* map live sessions and add state animations to office view ([cbb9476](https://github.com/divmora/localharness/commit/cbb9476c2d9e3b17b425ef62a376015e07bf6392))
+* redesign chat panel UI and remove new window button ([a2284a9](https://github.com/divmora/localharness/commit/a2284a9a8edc01950c93780df9f2181f5875190e))
+* redesign LLM config UI to list view ([51d1812](https://github.com/divmora/localharness/commit/51d18121e74b0c61a958c31102370ee5168cb60a))
+* refactor UI into page components and strictly scope session visibility ([568c1ea](https://github.com/divmora/localharness/commit/568c1ea44d96d2d5c22fcb1a5cde2750064c14ea))
+* UI improvements for chat mode and manager budget controls ([5f8e1c8](https://github.com/divmora/localharness/commit/5f8e1c8702c49de2405338ed9ef3301037e1aed1))
+
+
+### Bug Fixes
+
+* **core:** queue early user messages and flush on init ([977cd97](https://github.com/divmora/localharness/commit/977cd976ef31a7205242ff8408543f973d3b13f5))
+* correctly parse source field from transcript jsonl ([fa995a1](https://github.com/divmora/localharness/commit/fa995a1a82115bc93422defe939055797f1316a9))
+* ensure Browse button is always visible in ProjectSelectionModal ([84f981c](https://github.com/divmora/localharness/commit/84f981c658a1b7aacd90b84407aab2fc1b4a5d48))
+* ensure selecting a session resets view to main chat ([fe07d9c](https://github.com/divmora/localharness/commit/fe07d9c8f8fa6fda46d134ccf831d001c2040649))
+* **gui:** change localhost to 127.0.0.1 and improve connection logging ([2f775b2](https://github.com/divmora/localharness/commit/2f775b2560f0ff0204473f9b3dd7671abe66d54b))
+* **gui:** fix duplicate chat messages and improve user message contrast ([0231200](https://github.com/divmora/localharness/commit/0231200a87b94a4f3c52485c014fd2fa95c4deb4))
+* implement message queue for initial WebSocket payloads to prevent drop ([09a5c26](https://github.com/divmora/localharness/commit/09a5c264b6265d64a58088981c868842090854a4))
+* keep ssh port forwarding process alive in tauri backend ([adc8874](https://github.com/divmora/localharness/commit/adc8874d2c8a9e5459524b57517bd38c39428f92))
+* lazy load localharness engine and surface connection errors ([385d5a3](https://github.com/divmora/localharness/commit/385d5a397da873b93b4ffc491c75368e645ed3b7))
+* load chat history on reload and resolve text duplication in chat bubbles ([e3003d9](https://github.com/divmora/localharness/commit/e3003d9bb493baaaf5bd3072e8397113bc614758))
+* remove unused React import causing build failure ([1ce0c72](https://github.com/divmora/localharness/commit/1ce0c720996b08382f3dc1e9ae5c5fc44b8b2342))
+* reorder TopBar icons and hide traffic light space on fullscreen ([33e2937](https://github.com/divmora/localharness/commit/33e29377e5e75f6f980cd326923bbbbc5e87b21d))
+* **ssh:** add StrictHostKeyChecking=accept-new and BatchMode=yes to prevent hangs ([f6a0b7b](https://github.com/divmora/localharness/commit/f6a0b7b494100bd12580f6656bff788e98a07e51))
+
 ## [1.2.0](https://github.com/divmora/localharness/compare/v1.1.0...v1.2.0) (2026-08-13)
 
 
