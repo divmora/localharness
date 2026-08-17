@@ -58,12 +58,12 @@ pub async fn save_llm_endpoint(name: String, endpoint: LlmEndpoint) -> Result<()
 #[tauri::command]
 pub async fn delete_llm_endpoint(name: String) -> Result<(), String> {
     let mut config = get_llm_config().await.unwrap_or_default();
-    config.endpoints.remove(&name);
     
-    // Auto-update default if the default was deleted
     if config.default_endpoint == name {
-        config.default_endpoint = config.endpoints.keys().next().cloned().unwrap_or_default();
+        return Err("Cannot delete the default endpoint.".to_string());
     }
+    
+    config.endpoints.remove(&name);
     
     let content = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     let path = get_llm_config_path()?;
