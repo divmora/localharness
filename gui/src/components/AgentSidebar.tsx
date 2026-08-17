@@ -12,6 +12,7 @@ interface AgentSidebarProps {
   onMoveSessionToSpace?: (sessionId: string, spaceId: string) => void;
   onOpenCustomizations: () => void;
   onOpenSessionsManager: () => void;
+  onDeleteSession?: (sessionId: string) => void;
   sessions: ProtoSessionInfo[];
   spaces?: Space[];
   sessionSpaces?: Record<string, string>;
@@ -26,6 +27,7 @@ export function AgentSidebar({
   onMoveSessionToSpace,
   onOpenCustomizations,
   onOpenSessionsManager,
+  onDeleteSession,
   sessions,
   spaces = [],
   sessionSpaces = {},
@@ -170,6 +172,13 @@ export function AgentSidebar({
           {spaces.length === 0 && (
             <div className="px-3 py-1.5 text-text-tertiary italic">No spaces created</div>
           )}
+          <div className="border-t border-border-primary my-1"></div>
+          <button
+            className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-bg-tertiary hover:text-red-400"
+            onClick={() => onDeleteSession?.(contextMenu.sessionId)}
+          >
+            Delete Session
+          </button>
         </div>
       )}
 

@@ -28,6 +28,7 @@ interface MainPageProps {
   onSubmitQuestionResponse: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse: (requestId: string, approved: boolean, reason?: string) => void;
   onSelectWorkspace: (path: string) => void;
+  onDeleteSession?: (sessionId: string) => void;
   trajectoryState: TrajectoryState_TrajState;
   onInterrupt: () => void;
   onResume: (msg?: string) => void;
@@ -53,12 +54,14 @@ export function MainPage({
   onSubmitQuestionResponse,
   onSubmitPermissionResponse,
   onSelectWorkspace,
+  onDeleteSession,
   trajectoryState,
   onInterrupt,
   onResume
 }: MainPageProps) {
   return (
-    <PanelGroup orientation="horizontal" className="flex-1">
+    // @ts-ignore
+    <PanelGroup autoSaveId="harness-main-layout" orientation="horizontal" className="flex-1">
       {/* Left Pane: Agent Sidebar */}
       {showAgentSidebar && (
         <>
@@ -71,6 +74,7 @@ export function MainPage({
               onMoveSessionToSpace={onMoveSessionToSpace}
               onOpenCustomizations={onOpenCustomizations}
               onOpenSessionsManager={onOpenSessionsManager}
+              onDeleteSession={onDeleteSession}
               sessions={sessions}
               spaces={spaces}
               sessionSpaces={sessionSpaces}
@@ -83,10 +87,12 @@ export function MainPage({
 
       {/* Main Workspace Area (Chat + Editor + Terminal) */}
       <Panel className="flex flex-col bg-bg-primary">
-        <PanelGroup orientation="vertical">
+        {/* @ts-ignore */}
+        <PanelGroup autoSaveId="harness-vertical-layout" orientation="vertical">
           {/* Top Section: Chat + Editor */}
           <Panel defaultSize={70} minSize={20} className="flex flex-col">
-            <PanelGroup orientation="horizontal">
+            {/* @ts-ignore */}
+            <PanelGroup autoSaveId="harness-chat-editor-layout" orientation="horizontal">
               {/* Chat / Main Content */}
               <Panel defaultSize={50} minSize={30} className="flex flex-col">
                 {!activeSessionId ? (

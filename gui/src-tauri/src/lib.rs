@@ -728,6 +728,70 @@ async fn list_sessions(
     Ok(buf)
 }
 
+#[tauri::command]
+async fn delete_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    target: Option<ConnectionTarget>,
+) -> Result<(), String> {
+    let is_ssh = target.as_ref().map(|t| t.kind == "ssh").unwrap_or(false);
+
+    if is_ssh {
+        let t = target.as_ref().unwrap();
+        let host = t.host.as_ref().ok_or("SSH host required")?;
+
+        let mut args = vec![
+            "-T".to_string(), "-q".to_string(),
+            "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
+            "-o".to_string(), "BatchMode=yes".to_string(),
+        ];
+        if let Some(port) = t.port {
+            args.push("-p".to_string());
+            args.push(port.to_string());
+        }
+        if let Some(key) = t.key_path.as_ref() {
+            if !key.is_empty() {
+                args.push("-i".to_string());
+                args.push(key.clone());
+            }
+        }
+        if let Some(user) = t.user.as_ref() {
+            if !user.is_empty() {
+                args.push(format!("{}@{}", user, host));
+            } else {
+                args.push(host.clone());
+            }
+        } else {
+            args.push(host.clone());
+        }
+
+        let script = format!("rm -f ~/.divmora/localharness/conversations/{}.pb && rm -rf ~/.divmora/localharness/brain/{}", session_id, session_id);
+        args.push(script);
+
+        use tauri_plugin_shell::ShellExt;
+        let output = app
+            .shell()
+            .command("ssh")
+            .args(args)
+            .output()
+            .await
+            .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!("SSH rm failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+    } else {
+        let home = dirs::home_dir().ok_or("Could not find home dir")?;
+        let conv_file = home.join(format!(".divmora/localharness/conversations/{}.pb", session_id));
+        let brain_dir = home.join(format!(".divmora/localharness/brain/{}", session_id));
+
+        let _ = std::fs::remove_file(conv_file);
+        let _ = std::fs::remove_dir_all(brain_dir);
+    }
+
+    Ok(())
+}
+
 #[derive(serde::Deserialize, Clone)]
 pub struct ConnectionTarget {
     pub kind: String, // "local" or "ssh"
@@ -1091,11 +1155,12 @@ pub fn run() {
             get_session_spaces,
             add_recent_project,
             get_recent_projects,
+            get_wallet_balance,
+            add_wallet_balance,
+            delete_session,
             get_installation_id,
             get_setting,
-            set_setting,
-            get_wallet_balance,
-            add_wallet_balance
+            set_setting
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

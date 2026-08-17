@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { CustomizationsPage } from './components/CustomizationsPage';
 import { SessionsManager } from './components/SessionsManager';
 import { CommandPalette } from './components/CommandPalette';
@@ -69,30 +69,31 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  useEffect(() => {
-    async function loadSessions() {
-      try {
-        const iid = await invoke<string>('get_installation_id', { target: null });
-        setInstallationId(iid);
+  const loadSessions = useCallback(async () => {
+    try {
+      const iid = await invoke<string>('get_installation_id', { target: null });
+      setInstallationId(iid);
 
-        const [result, officesList, spacesList, sessionMap] = await Promise.all([
-          invoke<number[]>('list_sessions', { target: null }),
-          invoke<Office[]>('get_offices'),
-          invoke<Space[]>('get_spaces', { 
-            installationId: iid,
-            officeId: activeOfficeId
-          }),
-          invoke<Record<string, string>>('get_session_spaces')
-        ]);
-        const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
-        setSessions(sessionList.sessions);
-        setOffices(officesList);
-        setSpaces(spacesList);
-        setSessionSpaces(sessionMap);
-      } catch (err) {
-        console.error("Failed to list sessions:", err);
-      }
+      const [result, officesList, spacesList, sessionMap] = await Promise.all([
+        invoke<number[]>('list_sessions', { target: null }),
+        invoke<Office[]>('get_offices'),
+        invoke<Space[]>('get_spaces', { 
+          installationId: iid,
+          officeId: activeOfficeId
+        }),
+        invoke<Record<string, string>>('get_session_spaces')
+      ]);
+      const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
+      setSessions(sessionList.sessions);
+      setOffices(officesList);
+      setSpaces(spacesList);
+      setSessionSpaces(sessionMap);
+    } catch (err) {
+      console.error("Failed to list sessions:", err);
     }
+  }, [activeOfficeId]);
+
+  useEffect(() => {
     loadSessions();
     
     const interval = setInterval(() => {
@@ -101,7 +102,7 @@ function App() {
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [activeSessionId, activeOfficeId]);
+  }, [activeSessionId, loadSessions]);
 
   const handleNewSession = () => {
     setActiveSessionId(null);
@@ -138,6 +139,21 @@ function App() {
       const officesList = await invoke<Office[]>('get_offices');
       setOffices(officesList);
       setActiveOfficeId(id);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (confirm("Are you sure you want to delete this session?")) {
+      try {
+        await invoke('delete_session', { sessionId, target: null });
+        if (activeSessionId === sessionId) {
+          setActiveSessionId(null);
+        }
+        loadSessions();
+      } catch (e) {
+        console.error("Failed to delete session:", e);
+        alert("Failed to delete session: " + e);
+      }
     }
   };
 
@@ -237,6 +253,7 @@ function App() {
               onSubmitQuestionResponse={submitQuestionResponse}
               onSubmitPermissionResponse={submitPermissionResponse}
               onSelectWorkspace={setWorkspace}
+              onDeleteSession={handleDeleteSession}
               trajectoryState={trajectoryState}
               onInterrupt={interrupt}
               onResume={resume}
