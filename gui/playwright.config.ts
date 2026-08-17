@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 120000,
+  timeout: 600000, // 10 minutes for slow docker cargo builds
   expect: { timeout: 30000 },
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

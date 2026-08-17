@@ -34,20 +34,7 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
     return Object.keys(llmConfig.endpoints);
   }, [llmConfig]);
 
-  // Handle selecting an endpoint from the dropdown
-  const handleSelectEndpoint = (name: string, configContext?: any) => {
-    const configToUse = configContext || llmConfig;
-    setActiveEndpoint(name);
-    if (configToUse?.endpoints?.[name]) {
-      setFormBaseUrl(configToUse.endpoints[name].baseUrl || '');
-      setFormApiKey(configToUse.endpoints[name].apiKey || '');
-      setFormDefaultModel(configToUse.endpoints[name].defaultModel || '');
-    } else {
-      setFormBaseUrl('');
-      setFormApiKey('');
-      setFormDefaultModel('');
-    }
-  };
+
 
   useEffect(() => {
     async function fetchData() {
@@ -182,7 +169,6 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
       const updated = await invoke<any>('get_llm_config');
 
       setLlmConfig(updated);
-      handleSelectEndpoint(updated.defaultEndpoint || 'divmora', updated);
     } catch (e: any) {
       setLlmError(e.toString());
     } finally {
