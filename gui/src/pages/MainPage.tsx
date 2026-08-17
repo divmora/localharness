@@ -142,12 +142,7 @@ export function MainPage({
               
               {/* Bottom Section: Terminal */}
               <Panel defaultSize={30} minSize={10} className="relative bg-bg-secondary">
-                 <div className="absolute top-0 left-0 right-0 bg-bg-primary px-3 py-1.5 border-b border-border-primary z-10 flex items-center gap-2">
-                   <span className="text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">Terminal Output</span>
-                 </div>
-                 <div className="pt-8 h-full">
-                   <TerminalPanel steps={steps} />
-                 </div>
+                <TerminalPanel steps={steps} />
               </Panel>
             </>
           )}

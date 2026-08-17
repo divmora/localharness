@@ -6,6 +6,7 @@ use tauri::Manager;
 use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 mod db;
+mod pty;
 mod localharness;
 mod resolver;
 mod llm_config;
@@ -1358,6 +1359,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_playwright::init())
+        .manage(pty::PtyState { 
+            master: std::sync::Mutex::new(None),
+            writer: std::sync::Mutex::new(None)
+        })
         .invoke_handler(tauri::generate_handler![
             start_harness,
             list_sessions,
@@ -1377,6 +1382,9 @@ pub fn run() {
             update_agent_tasks,
             update_visiting_session_id,
             create_space,
+            pty::spawn_pty,
+            pty::write_pty,
+            pty::resize_pty,
             get_spaces,
             move_session_to_space,
             get_session_spaces,
