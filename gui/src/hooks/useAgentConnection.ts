@@ -17,7 +17,11 @@ export function useAgentConnection(sessionId: string) {
                 if (!mounted) return;
 
                 ws = await WebSocket.connect(`ws://127.0.0.1:${connInfo.port}/`, {
-                    headers: { 'x-localharness-api-key': connInfo.api_key }
+                    headers: { 
+                        'x-localharness-api-key': connInfo.api_key,
+                        'Connection': 'Upgrade',
+                        'Upgrade': 'websocket'
+                    }
                 });
                 wsRef.current = ws;
 
@@ -53,7 +57,11 @@ export function useAgentConnection(sessionId: string) {
                                         // 4. Send message to target agent
                                         const targetConn: any = await invoke('start_harness', { sessionId: args.conversation_id, target: null });
                                         const targetWs = await WebSocket.connect(`ws://127.0.0.1:${targetConn.port}/`, {
-                                            headers: { 'x-localharness-api-key': targetConn.api_key }
+                                            headers: { 
+                                                'x-localharness-api-key': targetConn.api_key,
+                                                'Connection': 'Upgrade',
+                                                'Upgrade': 'websocket'
+                                            }
                                         });
                                         const taskMsg = create(UserMessageSchema, { content: `Message from a colleague:\n\n${args.message}`, conversationId: args.conversation_id });
                                         await targetWs.send({

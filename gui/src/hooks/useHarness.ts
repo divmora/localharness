@@ -149,7 +149,9 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 
                 ws = await WebSocket.connect(`ws://127.0.0.1:${conn.port}/`, {
                     headers: {
-                        'x-localharness-api-key': conn.api_key
+                        'x-localharness-api-key': conn.api_key,
+                        'Connection': 'Upgrade',
+                        'Upgrade': 'websocket'
                     }
                 });
                 
@@ -315,7 +317,11 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                 }).then(async (childConn: any) => {
                                     // Initialize child and give it the task
                                     const childWs = await WebSocket.connect(`ws://127.0.0.1:${childConn.port}/`, {
-                                        headers: { 'x-localharness-api-key': childConn.api_key }
+                                        headers: { 
+                                            'x-localharness-api-key': childConn.api_key,
+                                            'Connection': 'Upgrade',
+                                            'Upgrade': 'websocket'
+                                        }
                                     });
                                     
                                     const childInitReq = create(InitRequestSchema, {
@@ -469,7 +475,11 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                     const targetConn: any = await invoke('start_harness', { sessionId: args.conversation_id, target: null });
                                     
                                     const targetWs = await WebSocket.connect(`ws://127.0.0.1:${targetConn.port}/`, {
-                                        headers: { 'x-localharness-api-key': targetConn.api_key }
+                                        headers: { 
+                                            'x-localharness-api-key': targetConn.api_key,
+                                            'Connection': 'Upgrade',
+                                            'Upgrade': 'websocket'
+                                        }
                                     });
                                     
                                     // Send the message
