@@ -32,6 +32,7 @@ interface MainPageProps {
   trajectoryState: TrajectoryState_TrajState;
   onInterrupt: () => void;
   onResume: (msg?: string) => void;
+  showTerminal?: boolean;
 }
 
 export function MainPage({
@@ -57,7 +58,8 @@ export function MainPage({
   onDeleteSession,
   trajectoryState,
   onInterrupt,
-  onResume
+  onResume,
+  showTerminal = true
 }: MainPageProps) {
   return (
     // @ts-ignore
@@ -136,7 +138,7 @@ export function MainPage({
             </PanelGroup>
           </Panel>
           
-          {activeSessionId && (
+          {activeSessionId && showTerminal && (
             <>
               <PanelResizeHandle className="h-[1px] bg-border-primary transition-colors hover:opacity-80" />
               

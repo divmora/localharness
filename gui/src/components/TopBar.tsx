@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { type as osType } from '@tauri-apps/plugin-os';
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink } from 'lucide-react';
+import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink, PanelBottom } from 'lucide-react';
 
 import { Office } from '../App';
 
@@ -12,6 +12,9 @@ interface TopBarProps {
   activeOfficeId?: string;
   onSelectOffice?: (id: string) => void;
   onCreateOffice?: () => void;
+  isChatMode?: boolean;
+  showTerminal?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 export function TopBar({ 
@@ -20,7 +23,10 @@ export function TopBar({
   offices = [], 
   activeOfficeId = 'default', 
   onSelectOffice, 
-  onCreateOffice 
+  onCreateOffice,
+  isChatMode,
+  showTerminal,
+  onToggleTerminal
 }: TopBarProps) {
   const [platform, setPlatform] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -167,6 +173,16 @@ export function TopBar({
                 <ExternalLink size={14} />
               </button>
             </div>
+          )}
+
+          {isChatMode && (
+            <button
+              onClick={() => onToggleTerminal?.()}
+              className={`p-1.5 rounded transition-colors ${showTerminal ? 'text-text-primary bg-bg-tertiary' : 'text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary'}`}
+              title="Toggle Terminal Panel"
+            >
+              <PanelBottom size={16} />
+            </button>
           )}
           
           <div className="w-[1px] h-4 bg-border-primary mx-1" />

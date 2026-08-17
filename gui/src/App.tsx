@@ -55,6 +55,7 @@ function App() {
   const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget, false);
 
   const [showAgentSidebar, setShowAgentSidebar] = useState(true);
+  const [showTerminal, setShowTerminal] = useState(true);
 
   // Manager session IDs
   const managerSessionIds = new Set(Object.values(officeManagers));
@@ -251,6 +252,9 @@ function App() {
           activeOfficeId={activeOfficeId}
           onSelectOffice={setActiveOfficeId}
           onCreateOffice={handleCreateOffice}
+          isChatMode={activeSessionId !== null && currentView === 'main'}
+          showTerminal={showTerminal}
+          onToggleTerminal={() => setShowTerminal(!showTerminal)}
         />
         <div className="flex flex-1 overflow-hidden relative">
           <CommandPalette />
@@ -304,6 +308,7 @@ function App() {
               trajectoryState={trajectoryState}
               onInterrupt={interrupt}
               onResume={resume}
+              showTerminal={showTerminal}
             />
           )}
         </div>
