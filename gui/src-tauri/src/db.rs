@@ -62,6 +62,14 @@ pub fn init_db() -> Result<DbState> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS office_managers (
+            office_id TEXT PRIMARY KEY,
+            manager_session_id TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS recent_projects (
             id TEXT PRIMARY KEY,
             path TEXT NOT NULL,
@@ -71,6 +79,17 @@ pub fn init_db() -> Result<DbState> {
             target_port INTEGER,
             target_key_path TEXT,
             last_opened_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS active_sessions (
+            session_id TEXT PRIMARY KEY,
+            pid INTEGER NOT NULL,
+            port INTEGER NOT NULL,
+            api_key TEXT NOT NULL,
+            started_at INTEGER NOT NULL
         )",
         [],
     )?;
@@ -106,6 +125,15 @@ pub struct RecentProject {
     pub last_opened_at: i64,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct ActiveSession {
+    pub session_id: String,
+    pub pid: u32,
+    pub port: u16,
+    pub api_key: String,
+    pub started_at: i64,
+}
+
 impl DbState {
     pub fn create_office(&self, id: &str, name: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -116,6 +144,37 @@ impl DbState {
         conn.execute(
             "INSERT INTO offices (id, name, created_at) VALUES (?1, ?2, ?3)",
             params![id, name, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_office_manager(&self, office_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT manager_session_id FROM office_managers WHERE office_id = ?1")?;
+        let mut rows = stmt.query([office_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_all_office_managers(&self) -> Result<std::collections::HashMap<String, String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT office_id, manager_session_id FROM office_managers")?;
+        let mut rows = stmt.query([])?;
+        let mut map = std::collections::HashMap::new();
+        while let Some(row) = rows.next()? {
+            map.insert(row.get(0)?, row.get(1)?);
+        }
+        Ok(map)
+    }
+
+    pub fn set_office_manager(&self, office_id: &str, manager_session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO office_managers (office_id, manager_session_id) VALUES (?1, ?2) ON CONFLICT(office_id) DO UPDATE SET manager_session_id = ?2",
+            params![office_id, manager_session_id],
         )?;
         Ok(())
     }
@@ -282,5 +341,47 @@ impl DbState {
         }
         
         Ok(projects)
+    }
+
+    pub fn set_active_session(&self, session: &ActiveSession) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO active_sessions (session_id, pid, port, api_key, started_at) 
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(session_id) DO UPDATE SET 
+             pid = excluded.pid, port = excluded.port, api_key = excluded.api_key, started_at = excluded.started_at",
+            params![
+                session.session_id,
+                session.pid,
+                session.port,
+                session.api_key,
+                session.started_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_active_session(&self, session_id: &str) -> Result<Option<ActiveSession>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT session_id, pid, port, api_key, started_at FROM active_sessions WHERE session_id = ?1")?;
+        
+        let mut rows = stmt.query(params![session_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ActiveSession {
+                session_id: row.get(0)?,
+                pid: row.get(1)?,
+                port: row.get(2)?,
+                api_key: row.get(3)?,
+                started_at: row.get(4)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn delete_active_session(&self, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM active_sessions WHERE session_id = ?1", params![session_id])?;
+        Ok(())
     }
 }

@@ -5,8 +5,10 @@ import * as THREE from 'three';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
 import { DepositModal } from './DepositModal';
-import { invoke } from '@tauri-apps/api/core';
 import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { useHarness } from '../hooks/useHarness';
+import { ChatPanel } from './ChatPanel';
 
 interface OfficeViewProps {
   sessions: ProtoSessionInfo[];
@@ -14,6 +16,8 @@ interface OfficeViewProps {
   sessionSpaces?: Record<string, string>;
   onSelectSession: (id: string) => void;
   activeOfficeId: string;
+  managerSessionId?: string;
+  onManagerCreated?: (sessionId: string) => void;
 }
 
 const AgentAvatar = ({ position, color, name, status, onClick }: { position: [number, number, number], color: string, name: string, status: SessionStatus, onClick: () => void }) => {
@@ -61,9 +65,12 @@ const Desk = ({ position }: { position: [number, number, number] }) => (
   </Box>
 );
 
-export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession, activeOfficeId }: OfficeViewProps) => {
+export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession, activeOfficeId, managerSessionId, onManagerCreated }: OfficeViewProps) => {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [isChatOpen, setIsChatOpen] = useState(true);
+
+  const { connected, steps, sendPrompt, interrupt } = useHarness(managerSessionId || null, null, 0, true, onManagerCreated);
 
   useEffect(() => {
     async function loadWallet() {
@@ -154,6 +161,41 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
           Deposit Funds
         </button>
       </div>
+
+      {/* Manager Chat Overlay */}
+      <div 
+        className={`absolute top-4 bottom-4 left-4 z-10 w-96 bg-bg-primary/95 backdrop-blur-md border border-border-primary rounded-lg shadow-xl flex flex-col overflow-hidden transition-transform duration-300 ${isChatOpen ? 'translate-x-0' : '-translate-x-[110%]'}`}
+      >
+        <div className="flex items-center justify-between p-3 border-b border-border-primary bg-bg-secondary shrink-0">
+          <div className="font-bold text-sm text-text-primary flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            Office Manager
+          </div>
+          <button onClick={() => setIsChatOpen(false)} className="text-text-tertiary hover:text-text-primary">
+            ✕
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 relative">
+          <ChatPanel 
+            steps={steps}
+            connected={connected}
+            onSend={(p: string) => sendPrompt(p)}
+            onInterrupt={interrupt}
+          />
+        </div>
+      </div>
+
+      {/* Toggle Chat Button */}
+      {!isChatOpen && (
+        <button 
+          onClick={() => setIsChatOpen(true)}
+          className="absolute top-4 left-4 z-10 bg-bg-primary border border-border-primary rounded-lg p-3 shadow-lg hover:bg-bg-secondary transition-colors"
+          title="Open Manager Chat"
+        >
+          <div className="w-2 h-2 rounded-full bg-blue-500 mb-1"></div>
+          <div className="w-4 h-0.5 bg-text-tertiary"></div>
+        </button>
+      )}
 
       {showDepositModal && (
         <DepositModal 

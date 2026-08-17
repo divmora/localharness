@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/divmora/localharness/internal/config"
@@ -20,6 +21,9 @@ type Server struct {
 	agentCard *AgentCard
 	// SessionHandler is called for each new WebSocket connection.
 	SessionHandler func(conn *websocket.Conn)
+
+	activeSession *Session
+	sessionMu     sync.RWMutex
 }
 
 // NewServer creates a new WebSocket server.
@@ -44,6 +48,13 @@ func (s *Server) SetAgentCard(card *AgentCard) {
 	s.agentCard = card
 }
 
+// SetActiveSession stores the current session for status queries.
+func (s *Server) SetActiveSession(sess *Session) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	s.activeSession = sess
+}
+
 // StartWithListener begins serving on a pre-bound listener.
 // The listener is typically created by main.go binding to localhost:0 atomically.
 // The ctx parameter is currently unused but reserved for future graceful shutdown.
@@ -53,6 +64,7 @@ func (s *Server) StartWithListener(ctx context.Context, ln net.Listener) error {
 	
 	// Secure endpoints
 	mux.HandleFunc("/", AuthMiddleware(s.apiKey, s.handleWebSocket))
+	mux.HandleFunc("/status", AuthMiddleware(s.apiKey, s.handleStatus))
 	
 	// Public endpoints
 	mux.HandleFunc("/health", s.handleHealth)
@@ -89,4 +101,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"status":"ok","version":"%s"}`, config.HarnessVersion)
+}
+
+// handleStatus returns the current agent session state.
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	s.sessionMu.RLock()
+	sess := s.activeSession
+	s.sessionMu.RUnlock()
+
+	status := "WAITING"
+	if sess != nil {
+		status = sess.Status()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status":"%s"}`, status)
 }

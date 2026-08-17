@@ -127,6 +127,7 @@ func main() {
 
 	srv.SessionHandler = func(conn *websocket.Conn) {
 		session := server.NewSession(conn, cfg, logger)
+		srv.SetActiveSession(session)
 		session.Run()
 	}
 

@@ -110,6 +110,21 @@ fn create_office(
 }
 
 #[tauri::command]
+fn get_office_manager(state: tauri::State<db::DbState>, office_id: String) -> Result<Option<String>, String> {
+    state.get_office_manager(&office_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_all_office_managers(state: tauri::State<db::DbState>) -> Result<std::collections::HashMap<String, String>, String> {
+    state.get_all_office_managers().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_office_manager(state: tauri::State<db::DbState>, office_id: String, manager_session_id: String) -> Result<(), String> {
+    state.set_office_manager(&office_id, &manager_session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_offices(state: tauri::State<db::DbState>) -> Result<Vec<db::Office>, String> {
     state.get_offices().map_err(|e| e.to_string())
 }
@@ -685,19 +700,37 @@ async fn list_sessions(
                                 }
                             }
 
-                            // Check last message for status
-                            if let Some(last_msg) = conv_state.messages.last() {
-                                if last_msg.role == "model" && !last_msg.tool_calls.is_empty() {
-                                    // Model made tool calls but no response yet
-                                    let has_question = last_msg
-                                        .tool_calls
-                                        .iter()
-                                        .any(|t| t.name == "ask_question");
-                                    if has_question {
-                                        status = localharness::v1::SessionStatus::Blocked;
-                                    } else {
-                                        status = localharness::v1::SessionStatus::Running;
+                            // Overwrite status using DB & /status endpoint
+                            if let Ok(Some(active)) = state.get_active_session(&id) {
+                                let is_alive = std::process::Command::new("kill")
+                                    .arg("-0")
+                                    .arg(active.pid.to_string())
+                                    .status()
+                                    .map(|s| s.success())
+                                    .unwrap_or(false);
+
+                                if is_alive {
+                                    // Default to running if alive
+                                    status = localharness::v1::SessionStatus::Running;
+                                    
+                                    // Try to fetch true status from API
+                                    let api_url = format!("http://127.0.0.1:{}/status", active.port);
+                                    let client = reqwest::Client::new();
+                                    if let Ok(res) = client.get(&api_url).header("x-localharness-api-key", &active.api_key).send().await {
+                                        if let Ok(json) = res.json::<serde_json::Value>().await {
+                                            if let Some(s) = json["status"].as_str() {
+                                                match s {
+                                                    "BLOCKED" => status = localharness::v1::SessionStatus::Blocked,
+                                                    "RUNNING" => status = localharness::v1::SessionStatus::Running,
+                                                    "IDLE" => status = localharness::v1::SessionStatus::Ready,
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
                                     }
+                                } else {
+                                    // Process is dead, clean up DB
+                                    let _ = state.delete_active_session(&id);
                                 }
                             }
                         }
@@ -801,9 +834,13 @@ pub struct ConnectionTarget {
     pub key_path: Option<String>,
 }
 
+use std::io::Read;
+
 #[tauri::command]
 async fn start_harness(
     app: tauri::AppHandle,
+    state: tauri::State<'_, db::DbState>,
+    session_id: String,
     target: Option<ConnectionTarget>,
 ) -> Result<HarnessConnection, String> {
     let target = target.unwrap_or(ConnectionTarget {
@@ -813,6 +850,100 @@ async fn start_harness(
         port: None,
         key_path: None,
     });
+
+    if target.kind == "local" {
+        // 1. Check if session is already running
+        if let Ok(Some(active)) = state.get_active_session(&session_id) {
+            let is_alive = std::process::Command::new("kill")
+                .arg("-0")
+                .arg(active.pid.to_string())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+
+            if is_alive {
+                eprintln!("Session {} is already running at PID {}", session_id, active.pid);
+                return Ok(HarnessConnection {
+                    port: active.port as i32,
+                    api_key: active.api_key,
+                });
+            } else {
+                eprintln!("Session {} PID {} is dead. Respawning.", session_id, active.pid);
+                let _ = state.delete_active_session(&session_id);
+            }
+        }
+
+        let binary_path = resolver::resolve_localharness().await?;
+
+        // 2. Prepare InputConfig
+        let input_cfg = InputConfig {
+            workspace: String::new(),
+            debug: true,
+        };
+        let mut buf = Vec::new();
+        input_cfg.encode(&mut buf).map_err(|e| e.to_string())?;
+        let mut payload = Vec::new();
+        payload.write_all(&(buf.len() as u32).to_le_bytes()).unwrap();
+        payload.write_all(&buf).unwrap();
+
+        // 3. Spawn detached process
+        let mut child = std::process::Command::new(binary_path);
+        child.stdin(std::process::Stdio::piped())
+             .stdout(std::process::Stdio::piped())
+             .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            child.process_group(0);
+        }
+
+        let mut child_proc = child.spawn().map_err(|e| format!("Failed to spawn localharness: {}", e))?;
+        let pid = child_proc.id();
+
+        // 4. Send InputConfig via stdin
+        let mut stdin = child_proc.stdin.take().unwrap();
+        stdin.write_all(&payload).map_err(|e| format!("Failed to write to stdin: {}", e))?;
+        drop(stdin); // Send EOF
+
+        // 5. Read OutputConfig from stdout
+        let mut stdout = child_proc.stdout.take().unwrap();
+        let mut len_bytes = [0u8; 4];
+        stdout.read_exact(&mut len_bytes).map_err(|e| format!("Failed to read length from stdout: {}", e))?;
+        let length = u32::from_le_bytes(len_bytes) as usize;
+        let mut out_payload = vec![0u8; length];
+        stdout.read_exact(&mut out_payload).map_err(|e| format!("Failed to read payload from stdout: {}", e))?;
+        let output_cfg = OutputConfig::decode(&out_payload[..]).map_err(|e| format!("Failed to decode OutputConfig: {}", e))?;
+
+        // 6. Spawn stderr background reader
+        let stderr = child_proc.stderr.take().unwrap();
+        let app_clone = app.clone();
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(l) = line {
+                    eprintln!("SIDECAR STDERR: {}", l);
+                    use tauri::Emitter;
+                    let _ = app_clone.emit("sidecar-log", l);
+                }
+            }
+        });
+
+        // 7. Persist to DB
+        let active = db::ActiveSession {
+            session_id: session_id.clone(),
+            pid,
+            port: output_cfg.port as u16,
+            api_key: output_cfg.api_key.clone(),
+            started_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64,
+        };
+        let _ = state.set_active_session(&active);
+
+        return Ok(HarnessConnection {
+            port: output_cfg.port,
+            api_key: output_cfg.api_key,
+        });
+    }
 
     let (mut rx, mut child) = if target.kind == "ssh" {
         let host = target.host.as_ref().ok_or("SSH host required")?;
@@ -880,11 +1011,7 @@ async fn start_harness(
             .spawn()
             .map_err(|e| format!("Failed to spawn ssh: {}", e))?
     } else {
-        let binary_path = resolver::resolve_localharness().await?;
-        app.shell()
-            .command(binary_path.to_string_lossy().to_string())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn localharness: {}", e))?
+        return Err("Local execution is handled above, but ssh block fell through".to_string());
     };
 
     // 2. Prepare InputConfig
@@ -1149,6 +1276,9 @@ pub fn run() {
             list_target_files,
             create_office,
             get_offices,
+            get_office_manager,
+            get_all_office_managers,
+            set_office_manager,
             create_space,
             get_spaces,
             move_session_to_space,

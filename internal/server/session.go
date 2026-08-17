@@ -63,6 +63,37 @@ func NewSession(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *sl
 	}
 }
 
+// Status returns the current high-level state of the session for the /status endpoint.
+func (s *Session) Status() string {
+	if s.engine == nil {
+		return "INITIALIZING"
+	}
+
+	// Check if waiting for SDK responses (Blocked)
+	s.pendingMu.Lock()
+	pendingTools := len(s.pendingToolResults)
+	s.pendingMu.Unlock()
+
+	s.pendingPermissionsMu.Lock()
+	pendingPerms := len(s.pendingPermissions)
+	s.pendingPermissionsMu.Unlock()
+
+	s.pendingQuestionsMu.Lock()
+	pendingQs := len(s.pendingQuestions)
+	s.pendingQuestionsMu.Unlock()
+
+	if pendingTools > 0 || pendingPerms > 0 || pendingQs > 0 {
+		return "BLOCKED"
+	}
+
+	// If engine is idle
+	if s.engine.IsIdle() {
+		return "IDLE"
+	}
+
+	return "RUNNING"
+}
+
 const (
 	// wsPingInterval is how often the server sends WebSocket ping frames.
 	// During long LLM calls (e.g., Workers AI free tier), the WebSocket

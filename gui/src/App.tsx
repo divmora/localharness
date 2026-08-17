@@ -34,6 +34,7 @@ function App() {
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [sessionSpaces, setSessionSpaces] = useState<Record<string, string>>({});
+  const [officeManagers, setOfficeManagers] = useState<Record<string, string>>({});
   const [installationId, setInstallationId] = useState<string | null>(null);
   
   const [offices, setOffices] = useState<Office[]>([]);
@@ -42,15 +43,22 @@ function App() {
     return params.get("office_id") || 'default';
   });
   
-  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget);
+  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget, false);
 
   const [showAgentSidebar, setShowAgentSidebar] = useState(true);
 
+  // Manager session IDs
+  const managerSessionIds = new Set(Object.values(officeManagers));
+
   const filteredSessions = sessions.filter(session => {
+    // Hide office managers from the Chat view
+    if (currentView !== 'office' && managerSessionIds.has(session.id)) {
+      return false;
+    }
+
     const spaceId = sessionSpaces[session.id];
     if (!spaceId) {
-      // Show local sessions (no space assigned) everywhere EXCEPT the Office View
-      return currentView !== 'office';
+      return true; // Show unassigned sessions
     }
     // If assigned to a space, only show if that space belongs to the currently active office
     return spaces.some(s => s.id === spaceId);
@@ -74,20 +82,22 @@ function App() {
       const iid = await invoke<string>('get_installation_id', { target: null });
       setInstallationId(iid);
 
-      const [result, officesList, spacesList, sessionMap] = await Promise.all([
+      const [result, officesList, spacesList, sessionMap, managerMap] = await Promise.all([
         invoke<number[]>('list_sessions', { target: null }),
         invoke<Office[]>('get_offices'),
         invoke<Space[]>('get_spaces', { 
           installationId: iid,
           officeId: activeOfficeId
         }),
-        invoke<Record<string, string>>('get_session_spaces')
+        invoke<Record<string, string>>('get_session_spaces'),
+        invoke<Record<string, string>>('get_all_office_managers')
       ]);
       const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
       setSessions(sessionList.sessions);
       setOffices(officesList);
       setSpaces(spacesList);
       setSessionSpaces(sessionMap);
+      setOfficeManagers(managerMap);
     } catch (err) {
       console.error("Failed to list sessions:", err);
     }
@@ -227,10 +237,19 @@ function App() {
           ) : currentView === 'office' ? (
             <OfficeView 
               sessions={filteredSessions} 
+              onSelectSession={handleSelectSession}
               spaces={spaces}
               sessionSpaces={sessionSpaces}
-              onSelectSession={handleSelectSession}
               activeOfficeId={activeOfficeId}
+              managerSessionId={officeManagers[activeOfficeId]}
+              onManagerCreated={async (sessionId: string) => {
+                try {
+                  await invoke('set_office_manager', { officeId: activeOfficeId, managerSessionId: sessionId });
+                  setOfficeManagers(prev => ({ ...prev, [activeOfficeId]: sessionId }));
+                } catch (err) {
+                  console.error("Failed to set office manager", err);
+                }
+              }}
             />
           ) : (
             <MainPage

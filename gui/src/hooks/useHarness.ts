@@ -27,7 +27,7 @@ interface HarnessConnection {
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number) {
+export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number, isManager: boolean = false, onSessionCreated?: (sessionId: string) => void) {
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [serverReady, setServerReady] = useState(false);
@@ -58,7 +58,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             try {
                 console.log("Requesting sidecar from Rust...");
                 try {
-                    conn = await invoke<HarnessConnection>('start_harness', { target: null });
+                    conn = await invoke<HarnessConnection>('start_harness', { 
+                        target: null,
+                        sessionId: activeSessionId || "temp-session"
+                    });
                     console.log("Got sidecar port:", conn.port);
                 } catch (err: any) {
                     if (err.toString().includes('__TAURI_INTERNALS__')) {
@@ -162,6 +165,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                             }
                         ],
                         initialBudget: initialBudget || 0,
+                        systemInstructions: isManager ? "You are the primary Manager agent in this Office. Your responsibility is to act as the single point of contact for the human user. You should gather complete requirements from the human before starting tasks (e.g. asking clarifying questions), plan out tasks carefully to ensure concurrent tasks do not conflict, and delegate specialized work to your team by hiring new agents using the 'hire_agent' tool." : undefined,
                         builtinTools: {
                             viewFile: true,
                             createFile: true,
@@ -173,6 +177,50 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                             finish: true,
                             schedule: true,
                         },
+                        hostTools: [
+                            {
+                                name: "hire_agent",
+                                description: "Hire a specialized agent to handle a specific subtask. This will spawn a completely new agent with its own context. Use this to delegate complex work that requires a specific persona.",
+                                parametersJsonSchema: JSON.stringify({
+                                    type: "object",
+                                    required: ["agent_name", "role_description", "task_description"],
+                                    properties: {
+                                        agent_name: {
+                                            type: "string",
+                                            description: "A human-readable name for this agent (e.g., 'Alice', 'Bob')."
+                                        },
+                                        role_description: {
+                                            type: "string",
+                                            description: "The title or role of the agent to hire (e.g., 'Senior Frontend Developer', 'Manager')."
+                                        },
+                                        task_description: {
+                                            type: "string",
+                                            description: "A highly detailed description of the task this agent must complete."
+                                        }
+                                    }
+                                }),
+                                responseJsonSchema: "{}"
+                            },
+                            {
+                                name: "message_agent",
+                                description: "Send a message to another active agent in the office. This is async; you will receive a confirmation that the message was sent, but you must wait for them to message you back.",
+                                parametersJsonSchema: JSON.stringify({
+                                    type: "object",
+                                    required: ["conversation_id", "message"],
+                                    properties: {
+                                        conversation_id: {
+                                            type: "string",
+                                            description: "The Conversation ID of the agent to message."
+                                        },
+                                        message: {
+                                            type: "string",
+                                            description: "The message to send."
+                                        }
+                                    }
+                                }),
+                                responseJsonSchema: "{}"
+                            }
+                        ],
                         clientSource: "GUI"
                     })
                 });
@@ -200,8 +248,141 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                         if (serverMsg.payload.case === "initResponse") {
                             console.log("Server init response received, marking server as ready");
                             setServerReady(true);
+                            if (onSessionCreated && serverMsg.payload.value.conversationId) {
+                                onSessionCreated(serverMsg.payload.value.conversationId);
+                            }
                         } else if (serverMsg.payload.case === "stepUpdate") {
                             const step = serverMsg.payload.value;
+
+                            // Intercept hire_agent host tool call
+                            if (step.action?.case === 'hostToolCall' && step.action.value.toolName === 'hire_agent' && step.state === StepUpdate_State.WAITING) {
+                                const stepIndex = step.action.value.stepIndex;
+                                const args = JSON.parse(step.action.value.argsJson);
+                                
+                                // Spawn new agent via Rust
+                                const childSessionId = crypto.randomUUID();
+                                invoke('start_harness', {
+                                    target: null,
+                                    sessionId: childSessionId
+                                }).then(async (childConn: any) => {
+                                    // Initialize child and give it the task
+                                    const childWs = await WebSocket.connect(`ws://127.0.0.1:${childConn.port}/`, {
+                                        headers: { 'x-localharness-api-key': childConn.api_key }
+                                    });
+                                    
+                                    const childInitReq = create(InitRequestSchema, {
+                                        config: create(HarnessConfigSchema, {
+                                            conversationId: childSessionId,
+                                            workspaces: [{ directory: workspacePath || "", name: "Project", corpusName: "" }],
+                                            initialBudget: initialBudget || 0,
+                                            systemInstructions: `You are a specialized agent: ${args.agent_name} (${args.role_description}).\n\nYou have been hired by a Manager agent to complete a specific task or act as a peer. Do not communicate with the user, but instead complete the task to the best of your ability. When you need to talk to the Manager, use the 'message_agent' tool.`,
+                                            builtinTools: {
+                                                viewFile: true, createFile: true, editFile: true, listDir: true, searchDir: true, findFile: true, runCommand: true, finish: true, schedule: true
+                                            },
+                                            clientSource: "GUI"
+                                        })
+                                    });
+                                    
+                                    await childWs.send({
+                                        type: 'Binary',
+                                        data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "init", value: childInitReq } })))
+                                    });
+                                    
+                                    // Wait a tiny bit for init to process, then send user message
+                                    setTimeout(async () => {
+                                        const taskMsg = create(UserMessageSchema, { content: args.task_description, conversationId: childSessionId });
+                                        await childWs.send({
+                                            type: 'Binary',
+                                            data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
+                                        });
+                                        await childWs.disconnect();
+                                        
+                                        // Reply to parent that the agent was hired
+                                        const { ToolResultSchema } = await import('../gen/localharness/v1/localharness_pb');
+                                        const res = create(ToolResultSchema, {
+                                            stepId: stepIndex.toString(),
+                                            toolName: "hire_agent",
+                                            resultJson: JSON.stringify({ success: true, message: `Successfully hired ${args.agent_name} (${args.role_description}). Conversation ID: ${childSessionId}` })
+                                        });
+                                        ws?.send({
+                                            type: 'Binary',
+                                            data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                        });
+                                    }, 500);
+                                }).catch(err => {
+                                    console.error("Failed to hire agent", err);
+                                    import('../gen/localharness/v1/localharness_pb').then(({ ToolResultSchema }) => {
+                                        const res = create(ToolResultSchema, {
+                                            stepId: stepIndex.toString(),
+                                            toolName: "hire_agent",
+                                            resultJson: JSON.stringify({ success: false, error: err.toString() }),
+                                            isError: true
+                                        });
+                                        ws?.send({
+                                            type: 'Binary',
+                                            data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                        });
+                                    });
+                                });
+                            } else if (step.action?.case === 'hostToolCall' && step.action.value.toolName === 'message_agent' && step.state === StepUpdate_State.WAITING) {
+                                const stepIndex = step.action.value.stepIndex;
+                                const args = JSON.parse(step.action.value.argsJson);
+                                
+                                // Fetch all sessions to find the port
+                                invoke('list_sessions', { target: null }).then(async (result: any) => {
+                                    const { SessionListSchema, ToolResultSchema, ClientMessageSchema, UserMessageSchema } = await import('../gen/localharness/v1/localharness_pb');
+                                    const { fromBinary, toBinary, create } = await import('@bufbuild/protobuf');
+                                    const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
+                                    const targetSession = sessionList.sessions.find(s => s.id === args.conversation_id);
+                                    
+                                    if (!targetSession) {
+                                        throw new Error(`Agent ${args.conversation_id} not found.`);
+                                    }
+
+                                    // Get port from SQLite by getting the active sessions
+                                    const targetConn: any = await invoke('start_harness', { sessionId: args.conversation_id, target: null });
+                                    
+                                    const targetWs = await WebSocket.connect(`ws://127.0.0.1:${targetConn.port}/`, {
+                                        headers: { 'x-localharness-api-key': targetConn.api_key }
+                                    });
+                                    
+                                    // Send the message
+                                    const taskMsg = create(UserMessageSchema, { content: `Message from Manager:\n\n${args.message}`, conversationId: args.conversation_id });
+                                    await targetWs.send({
+                                        type: 'Binary',
+                                        data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
+                                    });
+                                    
+                                    await targetWs.disconnect();
+                                    
+                                    const res = create(ToolResultSchema, {
+                                        stepId: stepIndex.toString(),
+                                        toolName: "message_agent",
+                                        resultJson: JSON.stringify({ success: true, message: "Message sent successfully." })
+                                    });
+                                    ws?.send({
+                                        type: 'Binary',
+                                        data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                    });
+                                }).catch(err => {
+                                    console.error("Failed to message agent", err);
+                                    import('../gen/localharness/v1/localharness_pb').then(({ ToolResultSchema, ClientMessageSchema }) => {
+                                        import('@bufbuild/protobuf').then(({ create, toBinary }) => {
+                                            const res = create(ToolResultSchema, {
+                                                stepId: stepIndex.toString(),
+                                                toolName: "message_agent",
+                                                resultJson: JSON.stringify({ success: false, error: err.toString() }),
+                                                isError: true
+                                            });
+                                            ws?.send({
+                                                type: 'Binary',
+                                                data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                            });
+                                        });
+                                    });
+                                });
+                            }
+
                             setSteps(prev => {
                                 const index = prev.findIndex(s => s.stepIndex === step.stepIndex);
                                 if (index >= 0) {
