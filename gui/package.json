@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test:e2e": "playwright test",
-    "test:e2e:headless": "rm -rf ~/.divmora && WEBKIT_FORCE_SANDBOX=0 WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a npx playwright test"
+    "test:e2e:headless": "rm -rf ~/.divmora/localharness/conversations ~/.divmora/localharness/brain ~/.divmora/localharness/projects.json && WEBKIT_FORCE_SANDBOX=0 WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a npx playwright test"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.13.0",

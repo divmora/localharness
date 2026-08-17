@@ -8,10 +8,13 @@ test.describe('LLM Configuration CRUD', () => {
     await tauriPage.click('text=Customizations');
     await tauriPage.waitForSelector('text="LLM Configuration"', 10000);
 
-    // 2. Add Endpoint
-    // We mock the prompt because playwright does not auto-handle window.prompt unless we set up a handler.
-    await tauriPage.evaluate(() => {
-      window.prompt = () => "test-endpoint";
+    // We must handle the dialog before clicking
+    page.on('dialog', dialog => {
+      if (dialog.type() === 'prompt') {
+        dialog.accept('test-endpoint');
+      } else {
+        dialog.accept();
+      }
     });
     
     await tauriPage.click('text="Add Endpoint"');
@@ -38,11 +41,7 @@ test.describe('LLM Configuration CRUD', () => {
     await tauriPage.waitForSelector('span:has-text("Default")', 5000);
 
     // 5. Delete Endpoint
-    // We need to mock window.confirm to always return true
-    await tauriPage.evaluate(() => {
-      window.confirm = () => true;
-    });
-
+    // The dialog handler registered earlier will automatically accept the confirm dialog.
     await tauriPage.click('text="Delete"');
     
     // Ensure it was deleted
