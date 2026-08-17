@@ -145,6 +145,17 @@ function App() {
       }
     }
 
+    setSessions(prev => [{
+      id: newId,
+      name: 'New Session',
+      status: 0,
+      createdAt: BigInt(Date.now()),
+      updatedAt: BigInt(Date.now()),
+      workspace: workspace || '',
+      budgetAllocated: allocatedBudget || 0,
+      budgetSpent: 0
+    } as any, ...prev]);
+
     setActiveSessionId(newId);
     sendPrompt(prompt);
   };
@@ -241,6 +252,16 @@ function App() {
     }
   };
 
+  const handleManagerCreated = useCallback(async (sessionId: string, officeId: string) => {
+    try {
+      await invoke('set_office_manager', { officeId: officeId, managerSessionId: sessionId });
+      setOfficeManagers(prev => ({ ...prev, [officeId]: sessionId }));
+    } catch (err) {
+      console.error("Failed to set office manager", err);
+      showToast({ title: 'Error', message: `Failed to set manager: ${err}`, type: 'error' });
+    }
+  }, [showToast]);
+
   return (
     <>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
@@ -274,15 +295,7 @@ function App() {
               sessionSpaces={sessionSpaces}
               activeOfficeId={activeOfficeId}
               managerSessionId={officeManagers[activeOfficeId]}
-              onManagerCreated={async (sessionId: string) => {
-                try {
-                  await invoke('set_office_manager', { officeId: activeOfficeId, managerSessionId: sessionId });
-                  setOfficeManagers(prev => ({ ...prev, [activeOfficeId]: sessionId }));
-                } catch (err) {
-                  console.error("Failed to set office manager", err);
-                  showToast({ title: 'Error', message: `Failed to set manager: ${err}`, type: 'error' });
-                }
-              }}
+              onManagerCreated={(sessionId) => handleManagerCreated(sessionId, activeOfficeId)}
             />
           ) : (
             <MainPage

@@ -17,7 +17,7 @@ interface MainPageProps {
   connectionError: string | null;
   steps: StepUpdate[];
   workspace: string | null;
-  
+
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
   onCreateSpace: () => void;
@@ -68,9 +68,9 @@ export function MainPage({
       {showAgentSidebar && (
         <>
           <Panel defaultSize={20} minSize={10} className="flex flex-col" collapsible>
-            <AgentSidebar 
-              activeSessionId={activeSessionId} 
-              onSelectSession={onSelectSession} 
+            <AgentSidebar
+              activeSessionId={activeSessionId}
+              onSelectSession={onSelectSession}
               onNewSession={onNewSession}
               onCreateSpace={onCreateSpace}
               onMoveSessionToSpace={onMoveSessionToSpace}
@@ -98,24 +98,24 @@ export function MainPage({
               {/* Chat / Main Content */}
               <Panel defaultSize={50} minSize={30} className="flex flex-col">
                 {!activeSessionId ? (
-                  <CenteredEmptyState 
-                    sessions={sessions} 
-                    onSelectSession={onSelectSession} 
+                  <CenteredEmptyState
+                    sessions={sessions}
+                    onSelectSession={onSelectSession}
                     onSubmitPrompt={onSubmitPrompt}
                     onOpenSessionsManager={onOpenSessionsManager}
                     workspace={workspace}
                     onSelectWorkspace={onSelectWorkspace}
                   />
                 ) : (
-                  <ChatPanel 
-                    connected={connected} 
+                  <ChatPanel
+                    connected={connected}
                     connectionError={connectionError}
-                    steps={steps} 
+                    steps={steps}
                     trajectoryState={trajectoryState}
                     onInterrupt={onInterrupt}
                     onResume={onResume}
-                    onSend={onSubmitPrompt} 
-                    onSubmitQuestionResponse={onSubmitQuestionResponse} 
+                    onSend={onSubmitPrompt}
+                    onSubmitQuestionResponse={onSubmitQuestionResponse}
                     onSubmitPermissionResponse={onSubmitPermissionResponse}
                   />
                 )}
@@ -127,9 +127,9 @@ export function MainPage({
 
                   {/* Editor */}
                   <Panel defaultSize={50} minSize={20} className="flex flex-col">
-                    <WorkspacePanel 
-                      steps={steps} 
-                      onNewSession={onNewSession} 
+                    <WorkspacePanel
+                      steps={steps}
+                      onNewSession={onNewSession}
                       onOpenCustomizations={onOpenCustomizations}
                     />
                   </Panel>
@@ -137,17 +137,17 @@ export function MainPage({
               )}
             </PanelGroup>
           </Panel>
-          
+
           {activeSessionId && (
             <>
-              <PanelResizeHandle 
-                className={`h-[1px] bg-border-primary transition-colors hover:opacity-80 ${!showTerminal ? 'hidden' : ''}`} 
+              <PanelResizeHandle
+                className={`h-[1px] bg-border-primary transition-colors hover:opacity-80 ${!showTerminal ? 'hidden' : ''}`}
               />
-              
+
               {/* Bottom Section: Terminal */}
-              <Panel 
-                defaultSize={30} 
-                minSize={10} 
+              <Panel
+                defaultSize={30}
+                minSize={10}
                 className={`relative bg-bg-secondary ${!showTerminal ? 'hidden' : ''}`}
               >
                 <TerminalPanel steps={steps} />

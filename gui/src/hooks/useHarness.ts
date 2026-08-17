@@ -39,7 +39,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
     useEffect(() => {
         let ws: WebSocket | null = null;
         
-        if (!activeSessionId) {
+        // Generate a new ID if it's a manager and doesn't exist
+        const targetSessionId = activeSessionId || (isManager ? crypto.randomUUID() : null);
+
+        if (!targetSessionId) {
             setConnected(false);
             setConnectionError(null);
             setSteps([]);
@@ -62,7 +65,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 try {
                     conn = await invoke<HarnessConnection>('start_harness', { 
                         target: null,
-                        sessionId: activeSessionId || "temp-session"
+                        sessionId: targetSessionId
                     });
                     console.log("Got sidecar port:", conn.port);
                 } catch (err: any) {
@@ -78,7 +81,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 // Fetch transcript to hydrate past session UI state
                 try {
                     const home = await homeDir();
-                    const transcriptPath = `${home}/.divmora/localharness/brain/${activeSessionId}/.system_generated/logs/transcript.jsonl`;
+                    const transcriptPath = `${home}/.divmora/localharness/brain/${targetSessionId}/.system_generated/logs/transcript.jsonl`;
                     console.log("Fetching transcript from", transcriptPath);
                     const rawJsonl = await invoke<string>('read_file', { 
                         path: transcriptPath 
@@ -289,7 +292,11 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                     data: Array.from(toBinary(ClientMessageSchema, initClientMsg))
                 });
                 
-                console.log(`WebSocket connected for session: ${activeSessionId || 'new'}`);
+                if (!activeSessionId && isManager && onSessionCreated) {
+                    onSessionCreated(targetSessionId!);
+                }
+                
+                console.log(`WebSocket connected for session: ${targetSessionId}`);
                 setConnected(true);
                 
                 ws.addListener((msg) => {

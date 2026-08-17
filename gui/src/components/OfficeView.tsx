@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrthographicCamera, OrbitControls, Box, Html, Billboard } from '@react-three/drei';
+import { OrthographicCamera, OrbitControls, Box, Html, Billboard, Bounds } from '@react-three/drei';
 import * as THREE from 'three';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
@@ -350,6 +350,7 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
         
         {/* Controls so the user can pan around the office */}
         <OrbitControls 
+          makeDefault
           enableRotate={false} /* Lock rotation to keep isometric perspective */
           enableZoom={true}
           enablePan={true}
@@ -363,8 +364,11 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
           intensity={1} 
           castShadow 
           shadow-mapSize={[1024, 1024]}
-        />        {/* Map out Spaces and Workspaces */}
-        {(() => {
+        />
+        
+        <Bounds fit clip observe margin={1.2}>
+          {/* Map out Spaces and Workspaces */}
+          {(() => {
           // Pre-calculate all desk world positions
           const worldDeskPositions: Record<string, [number, number, number]> = {};
           
@@ -490,7 +494,7 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
             </>
           );
         })()}
-
+        </Bounds>
       </Canvas>
     </div>
   );
