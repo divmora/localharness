@@ -138,12 +138,18 @@ export function MainPage({
             </PanelGroup>
           </Panel>
           
-          {activeSessionId && showTerminal && (
+          {activeSessionId && (
             <>
-              <PanelResizeHandle className="h-[1px] bg-border-primary transition-colors hover:opacity-80" />
+              <PanelResizeHandle 
+                className={`h-[1px] bg-border-primary transition-colors hover:opacity-80 ${!showTerminal ? 'hidden' : ''}`} 
+              />
               
               {/* Bottom Section: Terminal */}
-              <Panel defaultSize={30} minSize={10} className="relative bg-bg-secondary">
+              <Panel 
+                defaultSize={30} 
+                minSize={10} 
+                className={`relative bg-bg-secondary ${!showTerminal ? 'hidden' : ''}`}
+              >
                 <TerminalPanel steps={steps} />
               </Panel>
             </>
