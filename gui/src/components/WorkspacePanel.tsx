@@ -7,13 +7,11 @@ import { FileExplorer } from './FileExplorer';
 
 import { FileCode2, X } from 'lucide-react';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
-import { ConnectionTarget } from '../hooks/useHarness';
 
 interface WorkspacePanelProps {
   steps: StepUpdate[];
   onNewSession: () => void;
   onOpenCustomizations?: () => void;
-  connectionTarget?: ConnectionTarget | null;
 }
 
 interface OpenFile {
@@ -21,7 +19,7 @@ interface OpenFile {
   content: string;
 }
 
-export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, connectionTarget }: WorkspacePanelProps) {
+export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations }: WorkspacePanelProps) {
   const [openFiles, setOpenFiles] = useState<OpenFile[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
@@ -89,7 +87,6 @@ export function WorkspacePanel({ steps, onNewSession, onOpenCustomizations, conn
         isOpen={explorerOpen}
         onClose={() => setExplorerOpen(false)}
         onFileSelect={handleOpenFile}
-        connectionTarget={connectionTarget}
       />
 
 

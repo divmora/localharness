@@ -1,21 +1,18 @@
 import { Plus, MessageSquare, Terminal, FolderOpen, Cloud, TerminalSquare, ArrowUp, Mic } from 'lucide-react';
 import { SessionInfo as ProtoSessionInfo } from '../gen/localharness/v1/localharness_pb';
 import { useState } from 'react';
-import { ConnectionTarget } from '../hooks/useHarness';
 import { ProjectSelectionModal, RecentProject } from './ProjectSelectionModal';
 import { invoke } from '@tauri-apps/api/core';
 interface CenteredEmptyStateProps {
   onSelectSession: (id: string) => void;
   sessions: ProtoSessionInfo[];
   onSubmitPrompt: (prompt: string) => void;
-  onOpenSSHModal: () => void;
   onOpenSessionsManager: () => void;
-  connectionTarget?: ConnectionTarget | null;
   workspace: string | null;
   onSelectWorkspace: (path: string) => void;
 }
 
-export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSSHModal, onOpenSessionsManager, connectionTarget, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
+export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSessionsManager, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
   const [prompt, setPrompt] = useState("");
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
 
@@ -40,11 +37,11 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
       const recent: RecentProject = {
         id: project?.id || `local:${path}`,
         path: path,
-        target_kind: connectionTarget?.kind || 'local',
-        target_host: connectionTarget?.host || null,
-        target_user: connectionTarget?.user || null,
-        target_port: connectionTarget?.port || null,
-        target_key_path: connectionTarget?.key_path || null,
+        target_kind: 'local',
+        target_host: null,
+        target_user: null,
+        target_port: null,
+        target_key_path: null,
         last_opened_at: Date.now()
       };
       await invoke('add_recent_project', { project: recent });
@@ -97,7 +94,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
 
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-border-primary text-xs font-semibold text-text-secondary cursor-pointer transition-colors">
-                  <Terminal size={14} /> {connectionTarget?.kind === 'ssh' ? `SSH: ${connectionTarget.host}` : 'Local'}
+                  <Terminal size={14} /> Local
                 </div>
                 <button className="p-1.5 rounded-md hover:bg-border-primary text-text-secondary transition-colors">
                   <Mic size={16} />
@@ -120,7 +117,7 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
           <div className="bg-bg-secondary border-t border-border-primary px-4 py-3 flex items-center justify-between text-xs text-text-secondary">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
-                <TerminalSquare size={14} /> {connectionTarget?.kind === 'ssh' ? `SSH: ${connectionTarget.host}` : 'Local'}
+                <TerminalSquare size={14} /> Local
               </div>
               <div className="flex items-center gap-1.5 relative">
                 <button 
@@ -151,12 +148,6 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
             <Cloud size={16} className="text-text-secondary" />
             <span className="text-xs font-semibold text-text-primary">Clone repository</span>
           </div>
-          {(!connectionTarget || connectionTarget.kind !== 'ssh') && (
-            <div onClick={onOpenSSHModal} className="bg-bg-secondary hover:bg-bg-tertiary border border-border-primary hover:border-border-highlight rounded-lg p-4 cursor-pointer transition-all flex flex-col gap-2">
-              <TerminalSquare size={16} className="text-text-secondary" />
-              <span className="text-xs font-semibold text-text-primary">Connect via SSH</span>
-            </div>
-          )}
         </div>
 
         {/* Recent Sessions */}

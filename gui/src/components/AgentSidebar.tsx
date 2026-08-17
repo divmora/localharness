@@ -12,7 +12,6 @@ interface AgentSidebarProps {
   onMoveSessionToSpace?: (sessionId: string, spaceId: string) => void;
   onOpenCustomizations: () => void;
   onOpenSessionsManager: () => void;
-  onOpenOffice: () => void;
   sessions: ProtoSessionInfo[];
   spaces?: Space[];
   sessionSpaces?: Record<string, string>;
@@ -27,7 +26,6 @@ export function AgentSidebar({
   onMoveSessionToSpace,
   onOpenCustomizations,
   onOpenSessionsManager,
-  onOpenOffice,
   sessions,
   spaces = [],
   sessionSpaces = {},
@@ -63,13 +61,6 @@ export function AgentSidebar({
         >
           <MessageSquare size={14} />
           <span>Sessions</span>
-        </div>
-        <div 
-          className="flex items-center gap-2 px-3 py-1.5 mt-1 text-xs font-semibold text-text-primary bg-bg-secondary cursor-pointer hover:bg-bg-tertiary transition-colors rounded-sm"
-          onClick={onOpenOffice}
-        >
-          <Cpu size={14} />
-          <span>Office</span>
         </div>
       </div>
 

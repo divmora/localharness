@@ -17,20 +17,14 @@ import {
     PermissionResponseSchema
 } from '../gen/localharness/v1/localharness_pb';
 
-export interface ConnectionTarget {
-    kind: "local" | "ssh";
-    host?: string;
-    user?: string;
-    port?: number;
-    key_path?: string;
-}
+
 
 interface HarnessConnection {
     port: number;
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null, connectionTarget: ConnectionTarget | null = null, workspacePath?: string | null) {
+export function useHarness(activeSessionId: string | null, _unused: any = null, workspacePath?: string | null) {
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
@@ -58,9 +52,9 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
             let conn: HarnessConnection | null = null;
             
             try {
-                console.log("Requesting sidecar from Rust with target:", connectionTarget);
+                console.log("Requesting sidecar from Rust...");
                 try {
-                    conn = await invoke<HarnessConnection>('start_harness', { target: connectionTarget });
+                    conn = await invoke<HarnessConnection>('start_harness', { target: null });
                     console.log("Got sidecar port:", conn.port);
                 } catch (err: any) {
                     if (err.toString().includes('__TAURI_INTERNALS__')) {
@@ -77,8 +71,7 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                     const home = await homeDir();
                     const transcriptPath = `${home}/.divmora/localharness/brain/${activeSessionId}/.system_generated/logs/transcript.jsonl`;
                     console.log("Fetching transcript from", transcriptPath);
-                    const rawJsonl = await invoke<string>('read_target_file', { 
-                        target: connectionTarget, 
+                    const rawJsonl = await invoke<string>('read_file', { 
                         path: transcriptPath 
                     });
                     
@@ -221,7 +214,6 @@ export function useHarness(activeSessionId: string | null, connectionTarget: Con
                 
             } catch (e: any) {
                 console.error("Failed to connect to harness:", e);
-                console.error("Connection target:", connectionTarget);
                 console.error("Port:", conn?.port);
                 setConnectionError(e.toString());
             }

@@ -101,14 +101,29 @@ cat "$file"
 }
 
 #[tauri::command]
+fn create_office(
+    state: tauri::State<db::DbState>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    state.create_office(&id, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_offices(state: tauri::State<db::DbState>) -> Result<Vec<db::Office>, String> {
+    state.get_offices().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn create_space(
     state: tauri::State<db::DbState>,
     id: String,
     name: String,
     installation_id: String,
+    office_id: String,
 ) -> Result<(), String> {
     state
-        .create_space(&id, &name, &installation_id)
+        .create_space(&id, &name, &installation_id, &office_id)
         .map_err(|e| e.to_string())
 }
 
@@ -116,9 +131,10 @@ fn create_space(
 fn get_spaces(
     state: tauri::State<db::DbState>,
     installation_id: String,
+    office_id: String,
 ) -> Result<Vec<db::Space>, String> {
     state
-        .get_spaces(&installation_id)
+        .get_spaces(&installation_id, &office_id)
         .map_err(|e| e.to_string())
 }
 
@@ -511,6 +527,8 @@ async fn list_sessions(
                         let mut updated_at = 0;
                         let mut workspace = String::new();
                         let mut client_source = String::new();
+                        let mut budget_allocated = 0.0;
+                        let mut budget_spent = 0.0;
 
                         if let Ok(conv_state) = ConversationState::decode(decoded.as_slice()) {
                             if let Some(config) = &conv_state.config {
@@ -519,6 +537,8 @@ async fn list_sessions(
                                     workspace = config.workspaces[0].directory.clone();
                                 }
                             }
+                            budget_allocated = conv_state.budget_allocated;
+                            budget_spent = conv_state.budget_spent;
 
                             // Find last message timestamp
                             if let Some(last) = conv_state.messages.last() {
@@ -571,6 +591,8 @@ async fn list_sessions(
                             status: status.into(),
                             workspace,
                             client_source,
+                            budget_allocated,
+                            budget_spent,
                         });
                     }
                 } else if in_file {
@@ -604,6 +626,8 @@ async fn list_sessions(
                     let mut status = localharness::v1::SessionStatus::Ready;
                     let mut workspace = String::new();
                     let mut client_source = String::new();
+                    let mut budget_allocated = 0.0;
+                    let mut budget_spent = 0.0;
 
                     if let Ok(buf) = std::fs::read(&path) {
                         if let Ok(conv_state) = ConversationState::decode(buf.as_slice()) {
@@ -613,6 +637,8 @@ async fn list_sessions(
                                     workspace = config.workspaces[0].directory.clone();
                                 }
                             }
+                            budget_allocated = conv_state.budget_allocated;
+                            budget_spent = conv_state.budget_spent;
 
                             // Find last message timestamp to override file mtime if present
                             if let Some(last) = conv_state.messages.last() {
@@ -667,6 +693,8 @@ async fn list_sessions(
                         status: status.into(),
                         workspace,
                         client_source,
+                        budget_allocated,
+                        budget_spent,
                     });
                 }
             }
@@ -1038,6 +1066,8 @@ pub fn run() {
             read_target_file,
             write_target_file,
             list_target_files,
+            create_office,
+            get_offices,
             create_space,
             get_spaces,
             move_session_to_space,

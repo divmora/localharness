@@ -273,6 +273,7 @@ type subagentInvocationArgs struct {
 	TypeName string `json:"TypeName"`
 	Role     string `json:"Role"`
 	Prompt   string `json:"Prompt"`
+	AllocatedBudget float64 `json:"AllocatedBudget,omitempty"`
 }
 
 // executeSubagent handles the invoke_subagent tool call.
@@ -388,6 +389,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 				childConv.State.AgentRole = inv.Role
 				childConv.State.AgentTypeName = inv.TypeName
 				childConv.State.AgentDepth = int32(e.depth + 1)
+				childConv.State.BudgetAllocated = inv.AllocatedBudget
 			}
 		}
 

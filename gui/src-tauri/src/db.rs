@@ -13,18 +13,35 @@ pub fn init_db() -> Result<DbState> {
 
     let conn = Connection::open(db_path)?;
 
-    conn.execute("DROP TABLE IF EXISTS session_spaces", [])?;
-    conn.execute("DROP TABLE IF EXISTS spaces", [])?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS offices (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    // Ensure a Default Office exists
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    conn.execute(
+        "INSERT OR IGNORE INTO offices (id, name, created_at) VALUES ('default', 'Default Office', ?1)",
+        params![now],
+    )?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS spaces (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             installation_id TEXT NOT NULL,
+            office_id TEXT NOT NULL DEFAULT 'default' REFERENCES offices(id),
             created_at INTEGER NOT NULL
         )",
         [],
     )?;
+
+    // Migration for existing spaces
+    let _ = conn.execute("ALTER TABLE spaces ADD COLUMN office_id TEXT NOT NULL DEFAULT 'default' REFERENCES offices(id)", []);
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS settings (
@@ -64,10 +81,17 @@ pub fn init_db() -> Result<DbState> {
 }
 
 #[derive(serde::Serialize)]
+pub struct Office {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(serde::Serialize)]
 pub struct Space {
     pub id: String,
     pub name: String,
     pub installation_id: String,
+    pub office_id: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -83,30 +107,60 @@ pub struct RecentProject {
 }
 
 impl DbState {
-    pub fn create_space(&self, id: &str, name: &str, installation_id: &str) -> Result<()> {
+    pub fn create_office(&self, id: &str, name: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT INTO spaces (id, name, installation_id, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, name, installation_id, now],
+            "INSERT INTO offices (id, name, created_at) VALUES (?1, ?2, ?3)",
+            params![id, name, now],
         )?;
         Ok(())
     }
 
-    pub fn get_spaces(&self, installation_id: &str) -> Result<Vec<Space>> {
+    pub fn get_offices(&self) -> Result<Vec<Office>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, name, installation_id FROM spaces WHERE installation_id = ?1 ORDER BY created_at ASC")?;
+        let mut stmt = conn.prepare("SELECT id, name FROM offices ORDER BY created_at ASC")?;
+
+        let mut offices = Vec::new();
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            offices.push(Office {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            });
+        }
+
+        Ok(offices)
+    }
+
+    pub fn create_space(&self, id: &str, name: &str, installation_id: &str, office_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT INTO spaces (id, name, installation_id, office_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, installation_id, office_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_spaces(&self, installation_id: &str, office_id: &str) -> Result<Vec<Space>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name, installation_id, office_id FROM spaces WHERE installation_id = ?1 AND office_id = ?2 ORDER BY created_at ASC")?;
 
         let mut spaces = Vec::new();
-        let mut rows = stmt.query(params![installation_id])?;
+        let mut rows = stmt.query(params![installation_id, office_id])?;
         while let Some(row) = rows.next()? {
             spaces.push(Space {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 installation_id: row.get(2)?,
+                office_id: row.get(3)?,
             });
         }
 

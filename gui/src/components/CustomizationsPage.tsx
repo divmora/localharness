@@ -1,16 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Settings, Plug, Book, Lightbulb, CheckCircle2, Cpu, ArrowLeft } from 'lucide-react';
-import { ConnectionTarget } from '../hooks/useHarness';
-
 interface CustomizationsPageProps {
   onClose: () => void;
-  connectionTarget?: ConnectionTarget | null;
 }
 
 type TabId = 'llm' | 'knowledge' | 'skills' | 'mcp' | 'settings';
 
-export function CustomizationsPage({ onClose, connectionTarget }: CustomizationsPageProps) {
+export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
   const [activeTab, setActiveTab] = useState<TabId>('llm');
   const [loading, setLoading] = useState(false);
 
@@ -56,9 +53,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
       try {
         // Fetch LLM Config
         try {
-          const llmRaw = await invoke<string>('read_target_file', {
-            target: connectionTarget,
-            path: '~/.divmora/config/litellm.json'
+          const llmRaw = await invoke<string>('read_file', {
+            path: '/home/nitin/.divmora/config/litellm.json'
           });
           const parsed = JSON.parse(llmRaw);
           setLlmConfig(parsed);
@@ -72,9 +68,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
 
         // Fetch MCP Config
         try {
-          const mcpRaw = await invoke<string>('read_target_file', {
-            target: connectionTarget,
-            path: '~/.divmora/config/mcp_config.json'
+          const mcpRaw = await invoke<string>('read_file', {
+            path: '/home/nitin/.divmora/config/mcp_config.json'
           });
           setMcpConfig(JSON.parse(mcpRaw));
         } catch (e) {
@@ -83,9 +78,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
 
         // Fetch Settings
         try {
-          const settingsRaw = await invoke<string>('read_target_file', {
-            target: connectionTarget,
-            path: '~/.divmora/config/settings.json'
+          const settingsRaw = await invoke<string>('read_file', {
+            path: '/home/nitin/.divmora/config/settings.json'
           });
           setSettings(JSON.parse(settingsRaw));
         } catch (e) {
@@ -94,9 +88,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
 
         // Fetch Skills
         try {
-          const globalSkills = await invoke<string[]>('list_target_files', {
-            target: connectionTarget,
-            dir: '~/.divmora/localharness/skills'
+          const globalSkills = await invoke<string[]>('list_files', {
+            dir: '/home/nitin/.divmora/localharness/skills'
           });
           setSkills(globalSkills.filter(s => s.endsWith('/')));
         } catch (e) {
@@ -105,17 +98,15 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
 
         // Fetch Knowledge Items
         try {
-          const kiDirs = await invoke<string[]>('list_target_files', {
-            target: connectionTarget,
-            dir: '~/.divmora/localharness/knowledge'
+          const kiDirs = await invoke<string[]>('list_files', {
+            dir: '/home/nitin/.divmora/localharness/knowledge'
           });
           let allKis: string[] = [];
           for (const projDir of kiDirs) {
             if (projDir.endsWith('/')) {
               try {
-                const items = await invoke<string[]>('list_target_files', {
-                  target: connectionTarget,
-                  dir: `~/.divmora/localharness/knowledge/${projDir.slice(0, -1)}`
+                const items = await invoke<string[]>('list_files', {
+                  dir: `/home/nitin/.divmora/localharness/knowledge/${projDir}`
                 });
                 allKis = [...allKis, ...items.filter(i => i.endsWith('/'))];
               } catch (e) { }
@@ -134,7 +125,7 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
     }
 
     fetchData();
-  }, [connectionTarget]);
+  }, []);
 
   // Handle escape key
   useEffect(() => {
@@ -166,9 +157,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
         newConfig.defaultEndpoint = activeEndpoint;
       }
 
-      await invoke('write_target_file', {
-        target: connectionTarget,
-        path: '~/.divmora/config/litellm.json',
+      await invoke('write_file', {
+        path: '/home/nitin/.divmora/config/litellm.json',
         content: JSON.stringify(newConfig, null, 2)
       });
 
@@ -187,9 +177,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
         ...llmConfig,
         defaultEndpoint: activeEndpoint
       };
-      await invoke('write_target_file', {
-        target: connectionTarget,
-        path: '~/.divmora/config/litellm.json',
+      await invoke('write_file', {
+        path: '/home/nitin/.divmora/config/litellm.json',
         content: JSON.stringify(newConfig, null, 2)
       });
       setLlmConfig(newConfig);
@@ -218,9 +207,8 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
         newConfig.defaultEndpoint = Object.keys(newEndpoints)[0] || '';
       }
 
-      await invoke('write_target_file', {
-        target: connectionTarget,
-        path: '~/.divmora/config/litellm.json',
+      await invoke('write_file', {
+        path: '/home/nitin/.divmora/config/litellm.json',
         content: JSON.stringify(newConfig, null, 2)
       });
 
@@ -258,11 +246,7 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
           <Settings size={20} className="text-text-secondary" />
           <h2 className="text-sm font-semibold text-text-primary">
             Customizations Manager
-            {connectionTarget?.kind === 'ssh' && (
-              <span className="ml-2 text-xs px-2 py-0.5 rounded bg-blue-900 text-blue-300 font-normal">
-                Remote: {connectionTarget.host}
-              </span>
-            )}
+            <span>Global Customizations</span>
           </h2>
         </div>
       </div>
@@ -297,7 +281,7 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
                   <div>
                     <h3 className="text-lg font-semibold text-text-primary mb-1">LLM Configuration</h3>
                     <p className="text-xs text-text-tertiary">
-                      Configure the LiteLLM proxy settings {connectionTarget?.kind === 'ssh' ? `for remote host ${connectionTarget.host}` : 'for your local machine'}.
+                      Configure the LiteLLM proxy settings for your local machine.
                     </p>
                   </div>
 
@@ -460,7 +444,7 @@ export function CustomizationsPage({ onClose, connectionTarget }: Customizations
 
                   <div className="text-xs text-text-tertiary flex items-center gap-2 mt-2 bg-bg-primary p-3 rounded-md border border-border-primary">
                     <span className="text-[#EF4444]">Advanced:</span>
-                    Config is stored in <code>~/.divmora/config/litellm.json</code> on the target machine.
+                    Config is stored in <code>~/.divmora/config/litellm.json</code> on the local machine.
                   </div>
                 </div>
               )}

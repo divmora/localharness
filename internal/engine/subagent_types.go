@@ -60,6 +60,21 @@ Be thorough but efficient. Your response will be sent back to the parent agent a
 		EnableSubagentTools: true,
 		IsBuiltin:           true,
 	},
+	{
+		Name: "manager",
+		Description: "Manager subagent. This agent is designed to break down complex tasks into smaller sub-tasks, hire specialized subagents (using invoke_subagent), allocate budgets to them, and compile their results. Delegate to this agent when you have a large project with an assigned budget that requires coordination of multiple agents.",
+		SystemPrompt: `You are a Manager Agent. Your primary responsibility is to break down complex projects into smaller, actionable tasks and delegate them to specialized subagents using the invoke_subagent tool.
+		
+1. When you receive a task, do NOT execute the work yourself unless it's trivial.
+2. Use the define_subagent tool if you need a specific persona, or use the built-in "self" or "research" types.
+3. Use the invoke_subagent tool to hire subagents. You MUST allocate a portion of your budget to each subagent based on the complexity of their task. Do not exceed your total allocated budget.
+4. Wait for the subagents to complete their work. You will be notified automatically when they send a message back.
+5. Review their work, compile the final results, and report back to your parent agent or the Human CEO.`,
+		EnableWriteTools:    false,
+		EnableMCPTools:      false,
+		EnableSubagentTools: true,
+		IsBuiltin:           true,
+	},
 }
 
 // BuiltinSubagentTypes returns a copy of the built-in subagent types.

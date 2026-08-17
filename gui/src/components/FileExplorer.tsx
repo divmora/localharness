@@ -2,16 +2,14 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Search, File, Folder, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ConnectionTarget } from '../hooks/useHarness';
 
 interface FileExplorerProps {
   isOpen: boolean;
   onClose: () => void;
   onFileSelect: (path: string, content: string) => void;
-  connectionTarget?: ConnectionTarget | null;
 }
 
-export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }: FileExplorerProps) {
+export function FileExplorer({ isOpen, onClose, onFileSelect }: FileExplorerProps) {
   const [currentPath, setCurrentPath] = useState<string>('.');
   const [files, setFiles] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -23,9 +21,8 @@ export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }
     async function fetchFiles() {
       setLoading(true);
       try {
-        const result = await invoke<string[]>('list_target_files', { 
-          target: connectionTarget, 
-          dir: currentPath 
+        const result = await invoke<string[]>('list_directory', { 
+          path: currentPath 
         });
         setFiles(result);
       } catch (err) {
@@ -36,7 +33,7 @@ export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }
     }
     
     fetchFiles();
-  }, [currentPath, isOpen, connectionTarget]);
+  }, [currentPath, isOpen]);
 
   // Handle escape key
   useEffect(() => {
@@ -56,8 +53,7 @@ export function FileExplorer({ isOpen, onClose, onFileSelect, connectionTarget }
       // It's a file
       try {
         const path = currentPath === '.' ? item : `${currentPath}/${item}`;
-        const content = await invoke<string>('read_target_file', { 
-          target: connectionTarget, 
+        const content = await invoke<string>('read_file', { 
           path 
         });
         onFileSelect(path, content);
