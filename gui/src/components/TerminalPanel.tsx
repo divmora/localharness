@@ -207,10 +207,15 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
         </div>
       </div>
 
-      <div className="flex-1 relative">
-        <div className="absolute inset-0 p-2 overflow-hidden" style={{ display: activeTab === 'terminal' ? 'block' : 'none' }} ref={terminalRef} />
-        <div className="absolute inset-0 p-2 overflow-hidden" style={{ display: activeTab === 'output' ? 'block' : 'none' }} ref={outputRef} />
+      <div className="flex-1 relative bg-bg-primary">
+        <div className="absolute inset-0 p-2 overflow-hidden" style={{ display: activeTab === 'terminal' ? 'block' : 'none' }}>
+          <div className="w-full h-full" ref={terminalRef} />
+        </div>
         
+        <div className="absolute inset-0 p-2 overflow-hidden" style={{ display: activeTab === 'output' ? 'block' : 'none' }}>
+          <div className="w-full h-full" ref={outputRef} />
+        </div>
+
         {activeTab !== 'terminal' && activeTab !== 'output' && (
           <div className="absolute inset-0 flex items-center justify-center text-text-tertiary text-sm">
             No {activeTab} available.
