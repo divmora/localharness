@@ -8,19 +8,15 @@ test.describe('LLM Configuration CRUD', () => {
     await tauriPage.click('text=Customizations');
     await tauriPage.waitForSelector('text="LLM Configuration"', 10000);
 
-    // We must handle the dialog before clicking
-    page.on('dialog', dialog => {
-      if (dialog.type() === 'prompt') {
-        dialog.accept('test-endpoint');
-      } else {
-        dialog.accept();
-      }
-    });
+    // We must handle the confirm dialog before clicking Delete later
+    page.on('dialog', dialog => dialog.accept());
     
     await tauriPage.click('text="Add Endpoint"');
     
     // 3. Edit Endpoint fields
-    await tauriPage.waitForSelector('text="New Endpoint: test-endpoint"', 5000);
+    await tauriPage.waitForSelector('text="New Endpoint"', 5000);
+    
+    await tauriPage.fill('input[placeholder="my-endpoint"]', 'test-endpoint');
     
     await tauriPage.fill('input[placeholder="https://litellm.divmora.cloud"]', 'http://localhost:4000');
     await tauriPage.fill('input[placeholder="litellm-key"]', 'sk-test-123');

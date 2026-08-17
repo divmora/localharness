@@ -24,6 +24,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
   const [formBaseUrl, setFormBaseUrl] = useState('');
   const [formApiKey, setFormApiKey] = useState('');
   const [formDefaultModel, setFormDefaultModel] = useState('');
+  const [isAddingEndpoint, setIsAddingEndpoint] = useState(false);
+  const [formEndpointName, setFormEndpointName] = useState('');
   const [llmSaving, setLlmSaving] = useState(false);
   const [llmError, setLlmError] = useState('');
 
@@ -129,9 +131,16 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
     setLlmSaving(true);
     setLlmError('');
     try {
+      const endpointNameToSave = isAddingEndpoint ? formEndpointName.trim() : activeEndpoint;
+      if (!endpointNameToSave) {
+        setLlmError('Endpoint name cannot be empty');
+        setLlmSaving(false);
+        return;
+      }
+      
       // Call the dedicated backend endpoint
       await invoke('save_llm_endpoint', {
-        name: activeEndpoint,
+        name: endpointNameToSave,
         endpoint: {
           baseUrl: formBaseUrl,
           apiKey: formApiKey,
@@ -142,6 +151,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
       // Reload full config from backend to stay in sync
       const updated = await invoke<any>('get_llm_config');
       setLlmConfig(updated);
+      setIsAddingEndpoint(false);
+      setActiveEndpoint('');
     } catch (e: any) {
       setLlmError(e.toString());
     } finally {
@@ -247,16 +258,29 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
                     <div className="text-center text-[#6c7086] text-sm py-8 animate-pulse">Reading config...</div>
                   ) : (
                     <>
-                      {activeEndpoint !== '' ? (
+                      {activeEndpoint !== '' || isAddingEndpoint ? (
                         <div className="bg-bg-secondary border border-border-primary rounded-lg p-5 flex flex-col gap-5">
                           <div className="flex items-center gap-3 border-b border-border-primary pb-3 mb-2">
-                            <button onClick={() => setActiveEndpoint('')} className="text-text-secondary hover:text-text-primary transition-colors">
+                            <button onClick={() => { setActiveEndpoint(''); setIsAddingEndpoint(false); }} className="text-text-secondary hover:text-text-primary transition-colors">
                               <ArrowLeft size={16} />
                             </button>
                             <h4 className="text-sm font-semibold text-text-primary">
-                              {endpointNames.includes(activeEndpoint) ? `Edit Endpoint: ${activeEndpoint}` : `New Endpoint: ${activeEndpoint}`}
+                              {isAddingEndpoint ? 'New Endpoint' : `Edit Endpoint: ${activeEndpoint}`}
                             </h4>
                           </div>
+
+                          {isAddingEndpoint && (
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-xs font-semibold text-text-secondary">Endpoint Name</label>
+                              <input
+                                type="text"
+                                placeholder="my-endpoint"
+                                className="w-full bg-bg-primary border border-border-primary text-sm text-text-primary rounded p-2.5 outline-none focus:border-[#3B82F6] transition-colors"
+                                value={formEndpointName}
+                                onChange={e => setFormEndpointName(e.target.value)}
+                              />
+                            </div>
+                          )}
 
                           <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold text-text-secondary">Base URL</label>
@@ -297,10 +321,9 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
                           <div className="flex justify-end pt-2">
                             <button
-                              onClick={async () => {
-                                await handleSaveLlmConfig();
-                                setActiveEndpoint('');
-                              }}
+                               onClick={async () => {
+                                 await handleSaveLlmConfig();
+                               }}
                               disabled={llmSaving}
                               className="bg-[#3B82F6] hover:bg-[#60A5FA] text-[#000000] text-sm font-semibold rounded-md px-4 py-2 transition-colors disabled:opacity-50"
                             >
@@ -313,13 +336,12 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
                           <div className="flex justify-end">
                             <button
                               onClick={() => {
-                                const name = prompt("Enter a name for the new endpoint:");
-                                if (name && name.trim()) {
-                                  setFormBaseUrl('');
-                                  setFormApiKey('');
-                                  setFormDefaultModel('');
-                                  setActiveEndpoint(name.trim());
-                                }
+                                setFormBaseUrl('');
+                                setFormApiKey('');
+                                setFormDefaultModel('');
+                                setFormEndpointName('');
+                                setIsAddingEndpoint(true);
+                                setActiveEndpoint('');
                               }}
                               className="text-xs bg-border-primary hover:bg-border-highlight text-text-primary px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-colors"
                             >
