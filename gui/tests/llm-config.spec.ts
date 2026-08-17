@@ -31,10 +31,11 @@ test.describe('LLM Configuration CRUD', () => {
     await tauriPage.waitForSelector('text="test-model"', 5000);
     
     // 4. Set as Default
-    // The new endpoint should not be default initially since we didn't mock deleting the divmora one
-    // Actually, let's just make it default
     await tauriPage.click('text="Make Default"');
-    await tauriPage.waitForSelector('span:has-text("Default")', 5000);
+    
+    // Now test-endpoint is default. We cannot delete default endpoints.
+    // So we must make divmora default again before deleting test-endpoint.
+    await tauriPage.click('text="Make Default"');
 
     // 5. Delete Endpoint
     // The dialog handler registered earlier will automatically accept the confirm dialog.

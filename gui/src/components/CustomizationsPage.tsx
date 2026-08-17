@@ -369,7 +369,7 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
                                       >
                                         Edit
                                       </button>
-                                      {endpointNames.length > 1 && (
+                                      {!isDefault && endpointNames.length > 1 && (
                                         <button
                                           onClick={async () => {
                                             await handleDeleteEndpoint(name);
