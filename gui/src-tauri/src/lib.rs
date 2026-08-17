@@ -1382,10 +1382,28 @@ pub fn run() {
             get_wallet_balance,
             add_wallet_balance,
             delete_session,
+            get_archived_sessions,
+            archive_session,
+            unarchive_session,
             get_installation_id,
             get_setting,
             set_setting
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn get_archived_sessions(state: tauri::State<'_, db::DbState>) -> Result<Vec<String>, String> {
+    state.get_archived_sessions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn archive_session(state: tauri::State<'_, db::DbState>, session_id: String) -> Result<(), String> {
+    state.archive_session(&session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn unarchive_session(state: tauri::State<'_, db::DbState>, session_id: String) -> Result<(), String> {
+    state.unarchive_session(&session_id).map_err(|e| e.to_string())
 }

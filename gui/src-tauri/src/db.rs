@@ -74,6 +74,14 @@ pub fn init_db() -> Result<DbState> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS archived_sessions (
+            session_id TEXT PRIMARY KEY,
+            archived_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS office_agents (
             session_id TEXT PRIMARY KEY,
             office_id TEXT NOT NULL,
@@ -516,6 +524,34 @@ impl DbState {
     pub fn delete_active_session(&self, session_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM active_sessions WHERE session_id = ?1", params![session_id])?;
+        Ok(())
+    }
+
+    pub fn get_archived_sessions(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT session_id FROM archived_sessions")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        
+        let mut result = Vec::new();
+        for r in rows {
+            result.push(r?);
+        }
+        Ok(result)
+    }
+
+    pub fn archive_session(&self, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        conn.execute(
+            "INSERT OR IGNORE INTO archived_sessions (session_id, archived_at) VALUES (?1, ?2)",
+            params![session_id, now]
+        )?;
+        Ok(())
+    }
+
+    pub fn unarchive_session(&self, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM archived_sessions WHERE session_id = ?1", params![session_id])?;
         Ok(())
     }
 }

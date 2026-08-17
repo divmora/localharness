@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
-import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Loader, AlertCircle, CheckCircle, Share2, Trash2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, ArchiveRestore, Plus, Loader, AlertCircle, CheckCircle, Share2, Trash2 } from 'lucide-react';
 import { SkeletonCard } from './SkeletonLoader';
 
 interface SessionsManagerProps {
@@ -13,6 +14,35 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
   const [viewType, setViewType] = useState<'board' | 'list'>('board');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [archivedSessions, setArchivedSessions] = useState<Set<string>>(new Set());
+
+  const fetchArchived = async () => {
+    try {
+      const archived: string[] = await invoke('get_archived_sessions');
+      setArchivedSessions(new Set(archived));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    fetchArchived();
+  }, [sessions]);
+
+  const toggleArchive = async (e: React.MouseEvent, id: string, isArchived: boolean) => {
+    e.stopPropagation();
+    try {
+      if (isArchived) {
+        await invoke('unarchive_session', { sessionId: id });
+      } else {
+        await invoke('archive_session', { sessionId: id });
+      }
+      await fetchArchived();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
 
   // Simulate loading state
   useEffect(() => {
@@ -30,10 +60,14 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
     });
   }, [sessions, searchQuery]);
 
+  const activeFilteredSessions = filteredSessions.filter(s => !archivedSessions.has(s.id));
+  const archivedFilteredSessions = filteredSessions.filter(s => archivedSessions.has(s.id));
+
   // Group sessions by status for the Board view
-  const runningSessions = filteredSessions.filter(s => s.status === SessionStatus.RUNNING);
-  const blockedSessions = filteredSessions.filter(s => s.status === SessionStatus.BLOCKED);
-  const readySessions = filteredSessions.filter(s => s.status === SessionStatus.READY || s.status === SessionStatus.UNSPECIFIED || s.status === SessionStatus.ERROR);
+  // Group active sessions by status for the Board view
+  const runningSessions = activeFilteredSessions.filter(s => s.status === SessionStatus.RUNNING);
+  const blockedSessions = activeFilteredSessions.filter(s => s.status === SessionStatus.BLOCKED);
+  const readySessions = activeFilteredSessions.filter(s => s.status === SessionStatus.READY || s.status === SessionStatus.UNSPECIFIED || s.status === SessionStatus.ERROR);
 
   // Time formatter
   const formatTimeAgo = (updatedAt: bigint) => {
@@ -171,7 +205,11 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
             {filteredSessions.length === 0 && (
               <div className="text-text-tertiary text-xs text-center py-8">No sessions found matching your criteria.</div>
             )}
-            {filteredSessions.map(session => (
+            
+            {activeFilteredSessions.length > 0 && (
+              <div className="text-xs font-semibold text-text-tertiary mb-2 mt-2 px-2 uppercase tracking-wider">Active</div>
+            )}
+            {activeFilteredSessions.map(session => (
               <div key={session.id} onClick={() => onSelectSession(session.id)} className="group flex items-center py-2 px-4 hover:bg-bg-tertiary rounded-md cursor-pointer transition-colors">
                 <Share2 size={14} className="text-text-primary mr-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                 <div className="text-xs font-semibold text-text-primary min-w-[200px] max-w-[300px] truncate pr-4 flex items-center gap-2">
@@ -179,6 +217,41 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
                 </div>
                 <div className="text-xs text-text-secondary flex items-center gap-1.5 flex-1 truncate pr-4">
                   {session.workspace ? `My current workspace directory is \`${session.workspace}\`` : 'Local Workspace'}
+                  <button 
+                    className="p-1.5 text-text-tertiary hover:text-blue-500 hover:bg-bg-tertiary rounded transition-colors"
+                    title="Archive Session"
+                    onClick={(e) => toggleArchive(e, session.id, false)}
+                  >
+                    <Archive size={16} />
+                  </button>
+                </div>
+                <div className="text-xs text-text-tertiary whitespace-nowrap">
+                  {formatTimeAgo(session.updatedAt)}
+                </div>
+              </div>
+            ))}
+
+            {archivedFilteredSessions.length > 0 && (
+              <div className="text-xs font-semibold text-text-tertiary mb-2 mt-6 px-2 uppercase tracking-wider flex items-center gap-2">
+                <Archive size={14} /> Archived
+              </div>
+            )}
+            {archivedFilteredSessions.map(session => (
+              <div key={session.id} onClick={() => onSelectSession(session.id)} className="group flex items-center py-2 px-4 hover:bg-bg-tertiary rounded-md cursor-pointer transition-colors opacity-70 hover:opacity-100">
+                <Share2 size={14} className="text-text-primary mr-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="text-xs font-semibold text-text-primary min-w-[200px] max-w-[300px] truncate pr-4 flex items-center gap-2 line-through decoration-text-tertiary">
+                  {session.name} <span className="text-text-secondary font-normal text-[11px]">Devin Local</span>
+                </div>
+                <div className="text-xs text-text-secondary flex items-center gap-1.5 flex-1 truncate pr-4">
+                  {session.workspace ? `My current workspace directory is \`${session.workspace}\`` : 'Local Workspace'}
+                  
+                  <button 
+                    className="p-1.5 text-text-tertiary hover:text-blue-500 hover:bg-bg-tertiary rounded transition-colors"
+                    title="Unarchive Session"
+                    onClick={(e) => toggleArchive(e, session.id, true)}
+                  >
+                    <ArchiveRestore size={16} />
+                  </button>
                   <button 
                     className="p-1.5 text-text-tertiary hover:text-red-500 hover:bg-bg-tertiary rounded transition-colors"
                     title="Delete Session"
