@@ -217,6 +217,8 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
                 </div>
                 <div className="text-xs text-text-secondary flex items-center gap-1.5 flex-1 truncate pr-4">
                   {session.workspace ? `My current workspace directory is \`${session.workspace}\`` : 'Local Workspace'}
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-4 shrink-0">
                   <button 
                     className="p-1.5 text-text-tertiary hover:text-blue-500 hover:bg-bg-tertiary rounded transition-colors"
                     title="Archive Session"
@@ -225,7 +227,7 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
                     <Archive size={16} />
                   </button>
                 </div>
-                <div className="text-xs text-text-tertiary whitespace-nowrap">
+                <div className="text-xs text-text-tertiary whitespace-nowrap shrink-0 w-24 text-right">
                   {formatTimeAgo(session.updatedAt)}
                 </div>
               </div>
@@ -244,7 +246,8 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
                 </div>
                 <div className="text-xs text-text-secondary flex items-center gap-1.5 flex-1 truncate pr-4">
                   {session.workspace ? `My current workspace directory is \`${session.workspace}\`` : 'Local Workspace'}
-                  
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mr-4 shrink-0">
                   <button 
                     className="p-1.5 text-text-tertiary hover:text-blue-500 hover:bg-bg-tertiary rounded transition-colors"
                     title="Unarchive Session"
@@ -263,7 +266,7 @@ export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: 
                     <Trash2 size={16} />
                   </button>
                 </div>
-                <div className="text-xs text-text-tertiary whitespace-nowrap">
+                <div className="text-xs text-text-tertiary whitespace-nowrap shrink-0 w-24 text-right">
                   {formatTimeAgo(session.updatedAt)}
                 </div>
               </div>
