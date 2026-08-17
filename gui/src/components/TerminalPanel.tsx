@@ -18,7 +18,7 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
   const outputTermInstanceRef = useRef<Terminal | null>(null);
   const ptyFitAddonRef = useRef<FitAddon | null>(null);
   const outputFitAddonRef = useRef<FitAddon | null>(null);
-  const [activeTab, setActiveTab] = useState<'problems' | 'output' | 'debug' | 'terminal' | 'ports'>('terminal');
+  const [activeTab, setActiveTab] = useState<'problems' | 'output' | 'terminal' | 'ports'>('terminal');
 
   // Initialize PTY Terminal
   useEffect(() => {
@@ -185,7 +185,7 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
     <div className="h-full flex flex-col bg-bg-primary border-t border-border-primary overflow-hidden">
       <div className="h-9 flex items-center justify-between px-4 text-xs bg-bg-secondary border-b border-border-primary">
         <div className="flex gap-4 h-full">
-          {(['problems', 'output', 'debug', 'terminal', 'ports'] as const).map((tab) => (
+          {(['problems', 'output', 'terminal', 'ports'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -196,7 +196,7 @@ export function TerminalPanel({ steps = [] }: TerminalPanelProps) {
               }`}
               style={activeTab === tab ? { borderColor: 'var(--accent-primary)' } : {}}
             >
-              {tab === 'debug' ? 'Debug Console' : tab}
+              {tab}
             </button>
           ))}
         </div>
