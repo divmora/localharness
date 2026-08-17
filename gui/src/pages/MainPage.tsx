@@ -67,7 +67,7 @@ export function MainPage({
       {/* Left Pane: Agent Sidebar */}
       {showAgentSidebar && (
         <>
-          <Panel defaultSize={20} minSize={15} className="flex flex-col" collapsible>
+          <Panel defaultSize={20} minSize={10} className="flex flex-col" collapsible>
             <AgentSidebar 
               activeSessionId={activeSessionId} 
               onSelectSession={onSelectSession} 

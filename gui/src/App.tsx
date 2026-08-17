@@ -14,6 +14,8 @@ import { useToast } from './components/Toast';
 import { invoke } from '@tauri-apps/api/core';
 import { fromBinary } from '@bufbuild/protobuf';
 import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
+import { usePersistentState } from './hooks/usePersistentState';
+
 export interface Space {
   id: string;
   name: string;
@@ -30,7 +32,7 @@ export interface Office {
 function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [initialBudget, setInitialBudget] = useState<number>(0);
-  const [currentView, setCurrentView] = useState<'main' | 'customizations' | 'sessions' | 'office'>('main');
+  const [currentView, setCurrentView] = usePersistentState<'main' | 'customizations' | 'sessions' | 'office'>('ui.currentView', 'main');
   const [workspace, setWorkspace] = useState<string | null>(null);
   
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
@@ -40,11 +42,8 @@ function App() {
   const [installationId, setInstallationId] = useState<string | null>(null);
   
   const [offices, setOffices] = useState<Office[]>([]);
-  const [activeOfficeId, setActiveOfficeId] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("office_id") || 'default';
-  });
-
+  const [activeOfficeId, setActiveOfficeId] = usePersistentState<string>('ui.activeOfficeId', 'default');
+  
   // Modal states
   const [officePromptState, setOfficePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
   const [spacePromptState, setSpacePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
@@ -54,8 +53,8 @@ function App() {
   
   const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget, false);
 
-  const [showAgentSidebar, setShowAgentSidebar] = useState(true);
-  const [showTerminal, setShowTerminal] = useState(true);
+  const [showAgentSidebar, setShowAgentSidebar] = usePersistentState('ui.showAgentSidebar', true);
+  const [showTerminal, setShowTerminal] = usePersistentState('ui.showTerminal', true);
 
   // Manager session IDs
   const managerSessionIds = new Set(Object.values(officeManagers));
@@ -79,7 +78,7 @@ function App() {
       // Cmd+B on Mac, Ctrl+B on Windows/Linux
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
-        setShowAgentSidebar(prev => !prev);
+        setShowAgentSidebar(!showAgentSidebar);
       }
     };
 
@@ -255,6 +254,8 @@ function App() {
           isChatMode={activeSessionId !== null && currentView === 'main'}
           showTerminal={showTerminal}
           onToggleTerminal={() => setShowTerminal(!showTerminal)}
+          showSidebar={showAgentSidebar}
+          onToggleSidebar={() => setShowAgentSidebar(!showAgentSidebar)}
         />
         <div className="flex flex-1 overflow-hidden relative">
           <CommandPalette />

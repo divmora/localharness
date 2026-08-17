@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { type as osType } from '@tauri-apps/plugin-os';
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink, PanelBottom } from 'lucide-react';
+import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink, PanelBottom, PanelLeft } from 'lucide-react';
 
 import { Office } from '../App';
 
@@ -15,6 +15,8 @@ interface TopBarProps {
   isChatMode?: boolean;
   showTerminal?: boolean;
   onToggleTerminal?: () => void;
+  showSidebar?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export function TopBar({ 
@@ -26,7 +28,9 @@ export function TopBar({
   onCreateOffice,
   isChatMode,
   showTerminal,
-  onToggleTerminal
+  onToggleTerminal,
+  showSidebar,
+  onToggleSidebar
 }: TopBarProps) {
   const [platform, setPlatform] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -77,16 +81,24 @@ export function TopBar({
           {/* Segmented Control */}
           <div className="flex items-center bg-bg-primary rounded-md p-0.5 border border-border-primary">
             <button 
-              onClick={() => onViewChange && onViewChange('main')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${currentView !== 'office' ? 'bg-bg-tertiary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+              onClick={() => onViewChange?.('main')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                currentView === 'main' 
+                  ? 'bg-bg-tertiary text-text-primary' 
+                  : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-secondary'
+              }`}
             >
-              Chat
+              Agent
             </button>
             <button 
-              onClick={() => onViewChange && onViewChange('office')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${currentView === 'office' ? 'bg-bg-tertiary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+              onClick={() => onViewChange?.('office')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                currentView === 'office' 
+                  ? 'bg-bg-tertiary text-text-primary' 
+                  : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-secondary'
+              }`}
             >
-              Map
+              Office
             </button>
           </div>
 
@@ -114,10 +126,25 @@ export function TopBar({
 
       {/* Center (Omnibar) */}
       <div className="flex-1 max-w-md flex justify-center h-full items-center pointer-events-none" data-tauri-drag-region>
-        <div className="flex items-center w-full max-w-sm h-7 bg-bg-primary border border-border-primary rounded-md px-3 text-sm text-text-tertiary shadow-inner pointer-events-auto cursor-text hover:border-blue-500/50 transition-colors">
-          <Search size={14} className="mr-2 opacity-50" />
-          <span className="flex-1">Search sessions...</span>
-          <span className="text-[10px] font-mono opacity-50 ml-2 border border-border-primary rounded px-1">⇧ ⌘ A</span>
+        <div className="flex items-center w-full max-w-sm gap-2">
+          {isChatMode && (
+            <button
+              onClick={onToggleSidebar}
+              className={`p-1.5 rounded-md pointer-events-auto transition-colors ${
+                showSidebar 
+                  ? 'text-text-primary bg-bg-tertiary' 
+                  : 'text-text-tertiary hover:text-text-primary hover:bg-bg-secondary'
+              }`}
+              title="Toggle Sidebar"
+            >
+              <PanelLeft size={16} />
+            </button>
+          )}
+          <div className="flex-1 flex items-center h-7 bg-bg-primary border border-border-primary rounded-md px-3 text-sm text-text-tertiary shadow-inner pointer-events-auto cursor-text hover:border-blue-500/50 transition-colors">
+            <Search size={14} className="mr-2 opacity-50" />
+            <span className="flex-1">Search sessions...</span>
+            <span className="text-[10px] font-mono opacity-50 ml-2 border border-border-primary rounded px-1">⇧ ⌘ A</span>
+          </div>
         </div>
       </div>
 

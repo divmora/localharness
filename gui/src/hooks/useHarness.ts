@@ -45,6 +45,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             setSteps([]);
             setSocket(null);
             setServerReady(false);
+            setTrajectoryState(TrajectoryState_TrajState.TRAJ_UNSPECIFIED);
             return;
         }
 
@@ -52,6 +53,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             setConnectionError(null);
             setSteps([]);
             setServerReady(false);
+            setTrajectoryState(TrajectoryState_TrajState.TRAJ_UNSPECIFIED);
             
             let conn: HarnessConnection | null = null;
             
