@@ -3,7 +3,7 @@ import { AgentSidebar } from '../components/AgentSidebar';
 import { ChatPanel } from '../components/ChatPanel';
 import { WorkspacePanel } from '../components/WorkspacePanel';
 import { TerminalPanel } from '../components/TerminalPanel';
-import { SessionInfo as ProtoSessionInfo, StepUpdate } from '../gen/localharness/v1/localharness_pb';
+import { SessionInfo as ProtoSessionInfo, StepUpdate, TrajectoryState_TrajState } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
 import { CenteredEmptyState } from '../components/CenteredEmptyState';
 
@@ -28,6 +28,9 @@ interface MainPageProps {
   onSubmitQuestionResponse: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse: (requestId: string, approved: boolean, reason?: string) => void;
   onSelectWorkspace: (path: string) => void;
+  trajectoryState: TrajectoryState_TrajState;
+  onInterrupt: () => void;
+  onResume: (msg?: string) => void;
 }
 
 export function MainPage({
@@ -49,7 +52,10 @@ export function MainPage({
   onSubmitPrompt,
   onSubmitQuestionResponse,
   onSubmitPermissionResponse,
-  onSelectWorkspace
+  onSelectWorkspace,
+  trajectoryState,
+  onInterrupt,
+  onResume
 }: MainPageProps) {
   return (
     <PanelGroup orientation="horizontal" className="flex-1">
@@ -97,6 +103,9 @@ export function MainPage({
                     connected={connected} 
                     connectionError={connectionError}
                     steps={steps} 
+                    trajectoryState={trajectoryState}
+                    onInterrupt={onInterrupt}
+                    onResume={onResume}
                     onSend={onSubmitPrompt} 
                     onSubmitQuestionResponse={onSubmitQuestionResponse} 
                     onSubmitPermissionResponse={onSubmitPermissionResponse}

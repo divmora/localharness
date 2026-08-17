@@ -14,7 +14,10 @@ import {
     InitRequestSchema,
     HarnessConfigSchema,
     QuestionResponseSchema,
-    PermissionResponseSchema
+    PermissionResponseSchema,
+    InterruptRequestSchema,
+    ResumeRequestSchema,
+    TrajectoryState_TrajState
 } from '../gen/localharness/v1/localharness_pb';
 
 
@@ -24,13 +27,14 @@ interface HarnessConnection {
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null, _unused: any = null, workspacePath?: string | null) {
+export function useHarness(activeSessionId: string | null, workspacePath?: string | null) {
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
-    const [steps, setSteps] = useState<StepUpdate[]>([]);
-    const [socket, setSocket] = useState<WebSocket | null>(null);
     const [serverReady, setServerReady] = useState(false);
-    const messageQueueRef = useRef<any[]>([]);
+    const [socket, setSocket] = useState<WebSocket | null>(null);
+    const [steps, setSteps] = useState<StepUpdate[]>([]);
+    const [trajectoryState, setTrajectoryState] = useState<TrajectoryState_TrajState>(TrajectoryState_TrajState.TRAJ_UNSPECIFIED);
+    const messageQueueRef = useRef<number[][]>([]);
 
     useEffect(() => {
         let ws: WebSocket | null = null;
@@ -206,6 +210,8 @@ export function useHarness(activeSessionId: string | null, _unused: any = null, 
                                 }
                                 return [...prev, step];
                             });
+                        } else if (serverMsg.payload.case === "trajectoryState") {
+                            setTrajectoryState(serverMsg.payload.value.state);
                         }
                     }
                 });
@@ -235,7 +241,7 @@ export function useHarness(activeSessionId: string | null, _unused: any = null, 
                 while (messageQueueRef.current.length > 0) {
                     const data = messageQueueRef.current.shift();
                     try {
-                        await socket.send({ type: 'Binary', data });
+                        await socket.send({ type: 'Binary', data: data! });
                         console.log("Sent queued message successfully");
                     } catch (err) {
                         console.error("Failed to send queued message", err);
@@ -317,12 +323,43 @@ export function useHarness(activeSessionId: string | null, _unused: any = null, 
         await socket.send({ type: 'Binary', data });
     }, [socket, serverReady]);
 
+    const interrupt = useCallback(async () => {
+        const iReq = create(InterruptRequestSchema, {});
+        const clientMsg = create(ClientMessageSchema, {
+            payload: {
+                case: "interrupt",
+                value: iReq
+            }
+        });
+        const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
+        if (socket && serverReady) {
+            await socket.send({ type: 'Binary', data });
+        }
+    }, [socket, serverReady]);
+
+    const resume = useCallback(async (message: string = "") => {
+        const rReq = create(ResumeRequestSchema, { message });
+        const clientMsg = create(ClientMessageSchema, {
+            payload: {
+                case: "resume",
+                value: rReq
+            }
+        });
+        const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
+        if (socket && serverReady) {
+            await socket.send({ type: 'Binary', data });
+        }
+    }, [socket, serverReady]);
+
     return { 
         connected, 
         connectionError,
         steps, 
+        trajectoryState,
         sendPrompt, 
         submitQuestionResponse, 
-        submitPermissionResponse 
+        submitPermissionResponse,
+        interrupt,
+        resume
     };
 }

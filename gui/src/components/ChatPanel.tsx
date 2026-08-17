@@ -2,13 +2,16 @@ import { useState, useMemo } from 'react';
 import { TerminalSquare, Bot, Users, Globe, FileCode, ShieldAlert, Check, X, Brain, ThumbsUp, ThumbsDown, Copy, GitFork, BarChart2, MoreHorizontal, Square, ChevronDown, Plus, MessageCircle, Mic, ArrowUp, Monitor, Folder, Server, Wand2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { clone } from '@bufbuild/protobuf';
-import { StepUpdate, StepUpdate_Source, StepUpdate_State, StepUpdateSchema } from '../gen/localharness/v1/localharness_pb';
+import { StepUpdate, StepUpdate_Source, StepUpdate_State, StepUpdateSchema, TrajectoryState_TrajState } from '../gen/localharness/v1/localharness_pb';
 
 interface ChatPanelProps {
   connected: boolean;
   connectionError?: string | null;
   steps: StepUpdate[];
+  trajectoryState?: TrajectoryState_TrajState;
   onSend: (text: string) => void;
+  onInterrupt?: () => void;
+  onResume?: (msg?: string) => void;
   onSubmitQuestionResponse?: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse?: (requestId: string, approved: boolean, reason?: string) => void;
 }
@@ -105,7 +108,10 @@ export function ChatPanel({
   connected, 
   connectionError,
   steps, 
+  trajectoryState,
   onSend, 
+  onInterrupt,
+  onResume,
   onSubmitQuestionResponse, 
   onSubmitPermissionResponse 
 }: ChatPanelProps) {
@@ -419,11 +425,22 @@ export function ChatPanel({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSend();
+                if (trajectoryState === TrajectoryState_TrajState.TRAJ_PAUSED && onResume) {
+                  onResume(input.trim());
+                  setInput("");
+                } else {
+                  handleSend();
+                }
               }
             }}
-            disabled={!connected || !!connectionError}
-            placeholder={connected ? "Tip: Drag a session in the sidebar into a space to group it" : connectionError ? "Cannot send messages due to error" : "Connecting..."}
+            disabled={!connected || !!connectionError || trajectoryState === TrajectoryState_TrajState.TRAJ_RUNNING}
+            placeholder={
+              !connected ? "Connecting..." : 
+              connectionError ? "Cannot send messages due to error" : 
+              trajectoryState === TrajectoryState_TrajState.TRAJ_PAUSED ? "Inject command & resume..." : 
+              trajectoryState === TrajectoryState_TrajState.TRAJ_RUNNING ? "Agent is running (pause to inject commands)" : 
+              "Tip: Drag a session in the sidebar into a space to group it"
+            }
             className={`w-full bg-transparent border-none outline-none text-[13px] text-text-primary placeholder:text-text-tertiary p-3 min-h-[60px] resize-none ${connected ? '' : 'opacity-50'}`}
           />
           <div className="flex items-center justify-between px-3 py-2 border-t border-border-primary/30">
@@ -447,13 +464,38 @@ export function ChatPanel({
               <button className="text-text-tertiary hover:text-text-primary transition-colors">
                 <Mic size={16} />
               </button>
-              <button 
-                onClick={handleSend}
-                disabled={!connected || !input.trim() || !!connectionError}
-                className="w-7 h-7 flex items-center justify-center bg-gray-500 hover:bg-gray-400 text-white rounded-full transition-colors disabled:opacity-30 disabled:hover:bg-gray-500"
-              >
-                <ArrowUp size={14} strokeWidth={3} />
-              </button>
+              {trajectoryState === TrajectoryState_TrajState.TRAJ_RUNNING && (
+                <button 
+                  onClick={onInterrupt}
+                  className="w-7 h-7 flex items-center justify-center bg-yellow-600 hover:bg-yellow-500 text-white rounded-full transition-colors"
+                  title="Pause Agent"
+                >
+                  <Square size={10} fill="currentColor" />
+                </button>
+              )}
+              {trajectoryState === TrajectoryState_TrajState.TRAJ_PAUSED && (
+                <button 
+                  onClick={() => {
+                    if (onResume) {
+                      onResume(input.trim());
+                      setInput("");
+                    }
+                  }}
+                  className="w-7 h-7 flex items-center justify-center bg-green-600 hover:bg-green-500 text-white rounded-full transition-colors"
+                  title="Resume Agent"
+                >
+                  <Bot size={14} />
+                </button>
+              )}
+              {trajectoryState !== TrajectoryState_TrajState.TRAJ_PAUSED && (
+                <button 
+                  onClick={handleSend}
+                  disabled={!connected || !input.trim() || !!connectionError || trajectoryState === TrajectoryState_TrajState.TRAJ_RUNNING}
+                  className="w-7 h-7 flex items-center justify-center bg-gray-500 hover:bg-gray-400 text-white rounded-full transition-colors disabled:opacity-30 disabled:hover:bg-gray-500"
+                >
+                  <ArrowUp size={14} strokeWidth={3} />
+                </button>
+              )}
             </div>
           </div>
         </div>

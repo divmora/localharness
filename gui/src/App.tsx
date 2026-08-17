@@ -45,7 +45,7 @@ function App() {
     return params.get("office_id") || 'default';
   });
   
-  const { connected, connectionError, steps, sendPrompt, submitQuestionResponse, submitPermissionResponse } = useHarness(activeSessionId, null, workspace);
+  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace);
 
   const [showAgentSidebar, setShowAgentSidebar] = useState(true);
 
@@ -223,6 +223,9 @@ function App() {
               onSubmitQuestionResponse={submitQuestionResponse}
               onSubmitPermissionResponse={submitPermissionResponse}
               onSelectWorkspace={setWorkspace}
+              trajectoryState={trajectoryState}
+              onInterrupt={interrupt}
+              onResume={resume}
             />
           )}
         </div>

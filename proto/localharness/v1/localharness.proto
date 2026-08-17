@@ -44,6 +44,8 @@ message ClientMessage {
     CancelRequest cancel = 4;
     PermissionResponse permission_response = 5;
     QuestionResponse question_response = 6;
+    InterruptRequest interrupt = 7;
+    ResumeRequest resume = 8;
   }
 }
 
@@ -94,6 +96,15 @@ message ToolResult {
 
 // CancelRequest aborts the current turn.
 message CancelRequest {}
+
+// InterruptRequest signals the engine to pause execution at the next available boundary.
+message InterruptRequest {}
+
+// ResumeRequest signals the engine to resume a paused execution.
+// If message is provided, it is injected into the context as a human command.
+message ResumeRequest {
+  string message = 1;
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // HARNESS → CLIENT MESSAGES
@@ -253,6 +264,7 @@ message TrajectoryState {
     TRAJ_IDLE = 2;
     TRAJ_COMPLETED = 3;
     TRAJ_ERROR = 4;
+    TRAJ_PAUSED = 5;
   }
 }
 

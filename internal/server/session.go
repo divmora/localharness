@@ -210,8 +210,24 @@ func (s *Session) dispatchClientMessage(ctx context.Context, msg *pb.ClientMessa
 		s.handlePermissionResponse(payload.PermissionResponse)
 	case *pb.ClientMessage_QuestionResponse:
 		s.handleQuestionResponse(payload.QuestionResponse)
+	case *pb.ClientMessage_Interrupt:
+		s.handleInterrupt()
+	case *pb.ClientMessage_Resume:
+		s.handleResume(payload.Resume)
 	default:
 		s.logger.Warn("unknown client message type")
+	}
+}
+
+func (s *Session) handleInterrupt() {
+	if s.engine != nil {
+		s.engine.Interrupt()
+	}
+}
+
+func (s *Session) handleResume(req *pb.ResumeRequest) {
+	if s.engine != nil {
+		s.engine.Resume(req.Message)
 	}
 }
 

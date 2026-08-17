@@ -84,6 +84,10 @@ type Engine struct {
 	running             atomic.Int32                 // 1 = engine is running a turn, 0 = idle
 	preCompletionHook   func()                       // Called before TRAJ_IDLE so session can save state
 
+	// Interruption API channels
+	pauseCh  chan struct{}
+	resumeCh chan string
+
 	// Subagent support
 	depth              int           // Nesting depth (0 = root)
 	maxDepth           int           // Max nesting depth (default: 3)
@@ -294,6 +298,8 @@ func NewEngine(cfg Config) *Engine {
 		questionHandler:     cfg.QuestionHandler,
 		history:             cfg.InitialHistory,
 		mcpMgr:              cfg.MCPManager,
+		pauseCh:             make(chan struct{}, 1),
+		resumeCh:            make(chan string, 1),
 		msgCtx: MessageContextConfig{
 			ConversationID: cfg.ConversationID,
 			AppDataDir:     cfg.AppDataDir,
@@ -341,6 +347,28 @@ func (e *Engine) Run(ctx context.Context, userMessage string) error {
 // Used by the session's auto-wake to decide if a synthetic turn can be started.
 func (e *Engine) IsIdle() bool {
 	return e.running.Load() == 0
+}
+
+// Interrupt signals the engine to pause execution at the next available turn boundary.
+// It is non-blocking and safe to call concurrently.
+func (e *Engine) Interrupt() {
+	select {
+	case e.pauseCh <- struct{}{}:
+		e.logger.Info("interrupt signal sent to engine")
+	default:
+		// Already paused or pause pending
+	}
+}
+
+// Resume signals a paused engine to resume execution.
+// If injectedMsg is not empty, it is appended to the context as a human command.
+func (e *Engine) Resume(injectedMsg string) {
+	select {
+	case e.resumeCh <- injectedMsg:
+		e.logger.Info("resume signal sent to engine", "has_injected_msg", injectedMsg != "")
+	default:
+		// Not paused or resume already pending
+	}
 }
 
 // SetEphemeralMessages sets ADK-injected ephemeral directives for the next turn.
@@ -467,6 +495,42 @@ drained:
 			e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
 			return ctx.Err()
 		default:
+		}
+
+		// Check for pause request
+		select {
+		case <-e.pauseCh:
+			e.logger.Info("engine paused, waiting for resume")
+			e.emitTrajectoryState(pb.TrajectoryState_TRAJ_PAUSED)
+			
+			select {
+			case <-ctx.Done():
+				e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
+				return ctx.Err()
+			case injectedMsg := <-e.resumeCh:
+				e.logger.Info("engine resumed", "injectedMsg", injectedMsg)
+				e.emitTrajectoryState(pb.TrajectoryState_TRAJ_RUNNING)
+				if injectedMsg != "" {
+					// Inject the human command into the history
+					e.history = append(e.history, llm.Message{
+						Role:    "user",
+						Content: injectedMsg,
+					})
+					
+					// Emit a step for the UI so the user sees their injected command
+					e.emitStep(&pb.StepUpdate{
+						ConversationId: e.convID,
+						TrajectoryId:   e.trajectoryID,
+						StepIndex:      e.nextStepIndex(),
+						Text:           injectedMsg,
+						Source:         pb.StepUpdate_SOURCE_USER,
+						State:          pb.StepUpdate_STATE_DONE,
+						Target:         pb.StepUpdate_TARGET_USER,
+					})
+				}
+			}
+		default:
+			// Not paused
 		}
 
 		// Budget Check

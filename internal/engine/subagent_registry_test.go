@@ -192,16 +192,16 @@ func TestList_AllSources(t *testing.T) {
 	_ = r.Define(SubagentTypeDef{Name: "agent-defined", Description: "Runtime type"})
 
 	list := r.List()
-	// builtins (research, self) + SDK (custom-sdk) + agent (agent-defined) = 4
-	if len(list) != 4 {
-		t.Errorf("expected 4 types, got %d", len(list))
+	// builtins (research, self, manager) + SDK (custom-sdk) + agent (agent-defined) = 5
+	if len(list) != 5 {
+		t.Errorf("expected 5 types, got %d", len(list))
 	}
 
 	names := make(map[string]bool)
 	for _, t := range list {
 		names[t.Name] = true
 	}
-	for _, expected := range []string{"research", "self", "custom-sdk", "agent-defined"} {
+	for _, expected := range []string{"research", "self", "manager", "custom-sdk", "agent-defined"} {
 		if !names[expected] {
 			t.Errorf("expected %q in list", expected)
 		}
@@ -211,8 +211,8 @@ func TestList_AllSources(t *testing.T) {
 func TestNames(t *testing.T) {
 	r := NewSubagentRegistry(BuiltinSubagentTypes(), nil, nil, false)
 	names := r.Names()
-	if len(names) != 2 {
-		t.Errorf("expected 2 names, got %d", len(names))
+	if len(names) != 3 {
+		t.Errorf("expected 3 names, got %d", len(names))
 	}
 }
 
