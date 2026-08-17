@@ -3,7 +3,12 @@ import { type as osType } from '@tauri-apps/plugin-os';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X } from 'lucide-react';
 
-export function TopBar() {
+interface TopBarProps {
+  currentView?: string;
+  onViewChange?: (view: 'main' | 'office' | 'customizations' | 'sessions') => void;
+}
+
+export function TopBar({ currentView = 'main', onViewChange }: TopBarProps) {
   const [platform, setPlatform] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -52,11 +57,17 @@ export function TopBar() {
         <div className="flex items-center gap-2 pointer-events-auto pl-2">
           {/* Segmented Control */}
           <div className="flex items-center bg-bg-primary rounded-md p-0.5 border border-border-primary">
-            <button className="px-3 py-1 rounded bg-bg-tertiary text-text-primary text-xs font-medium shadow-sm">
+            <button 
+              onClick={() => onViewChange && onViewChange('main')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${currentView !== 'office' ? 'bg-bg-tertiary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+            >
               Agent
             </button>
-            <button className="px-3 py-1 rounded text-text-secondary hover:text-text-primary text-xs font-medium transition-colors">
-              Editor
+            <button 
+              onClick={() => onViewChange && onViewChange('office')}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${currentView === 'office' ? 'bg-bg-tertiary text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'}`}
+            >
+              Office
             </button>
           </div>
 

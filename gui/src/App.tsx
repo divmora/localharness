@@ -10,6 +10,7 @@ import { SessionsManager } from './components/SessionsManager';
 import { CommandPalette } from './components/CommandPalette';
 import { TopBar } from './components/TopBar';
 import { TerminalPanel } from './components/TerminalPanel';
+import { OfficeView } from './components/OfficeView';
 import { ToastProvider } from './components/Toast';
 import './App.css';
 import { useHarness, ConnectionTarget } from './hooks/useHarness';
@@ -47,7 +48,7 @@ function App() {
   });
 
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
-  const [currentView, setCurrentView] = useState<'main' | 'customizations' | 'sessions'>('main');
+  const [currentView, setCurrentView] = useState<'main' | 'customizations' | 'sessions' | 'office'>('main');
   const [sshModalOpen, setSshModalOpen] = useState(false);
   const [workspace, setWorkspace] = useState<string | null>(null);
   
@@ -193,7 +194,7 @@ function App() {
   return (
     <ToastProvider>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
-        <TopBar />
+        <TopBar currentView={currentView} onViewChange={setCurrentView as any} />
         <div className="flex flex-1 overflow-hidden relative">
           <CommandPalette />
           <ConnectSSHModal
@@ -215,6 +216,7 @@ function App() {
                   onMoveSessionToSpace={handleMoveSessionToSpace}
                   onOpenCustomizations={() => setCurrentView('customizations')}
                   onOpenSessionsManager={() => setCurrentView('sessions')}
+                  onOpenOffice={() => setCurrentView('office')}
                   sessions={sessions}
                   spaces={spaces}
                   sessionSpaces={sessionSpaces}
@@ -240,6 +242,8 @@ function App() {
                       />
                     ) : currentView === 'sessions' ? (
                       <SessionsManager sessions={sessions} onSelectSession={handleSelectSession} />
+                    ) : currentView === 'office' ? (
+                      <OfficeView />
                     ) : !activeSessionId ? (
                       <CenteredEmptyState 
                         sessions={sessions} 
