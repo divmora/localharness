@@ -53,10 +53,7 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
       try {
         // Fetch LLM Config
         try {
-          const llmRaw = await invoke<string>('read_config_file', {
-            name: 'litellm.json'
-          });
-          const parsed = JSON.parse(llmRaw);
+          const parsed = await invoke<any>('get_llm_config');
           setLlmConfig(parsed);
           setActiveEndpoint(''); // Start in list view
         } catch (e) {
@@ -68,29 +65,23 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
         // Fetch MCP Config
         try {
-          const mcpRaw = await invoke<string>('read_config_file', {
-            name: 'mcp_config.json'
-          });
-          setMcpConfig(JSON.parse(mcpRaw));
+          const parsed = await invoke<any>('get_mcp_config');
+          setMcpConfig(parsed);
         } catch (e) {
           setMcpConfig({ mcpServers: {} });
         }
 
         // Fetch Settings
         try {
-          const settingsRaw = await invoke<string>('read_config_file', {
-            name: 'settings.json'
-          });
-          setSettings(JSON.parse(settingsRaw));
+          const parsed = await invoke<any>('get_app_settings');
+          setSettings(parsed);
         } catch (e) {
           setSettings({});
         }
 
         // Fetch Skills
         try {
-          const globalSkills = await invoke<string[]>('list_global_items', {
-            kind: 'skills'
-          });
+          const globalSkills = await invoke<string[]>('list_global_skills');
           setSkills(globalSkills.filter(s => s.endsWith('/')));
         } catch (e) {
           setSkills([]);
@@ -98,15 +89,12 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
         // Fetch Knowledge Items
         try {
-          const globalKnowledge = await invoke<string[]>('list_global_items', {
-            kind: 'knowledge'
-          });
+          const globalKnowledge = await invoke<string[]>('list_global_knowledge');
           let allKnowledge = [...globalKnowledge];
           for (const projDir of allKnowledge) {
             if (projDir.endsWith('/')) {
               try {
-                const projKnowledge = await invoke<string[]>('list_global_items', {
-                  kind: 'knowledge',
+                const projKnowledge = await invoke<string[]>('list_global_knowledge', {
                   projDir: projDir
                 });
                 allKnowledge = [...allKnowledge, ...projKnowledge.map(k => `${projDir}/${k}`)];
@@ -141,29 +129,19 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
     setLlmSaving(true);
     setLlmError('');
     try {
-      const newConfig = {
-        ...llmConfig,
-        endpoints: {
-          ...(llmConfig?.endpoints || {}),
-          [activeEndpoint]: {
-            baseUrl: formBaseUrl,
-            apiKey: formApiKey,
-            defaultModel: formDefaultModel
-          }
+      // Call the dedicated backend endpoint
+      await invoke('save_llm_endpoint', {
+        name: activeEndpoint,
+        endpoint: {
+          baseUrl: formBaseUrl,
+          apiKey: formApiKey,
+          defaultModel: formDefaultModel
         }
-      };
-
-      // Keep existing defaultEndpoint unless it wasn't set, then set to active
-      if (!newConfig.defaultEndpoint) {
-        newConfig.defaultEndpoint = activeEndpoint;
-      }
-
-      await invoke('write_config_file', {
-        name: 'litellm.json',
-        content: JSON.stringify(newConfig, null, 2)
       });
-
-      setLlmConfig(newConfig);
+      
+      // Reload full config from backend to stay in sync
+      const updated = await invoke<any>('get_llm_config');
+      setLlmConfig(updated);
     } catch (e: any) {
       setLlmError(e.toString());
     } finally {
@@ -174,15 +152,9 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
   const handleSetDefaultEndpoint = async () => {
     setLlmSaving(true);
     try {
-      const newConfig = {
-        ...llmConfig,
-        defaultEndpoint: activeEndpoint
-      };
-      await invoke('write_config_file', {
-        name: 'litellm.json',
-        content: JSON.stringify(newConfig, null, 2)
-      });
-      setLlmConfig(newConfig);
+      await invoke('set_default_llm_endpoint', { name: activeEndpoint });
+      const updated = await invoke<any>('get_llm_config');
+      setLlmConfig(updated);
     } catch (e: any) {
       setLlmError(e.toString());
     } finally {
@@ -195,26 +167,11 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
     setLlmSaving(true);
     try {
-      const newEndpoints = { ...(llmConfig?.endpoints || {}) };
-      delete newEndpoints[activeEndpoint];
+      await invoke('delete_llm_endpoint', { name: activeEndpoint });
+      const updated = await invoke<any>('get_llm_config');
 
-      const newConfig = {
-        ...llmConfig,
-        endpoints: newEndpoints
-      };
-
-      // If we deleted the default, clear it
-      if (newConfig.defaultEndpoint === activeEndpoint) {
-        newConfig.defaultEndpoint = Object.keys(newEndpoints)[0] || '';
-      }
-
-      await invoke('write_config_file', {
-        name: 'litellm.json',
-        content: JSON.stringify(newConfig, null, 2)
-      });
-
-      setLlmConfig(newConfig);
-      handleSelectEndpoint(newConfig.defaultEndpoint || 'divmora', newConfig);
+      setLlmConfig(updated);
+      handleSelectEndpoint(updated.defaultEndpoint || 'divmora', updated);
     } catch (e: any) {
       setLlmError(e.toString());
     } finally {

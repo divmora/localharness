@@ -8,6 +8,10 @@ use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 mod db;
 mod localharness;
 mod resolver;
+mod llm_config;
+mod mcp_config;
+mod settings;
+mod assets;
 use localharness::v1::{ConversationState, InputConfig, OutputConfig, SessionInfo, SessionList};
 
 #[derive(Serialize)]
@@ -1388,9 +1392,16 @@ pub fn run() {
             get_installation_id,
             get_setting,
             set_setting,
-            read_config_file,
-            write_config_file,
-            list_global_items
+            llm_config::get_llm_config,
+            llm_config::save_llm_endpoint,
+            llm_config::delete_llm_endpoint,
+            llm_config::set_default_llm_endpoint,
+            mcp_config::get_mcp_config,
+            mcp_config::save_mcp_config,
+            settings::get_app_settings,
+            settings::save_app_settings,
+            assets::list_global_skills,
+            assets::list_global_knowledge
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1409,45 +1420,5 @@ async fn archive_session(state: tauri::State<'_, db::DbState>, session_id: Strin
 #[tauri::command]
 async fn unarchive_session(state: tauri::State<'_, db::DbState>, session_id: String) -> Result<(), String> {
     state.unarchive_session(&session_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn read_config_file(name: String) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or("Could not find home dir")?;
-    let path = home.join(".divmora/config").join(&name);
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn write_config_file(name: String, content: String) -> Result<(), String> {
-    let home = dirs::home_dir().ok_or("Could not find home dir")?;
-    let dir = home.join(".divmora/config");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(&name);
-    std::fs::write(&path, content).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn list_global_items(kind: String, proj_dir: Option<String>) -> Result<Vec<String>, String> {
-    let home = dirs::home_dir().ok_or("Could not find home dir")?;
-    let mut dir = home.join(".divmora/localharness").join(&kind);
-    if let Some(p) = proj_dir {
-        dir = dir.join(p);
-    }
-    
-    let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            if path.is_dir() {
-                files.push(format!("{}/", name));
-            } else {
-                files.push(name);
-            }
-        }
-    }
-    files.sort();
-    Ok(files)
 }
 
