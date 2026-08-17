@@ -120,52 +120,54 @@ export function TopBar({
         <div className="flex items-center gap-3 pointer-events-auto pr-2">
           
           {/* Office Switcher */}
-          <div className="flex items-center gap-1">
-            <div className="relative group">
-              <select
-                className="appearance-none bg-bg-secondary border border-border-primary hover:border-blue-500/50 text-text-primary text-xs font-medium rounded-md pl-3 pr-8 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50 transition-colors cursor-pointer max-w-[150px] text-ellipsis overflow-hidden whitespace-nowrap"
-                value={activeOfficeId}
-                onChange={(e) => {
-                  if (e.target.value === '__CREATE__') {
-                    onCreateOffice?.();
-                  } else {
-                    onSelectOffice?.(e.target.value);
-                  }
+          {currentView === 'office' && (
+            <div className="flex items-center gap-1">
+              <div className="relative group">
+                <select
+                  className="appearance-none bg-bg-secondary border border-border-primary hover:border-blue-500/50 text-text-primary text-xs font-medium rounded-md pl-3 pr-8 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50 transition-colors cursor-pointer max-w-[150px] text-ellipsis overflow-hidden whitespace-nowrap"
+                  value={activeOfficeId}
+                  onChange={(e) => {
+                    if (e.target.value === '__CREATE__') {
+                      onCreateOffice?.();
+                    } else {
+                      onSelectOffice?.(e.target.value);
+                    }
+                  }}
+                >
+                  {offices.map((office) => (
+                    <option key={office.id} value={office.id}>
+                      {office.name}
+                    </option>
+                  ))}
+                  <option value="__CREATE__" className="text-blue-500 font-semibold bg-bg-tertiary">
+                    + New Office
+                  </option>
+                </select>
+                {/* Custom chevron */}
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+              </div>
+              <button
+                className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors"
+                title="Open office in new window"
+                onClick={() => {
+                  const office = offices.find(o => o.id === activeOfficeId);
+                  const title = office ? `Office: ${office.name}` : 'Local Harness';
+                  new WebviewWindow(`window-${Date.now()}`, {
+                    url: `/?office_id=${activeOfficeId}`,
+                    title,
+                    width: 1000,
+                    height: 700,
+                    decorations: true,
+                    transparent: true,
+                  });
                 }}
               >
-                {offices.map((office) => (
-                  <option key={office.id} value={office.id}>
-                    {office.name}
-                  </option>
-                ))}
-                <option value="__CREATE__" className="text-blue-500 font-semibold bg-bg-tertiary">
-                  + New Office
-                </option>
-              </select>
-              {/* Custom chevron */}
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
+                <ExternalLink size={14} />
+              </button>
             </div>
-            <button
-              className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors"
-              title="Open office in new window"
-              onClick={() => {
-                const office = offices.find(o => o.id === activeOfficeId);
-                const title = office ? `Office: ${office.name}` : 'Local Harness';
-                new WebviewWindow(`window-${Date.now()}`, {
-                  url: `/?office_id=${activeOfficeId}`,
-                  title,
-                  width: 1000,
-                  height: 700,
-                  decorations: true,
-                  transparent: true,
-                });
-              }}
-            >
-              <ExternalLink size={14} />
-            </button>
-          </div>
+          )}
           
           <div className="w-[1px] h-4 bg-border-primary mx-1" />
           <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ring-bg-primary overflow-hidden">

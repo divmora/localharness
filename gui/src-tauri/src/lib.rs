@@ -189,6 +189,23 @@ fn set_setting(
 }
 
 #[tauri::command]
+fn get_wallet_balance(state: tauri::State<db::DbState>, office_id: String) -> Result<f64, String> {
+    let key = format!("wallet_balance_{}", office_id);
+    let val_str = state.get_setting(&key).map_err(|e| e.to_string())?.unwrap_or_else(|| "0.0".to_string());
+    val_str.parse::<f64>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_wallet_balance(state: tauri::State<db::DbState>, office_id: String, amount: f64) -> Result<f64, String> {
+    let key = format!("wallet_balance_{}", office_id);
+    let val_str = state.get_setting(&key).map_err(|e| e.to_string())?.unwrap_or_else(|| "0.0".to_string());
+    let mut current_bal = val_str.parse::<f64>().unwrap_or(0.0);
+    current_bal += amount;
+    state.set_setting(&key, &current_bal.to_string(), "0.0").map_err(|e| e.to_string())?;
+    Ok(current_bal)
+}
+
+#[tauri::command]
 async fn list_files(dir: Option<String>) -> Result<Vec<String>, String> {
     let mut target = dir.unwrap_or_else(|| ".".to_string());
     if target.starts_with("~/") {
@@ -1076,7 +1093,9 @@ pub fn run() {
             get_recent_projects,
             get_installation_id,
             get_setting,
-            set_setting
+            set_setting,
+            get_wallet_balance,
+            add_wallet_balance
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

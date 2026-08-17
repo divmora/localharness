@@ -51,7 +51,12 @@ function App() {
 
   const filteredSessions = sessions.filter(session => {
     const spaceId = sessionSpaces[session.id];
-    return spaceId && spaces.some(s => s.id === spaceId);
+    if (!spaceId) {
+      // Show local sessions (no space assigned) everywhere EXCEPT the Office View
+      return currentView !== 'office';
+    }
+    // If assigned to a space, only show if that space belongs to the currently active office
+    return spaces.some(s => s.id === spaceId);
   });
 
   useEffect(() => {
@@ -200,7 +205,8 @@ function App() {
               sessions={filteredSessions} 
               spaces={spaces}
               sessionSpaces={sessionSpaces}
-              onSelectSession={handleSelectSession} 
+              onSelectSession={handleSelectSession}
+              activeOfficeId={activeOfficeId}
             />
           ) : (
             <MainPage

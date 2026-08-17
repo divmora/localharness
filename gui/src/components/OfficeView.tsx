@@ -4,12 +4,16 @@ import { OrthographicCamera, OrbitControls, Box, Html } from '@react-three/drei'
 import * as THREE from 'three';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
+import { DepositModal } from './DepositModal';
+import { invoke } from '@tauri-apps/api/core';
+import { useState, useEffect } from 'react';
 
 interface OfficeViewProps {
   sessions: ProtoSessionInfo[];
   spaces?: Space[];
   sessionSpaces?: Record<string, string>;
   onSelectSession: (id: string) => void;
+  activeOfficeId: string;
 }
 
 const AgentAvatar = ({ position, color, name, status, onClick }: { position: [number, number, number], color: string, name: string, status: SessionStatus, onClick: () => void }) => {
@@ -57,7 +61,22 @@ const Desk = ({ position }: { position: [number, number, number] }) => (
   </Box>
 );
 
-export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession }: OfficeViewProps) => {
+export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession, activeOfficeId }: OfficeViewProps) => {
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+
+  useEffect(() => {
+    async function loadWallet() {
+      try {
+        const bal = await invoke<number>('get_wallet_balance', { officeId: activeOfficeId });
+        setWalletBalance(bal);
+      } catch (err) {
+        console.error("Failed to load wallet balance:", err);
+      }
+    }
+    loadWallet();
+  }, [activeOfficeId]);
+
   const totalAllocated = sessions.reduce((acc, s) => acc + (s.budgetAllocated || 0), 0);
   const totalSpent = sessions.reduce((acc, s) => acc + (s.budgetSpent || 0), 0);
   const percentSpent = totalAllocated > 0 ? (totalSpent / totalAllocated) * 100 : 0;
@@ -101,12 +120,23 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
           <span className="text-xs font-normal text-text-secondary">Manager Persona</span>
         </h3>
         
-        <div className="flex justify-between items-end mb-1">
-          <div className="text-2xl font-bold text-text-primary">
-            ${totalSpent.toFixed(4)}
+        <div className="mb-3">
+          <div className="flex justify-between items-end mb-1">
+            <div className="text-2xl font-bold text-text-primary">
+              {walletBalance.toFixed(0)} <span className="text-sm font-normal text-text-secondary">DC</span>
+            </div>
+            <div className="text-xs text-text-tertiary uppercase font-bold tracking-wider">
+              Available
+            </div>
           </div>
-          <div className="text-sm text-text-secondary">
-            / ${totalAllocated.toFixed(2)}
+        </div>
+
+        <div className="flex justify-between items-end mb-1">
+          <div className="text-sm font-bold text-text-primary">
+            {totalSpent.toFixed(2)} DC spent
+          </div>
+          <div className="text-xs text-text-secondary">
+            / {totalAllocated.toFixed(0)} DC allocated
           </div>
         </div>
 
@@ -119,11 +149,20 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
 
         <button 
           className="w-full text-xs font-semibold py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer"
-          onClick={() => alert("Mock: Add Funds to Manager's budget")}
+          onClick={() => setShowDepositModal(true)}
         >
           Deposit Funds
         </button>
       </div>
+
+      {showDepositModal && (
+        <DepositModal 
+          officeId={activeOfficeId}
+          currentBalance={walletBalance} 
+          onClose={() => setShowDepositModal(false)} 
+          onDepositComplete={setWalletBalance}
+        />
+      )}
 
       <Canvas shadows>
         {/* Isometric Orthographic Camera */}
