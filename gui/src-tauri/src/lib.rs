@@ -989,7 +989,9 @@ async fn start_harness(
         // 4. Send InputConfig via stdin
         let mut stdin = child_proc.stdin.take().unwrap();
         stdin.write_all(&payload).map_err(|e| format!("Failed to write to stdin: {}", e))?;
-        drop(stdin); // Send EOF
+        // DO NOT drop(stdin). If stdin closes, the sidecar detects EOF and shuts down!
+        // We leak the File Descriptor so it stays open until the Tauri app exits.
+        std::mem::forget(stdin);
 
         // 5. Read OutputConfig from stdout
         let mut stdout = child_proc.stdout.take().unwrap();
