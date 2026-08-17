@@ -41,6 +41,16 @@ pub async fn get_llm_config() -> Result<LlmConfig, String> {
 
 #[tauri::command]
 pub async fn save_llm_endpoint(name: String, endpoint: LlmEndpoint) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Endpoint name cannot be empty".to_string());
+    }
+    if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        return Err("Endpoint name can only contain lowercase letters, numbers, and hyphens".to_string());
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        return Err("Endpoint name cannot start or end with a hyphen".to_string());
+    }
+
     let mut config = get_llm_config().await.unwrap_or_default();
     config.endpoints.insert(name.clone(), endpoint);
     if config.default_endpoint.is_empty() {
