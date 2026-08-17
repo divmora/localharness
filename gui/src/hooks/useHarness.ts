@@ -27,7 +27,7 @@ interface HarnessConnection {
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number, isManager: boolean = false, onSessionCreated?: (sessionId: string) => void) {
+export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number, isManager: boolean = false, onSessionCreated?: (sessionId: string) => void, activeOfficeId?: string | null) {
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [serverReady, setServerReady] = useState(false);
@@ -183,7 +183,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                 description: "Hire a specialized agent to handle a specific subtask. This will spawn a completely new agent with its own context. Use this to delegate complex work that requires a specific persona.",
                                 parametersJsonSchema: JSON.stringify({
                                     type: "object",
-                                    required: ["agent_name", "role_description", "task_description"],
+                                    required: ["agent_name", "role_description", "task_description", "employment_type", "gender", "experience_level", "personality_traits"],
                                     properties: {
                                         agent_name: {
                                             type: "string",
@@ -196,6 +196,40 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                         task_description: {
                                             type: "string",
                                             description: "A highly detailed description of the task this agent must complete."
+                                        },
+                                        employment_type: {
+                                            type: "string",
+                                            enum: ["permanent", "consultancy"],
+                                            description: "Permanent hires can take up to 5 concurrent tasks. Consultants can take up to 2."
+                                        },
+                                        gender: {
+                                            type: "string",
+                                            enum: ["male", "female", "other"],
+                                            description: "The gender identity of the agent."
+                                        },
+                                        experience_level: {
+                                            type: "string",
+                                            enum: ["junior", "mid", "senior", "expert"],
+                                            description: "The experience level of the agent."
+                                        },
+                                        personality_traits: {
+                                            type: "string",
+                                            description: "A short sentence describing their personality and traits (e.g., 'Impatient and direct', 'Cheerful and helpful')."
+                                        }
+                                    }
+                                }),
+                                responseJsonSchema: "{}"
+                            },
+                            {
+                                name: "check_agent_capacity",
+                                description: "Check how many concurrent tasks an agent is currently handling and their maximum limit.",
+                                parametersJsonSchema: JSON.stringify({
+                                    type: "object",
+                                    required: ["conversation_id"],
+                                    properties: {
+                                        conversation_id: {
+                                            type: "string",
+                                            description: "The Conversation ID of the agent to check."
                                         }
                                     }
                                 }),
@@ -275,7 +309,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                             conversationId: childSessionId,
                                             workspaces: [{ directory: workspacePath || "", name: "Project", corpusName: "" }],
                                             initialBudget: initialBudget || 0,
-                                            systemInstructions: `You are a specialized agent: ${args.agent_name} (${args.role_description}).\n\nYou have been hired by a Manager agent to complete a specific task or act as a peer. Do not communicate with the user, but instead complete the task to the best of your ability. When you need to talk to the Manager, use the 'message_agent' tool.`,
+                                            systemInstructions: `You are a specialized agent: ${args.agent_name} (${args.role_description}).\n\nYour demographic profile is a ${args.experience_level} ${args.gender} on a ${args.employment_type} contract.\nYour personality traits are: ${args.personality_traits || 'Neutral'}.\n\nYou have been hired by a Manager agent to complete a specific task or act as a peer. Do not communicate with the user, but instead complete the task to the best of your ability. When you need to talk to the Manager or other peers, use the 'message_agent' tool. If you are idle and have no tasks, you may periodically use the 'message_agent' tool to chit-chat with other agents in the office.`,
                                             builtinTools: {
                                                 viewFile: true, createFile: true, editFile: true, listDir: true, searchDir: true, findFile: true, runCommand: true, finish: true, schedule: true
                                             },
@@ -299,6 +333,29 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                         
                                         // Reply to parent that the agent was hired
                                         const { ToolResultSchema } = await import('../gen/localharness/v1/localharness_pb');
+                                        
+                                        if (activeOfficeId) {
+                                            try {
+                                                await invoke('add_office_agent', {
+                                                    agent: {
+                                                        session_id: childSessionId,
+                                                        office_id: activeOfficeId,
+                                                        agent_name: args.agent_name,
+                                                        role_description: args.role_description,
+                                                        employment_type: args.employment_type || 'permanent',
+                                                        gender: args.gender || 'other',
+                                                        experience_level: args.experience_level || 'mid',
+                                                        personality_traits: args.personality_traits || '',
+                                                        current_tasks: 1, // Start with 1 since we immediately give them a task
+                                                        specializations: '[]',
+                                                        visiting_session_id: null
+                                                    }
+                                                });
+                                            } catch (dbErr) {
+                                                console.error("Failed to add agent to database", dbErr);
+                                            }
+                                        }
+
                                         const res = create(ToolResultSchema, {
                                             stepId: stepIndex.toString(),
                                             toolName: "hire_agent",
@@ -324,11 +381,66 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                         });
                                     });
                                 });
+                            } else if (step.action?.case === 'hostToolCall' && step.action.value.toolName === 'check_agent_capacity' && step.state === StepUpdate_State.WAITING) {
+                                const stepIndex = step.action.value.stepIndex;
+                                const args = JSON.parse(step.action.value.argsJson);
+                                
+                                if (!activeOfficeId) {
+                                    import('../gen/localharness/v1/localharness_pb').then(({ ToolResultSchema, ClientMessageSchema }) => {
+                                        import('@bufbuild/protobuf').then(({ create, toBinary }) => {
+                                            const res = create(ToolResultSchema, {
+                                                stepId: stepIndex.toString(),
+                                                toolName: "check_agent_capacity",
+                                                resultJson: JSON.stringify({ error: "Cannot check capacity: not in an active office." }),
+                                                isError: true
+                                            });
+                                            ws?.send({ type: 'Binary', data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
+                                        });
+                                    });
+                                } else {
+                                    invoke('get_office_agents', { officeId: activeOfficeId }).then((agents: any) => {
+                                        const agent = agents.find((a: any) => a.session_id === args.conversation_id);
+                                        if (!agent) {
+                                            throw new Error(`Agent ${args.conversation_id} not found in this office.`);
+                                        }
+                                        
+                                        let maxTasks = 5;
+                                        if (agent.employment_type === 'consultancy') maxTasks = 2;
+                                        
+                                        import('../gen/localharness/v1/localharness_pb').then(({ ToolResultSchema, ClientMessageSchema }) => {
+                                            import('@bufbuild/protobuf').then(({ create, toBinary }) => {
+                                                const res = create(ToolResultSchema, {
+                                                    stepId: stepIndex.toString(),
+                                                    toolName: "check_agent_capacity",
+                                                    resultJson: JSON.stringify({
+                                                        current_tasks: agent.current_tasks,
+                                                        max_tasks: maxTasks,
+                                                        available_capacity: maxTasks - agent.current_tasks,
+                                                        employment_type: agent.employment_type
+                                                    })
+                                                });
+                                                ws?.send({ type: 'Binary', data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
+                                            });
+                                        });
+                                    }).catch(err => {
+                                        import('../gen/localharness/v1/localharness_pb').then(({ ToolResultSchema, ClientMessageSchema }) => {
+                                            import('@bufbuild/protobuf').then(({ create, toBinary }) => {
+                                                const res = create(ToolResultSchema, {
+                                                    stepId: stepIndex.toString(),
+                                                    toolName: "check_agent_capacity",
+                                                    resultJson: JSON.stringify({ error: err.toString() }),
+                                                    isError: true
+                                                });
+                                                ws?.send({ type: 'Binary', data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
+                                            });
+                                        });
+                                    });
+                                }
                             } else if (step.action?.case === 'hostToolCall' && step.action.value.toolName === 'message_agent' && step.state === StepUpdate_State.WAITING) {
                                 const stepIndex = step.action.value.stepIndex;
                                 const args = JSON.parse(step.action.value.argsJson);
                                 
-                                // Fetch all sessions to find the port
+                                // Call Tauri to handle updating the visiting_session_id in sqlite and sending the message
                                 invoke('list_sessions', { target: null }).then(async (result: any) => {
                                     const { SessionListSchema, ToolResultSchema, ClientMessageSchema, UserMessageSchema } = await import('../gen/localharness/v1/localharness_pb');
                                     const { fromBinary, toBinary, create } = await import('@bufbuild/protobuf');
@@ -347,7 +459,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                     });
                                     
                                     // Send the message
-                                    const taskMsg = create(UserMessageSchema, { content: `Message from Manager:\n\n${args.message}`, conversationId: args.conversation_id });
+                                    const taskMsg = create(UserMessageSchema, { content: `Message from an agent in the office:\n\n${args.message}`, conversationId: args.conversation_id });
                                     await targetWs.send({
                                         type: 'Binary',
                                         data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
@@ -435,6 +547,11 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
     }, [serverReady, socket]);
 
     const sendPrompt = useCallback(async (text: string) => {
+        // Track the task assignment in our simulation backend for capacity scaling
+        if (activeSessionId) {
+            invoke('assign_task', { sessionId: activeSessionId }).catch(console.error);
+        }
+
         const userMsg = create(UserMessageSchema, {
             content: text,
         });
@@ -455,7 +572,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
         }
         
         await socket.send({ type: 'Binary', data });
-    }, [socket, serverReady]);
+    }, [socket, serverReady, activeSessionId]);
 
     const submitQuestionResponse = useCallback(async (requestId: string, answers: any[], skipped: boolean) => {
         const qResponse = create(QuestionResponseSchema, {

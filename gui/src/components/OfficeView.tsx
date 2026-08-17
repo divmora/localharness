@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrthographicCamera, OrbitControls, Box, Html } from '@react-three/drei';
+import { OrthographicCamera, OrbitControls, Box, Html, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
@@ -8,7 +8,28 @@ import { DepositModal } from './DepositModal';
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useHarness } from '../hooks/useHarness';
+import { useAgentConnection } from '../hooks/useAgentConnection';
 import { ChatPanel } from './ChatPanel';
+import { getAgentSpriteLayers, compositeSpriteSheet } from '../utils/spriteCompositor';
+
+const AgentConnectionWrapper = ({ sessionId }: { sessionId: string }) => {
+  useAgentConnection(sessionId);
+  return null;
+};
+
+export interface OfficeAgent {
+  session_id: string;
+  office_id: string;
+  agent_name: string;
+  role_description: string;
+  employment_type: string;
+  gender: string;
+  experience_level: string;
+  personality_traits: string;
+  current_tasks: number;
+  specializations: string;
+  visiting_session_id: string | null;
+}
 
 interface OfficeViewProps {
   sessions: ProtoSessionInfo[];
@@ -20,44 +41,6 @@ interface OfficeViewProps {
   onManagerCreated?: (sessionId: string) => void;
 }
 
-const AgentAvatar = ({ position, color, name, status, onClick }: { position: [number, number, number], color: string, name: string, status: SessionStatus, onClick: () => void }) => {
-  const meshRef = useRef<THREE.Mesh>(null);
-  
-  useFrame((state) => {
-    if (meshRef.current) {
-      const time = state.clock.elapsedTime;
-      if (status === SessionStatus.RUNNING) {
-        meshRef.current.position.y = position[1] + Math.sin(time * 8) * 0.15;
-        meshRef.current.rotation.y = Math.sin(time * 4) * 0.2;
-      } else if (status === SessionStatus.ERROR) {
-        meshRef.current.position.x = position[0] + Math.sin(time * 20) * 0.1;
-        meshRef.current.position.y = position[1];
-        meshRef.current.rotation.y = 0;
-      } else if (status === SessionStatus.BLOCKED) {
-        meshRef.current.position.y = position[1] + Math.sin(time * 1.5) * 0.3;
-        meshRef.current.rotation.y = 0;
-        meshRef.current.position.x = position[0];
-      } else {
-        meshRef.current.position.y = position[1] + Math.sin(time * 2) * 0.1;
-        meshRef.current.position.x = position[0];
-        meshRef.current.rotation.y = 0;
-      }
-    }
-  });
-
-  return (
-    <group position={position}>
-      <Box ref={meshRef} args={[1, 2, 1]} castShadow receiveShadow onClick={onClick} onPointerOver={() => document.body.style.cursor = 'pointer'} onPointerOut={() => document.body.style.cursor = 'auto'}>
-        <meshStandardMaterial color={status === SessionStatus.ERROR ? '#ff0000' : status === SessionStatus.BLOCKED ? '#facc15' : color} />
-      </Box>
-      <Html position={[0, 1.5, 0]} center>
-        <div className="bg-bg-primary text-text-primary px-2 py-1 rounded text-xs font-semibold whitespace-nowrap border border-border-primary shadow-sm pointer-events-none">
-          {name || 'Agent'}
-        </div>
-      </Html>
-    </group>
-  );
-};
 
 const Desk = ({ position }: { position: [number, number, number] }) => (
   <Box position={position} args={[2.5, 1, 1.5]} castShadow receiveShadow>
@@ -65,23 +48,165 @@ const Desk = ({ position }: { position: [number, number, number] }) => (
   </Box>
 );
 
+const CoffeeMachine = ({ position }: { position: [number, number, number] }) => (
+  <group position={position}>
+    {/* Base table */}
+    <Box args={[3, 1, 2]} position={[0, -0.5, 0]} castShadow receiveShadow>
+      <meshStandardMaterial color="#e5e7eb" />
+    </Box>
+    {/* Machine */}
+    <Box args={[1, 1.5, 1]} position={[-0.5, 0.75, 0]} castShadow>
+      <meshStandardMaterial color="#1f2937" />
+    </Box>
+    <Box args={[0.5, 1.2, 0.8]} position={[0.5, 0.6, 0]} castShadow>
+      <meshStandardMaterial color="#ef4444" />
+    </Box>
+    <Html position={[0, 2, 0]} center>
+      <div className="bg-bg-primary text-text-primary px-2 py-1 rounded text-xs font-bold shadow-sm whitespace-nowrap border border-border-primary">
+        ☕ Coffee Break
+      </div>
+    </Html>
+  </group>
+);
+
+interface ProceduralAvatarProps {
+  session: ProtoSessionInfo;
+  agent: OfficeAgent | undefined;
+  homePosition: [number, number, number];
+  targetPosition: [number, number, number];
+  onClick: () => void;
+}
+
+const ProceduralAvatar = ({ session, agent, homePosition, targetPosition, onClick }: ProceduralAvatarProps) => {
+  const meshRef = useRef<THREE.Group>(null);
+  
+  // Animate movement
+  useFrame((state, delta) => {
+    if (meshRef.current) {
+      // Lerp position towards target
+      meshRef.current.position.x += (targetPosition[0] - meshRef.current.position.x) * delta * 2;
+      meshRef.current.position.z += (targetPosition[2] - meshRef.current.position.z) * delta * 2;
+      
+      // Bounce animation based on experience
+      let bounceSpeed = 3;
+      let bounceHeight = 0.2;
+      
+      if (agent) {
+        if (agent.experience_level === 'junior') { bounceSpeed = 6; bounceHeight = 0.4; }
+        else if (agent.experience_level === 'senior') { bounceSpeed = 2; bounceHeight = 0.1; }
+        else if (agent.experience_level === 'expert') { bounceSpeed = 1; bounceHeight = 0.05; }
+      }
+      
+      // Only bounce if moving or working
+      const isMoving = Math.abs(targetPosition[0] - meshRef.current.position.x) > 0.1 || Math.abs(targetPosition[2] - meshRef.current.position.z) > 0.1;
+      const isWorking = session.status === SessionStatus.RUNNING;
+      
+      if (isMoving || isWorking) {
+        meshRef.current.position.y = homePosition[1] + Math.sin(state.clock.elapsedTime * bounceSpeed) * bounceHeight;
+      } else {
+        meshRef.current.position.y += (homePosition[1] - meshRef.current.position.y) * delta * 5;
+      }
+    }
+  });
+
+  // Determine scale and color modifiers
+  let scale: [number, number, number] = [1.5, 1.5, 1.5]; // Base scale for 2D sprite
+  let opacity = 1;
+  let transparent = true;
+  
+  const [agentTexture, setAgentTexture] = useState<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    // Generate the layer configuration for this specific agent
+    // Since we don't have the full office object here, we'll randomize country based on ID length
+    // in a real setup we'd pass the actual Office.country down.
+    const mockCountries = ['USA', 'India', 'Japan', 'China'];
+    const mockCountry = mockCountries[(session.id.length) % mockCountries.length];
+    
+    const layers = getAgentSpriteLayers(
+      mockCountry,
+      agent?.role_description,
+      agent?.gender,
+      agent?.employment_type
+    );
+    
+    let isMounted = true;
+    compositeSpriteSheet(layers).then(texture => {
+      if (isMounted) {
+        texture.needsUpdate = true;
+        // Temporary: Just show a portion of the sprite sheet if it's a grid (e.g. 1/3 width, 1/2 height)
+        texture.repeat.set(1/3, 1/2); 
+        
+        // Pick a random frame based on agent name or ID to add variety
+        const nameHash = agent?.agent_name.length || 0;
+        const col = nameHash % 3;
+        const row = (nameHash % 2) === 0 ? 0 : 0.5;
+        texture.offset.set(col * (1/3), row);
+        
+        setAgentTexture(texture);
+      }
+    }).catch(console.error);
+
+    return () => { isMounted = false; };
+  }, [agent, session.id]);
+
+  return (
+    <group position={homePosition}>
+      <Billboard
+        ref={meshRef}
+        follow={true}
+        lockX={false}
+        lockY={false}
+        lockZ={false}
+      >
+        <mesh onClick={onClick} onPointerOver={() => document.body.style.cursor = 'pointer'} onPointerOut={() => document.body.style.cursor = 'auto'}>
+          <planeGeometry args={[scale[0], scale[1]]} />
+          <meshStandardMaterial 
+            map={agentTexture}
+            transparent={transparent}
+            opacity={agentTexture ? opacity : 0} // Hide until texture loads
+            alphaTest={0.1}
+            side={THREE.DoubleSide}
+            color={session.status === SessionStatus.ERROR ? '#ffaaaa' : session.status === SessionStatus.BLOCKED ? '#ffffaa' : '#ffffff'}
+          />
+        </mesh>
+      </Billboard>
+      <Html position={[0, scale[1] / 2 + 0.2, 0]} center>
+        <div className="bg-bg-primary text-text-primary px-2 py-1 rounded text-xs font-semibold whitespace-nowrap border border-border-primary shadow-sm pointer-events-none flex flex-col items-center">
+          <span>{agent?.agent_name || session.name || 'Agent'}</span>
+          {agent && <span className="text-[9px] text-text-tertiary">{agent.role_description}</span>}
+          {agent && agent.current_tasks > 0 && <span className="text-[9px] text-blue-500">{agent.current_tasks} tasks</span>}
+        </div>
+      </Html>
+    </group>
+  );
+};
+
 export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession, activeOfficeId, managerSessionId, onManagerCreated }: OfficeViewProps) => {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [isChatOpen, setIsChatOpen] = useState(true);
+  const [officeAgents, setOfficeAgents] = useState<OfficeAgent[]>([]);
 
-  const { connected, steps, sendPrompt, interrupt } = useHarness(managerSessionId || null, null, 0, true, onManagerCreated);
+  const { connected, steps, sendPrompt, interrupt } = useHarness(managerSessionId || null, null, 0, true, onManagerCreated, activeOfficeId);
 
   useEffect(() => {
-    async function loadWallet() {
+    async function loadData() {
       try {
         const bal = await invoke<number>('get_wallet_balance', { officeId: activeOfficeId });
         setWalletBalance(bal);
+        
+        const agents = await invoke<OfficeAgent[]>('get_office_agents', { officeId: activeOfficeId });
+        setOfficeAgents(agents);
       } catch (err) {
-        console.error("Failed to load wallet balance:", err);
+        console.error("Failed to load office data:", err);
       }
     }
-    loadWallet();
+    loadData();
+    
+    // Poll for updates to agents (visiting_session_id, tasks, etc)
+    const interval = setInterval(loadData, 2000);
+    return () => clearInterval(interval);
   }, [activeOfficeId]);
 
   const totalAllocated = sessions.reduce((acc, s) => acc + (s.budgetAllocated || 0), 0);
@@ -231,83 +356,133 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
           intensity={1} 
           castShadow 
           shadow-mapSize={[1024, 1024]}
-        />
+        />        {/* Map out Spaces and Workspaces */}
+        {(() => {
+          // Pre-calculate all desk world positions
+          const worldDeskPositions: Record<string, [number, number, number]> = {};
+          
+          Object.entries(groupedData).forEach(([_, workspaces], spaceIndex) => {
+            const workspaceEntries = Object.entries(workspaces);
+            if (workspaceEntries.length === 0) return;
+            const spaceOffsetX = spaceIndex * 40 - 20;
 
-        {/* Map out Spaces and Workspaces */}
-        {Object.entries(groupedData).map(([spaceId, workspaces], spaceIndex) => {
-          // If space is empty, skip rendering its platform unless we want to show empty spaces
-          const workspaceEntries = Object.entries(workspaces);
-          if (workspaceEntries.length === 0) return null;
+            workspaceEntries.forEach(([_, workspaceSessions], wsIndex) => {
+              const wsCols = 2;
+              const wsX = spaceOffsetX + (wsIndex % wsCols) * 16 - 8;
+              const wsZ = Math.floor(wsIndex / wsCols) * 16 - 8;
 
-          const spaceOffsetX = spaceIndex * 40 - 20; // Spread spaces out along X axis
-          const spaceName = getSpaceName(spaceId);
+              workspaceSessions.forEach((session, agentIndex) => {
+                const aCols = 3;
+                const aX = wsX + (agentIndex % aCols) * 4 - 4;
+                const aZ = wsZ + Math.floor(agentIndex / aCols) * 4 - 2;
+                worldDeskPositions[session.id] = [aX, 0, aZ];
+              });
+            });
+          });
+
+          const COFFEE_MACHINE_POS: [number, number, number] = [0, 0, -25];
 
           return (
-            <group key={spaceId} position={[spaceOffsetX, 0, 0]}>
-              {/* Space Platform */}
-              <Box args={[35, 1, 35]} position={[0, -1, 0]} receiveShadow>
-                <meshStandardMaterial color={spaceId === 'unassigned' ? '#e5e7eb' : '#dbeafe'} />
-              </Box>
-              
-              {/* Space Title */}
-              <Html position={[0, 0.5, -17]} center>
-                <div className="bg-bg-primary/90 text-text-primary px-3 py-1.5 rounded-md text-sm font-bold shadow-sm whitespace-nowrap border border-border-primary">
-                  {spaceName}
-                </div>
-              </Html>
+            <>
+              <CoffeeMachine position={COFFEE_MACHINE_POS} />
 
-              {/* Map Workspaces within the Space */}
-              {workspaceEntries.map(([workspacePath, workspaceSessions], wsIndex) => {
-                // Layout workspaces in a grid within the space platform
-                const wsCols = 2;
-                const wsX = (wsIndex % wsCols) * 16 - 8;
-                const wsZ = Math.floor(wsIndex / wsCols) * 16 - 8;
+              {/* Render Spaces & Desks */}
+              {Object.entries(groupedData).map(([spaceId, workspaces], spaceIndex) => {
+                const workspaceEntries = Object.entries(workspaces);
+                if (workspaceEntries.length === 0) return null;
 
-                // Make the path shorter for display
-                const shortPath = workspacePath.split('/').pop() || workspacePath;
+                const spaceOffsetX = spaceIndex * 40 - 20;
+                const spaceName = getSpaceName(spaceId);
 
                 return (
-                  <group key={workspacePath} position={[wsX, 0, wsZ]}>
-                    {/* Workspace Rug/Platform */}
-                    <Box args={[14, 0.2, 14]} position={[0, -0.4, 0]} receiveShadow>
-                      <meshStandardMaterial color="#cbd5e1" />
+                  <group key={spaceId} position={[spaceOffsetX, 0, 0]}>
+                    <Box args={[35, 1, 35]} position={[0, -1, 0]} receiveShadow>
+                      <meshStandardMaterial color={spaceId === 'unassigned' ? '#e5e7eb' : '#dbeafe'} />
                     </Box>
-
-                    {/* Workspace Label */}
-                    <Html position={[0, 0.5, -6]} center>
-                      <div className="bg-bg-secondary/90 text-text-secondary px-2 py-1 rounded text-[10px] font-mono shadow-sm whitespace-nowrap border border-border-primary">
-                        {shortPath}
+                    <Html position={[0, 0.5, -17]} center>
+                      <div className="bg-bg-primary/90 text-text-primary px-3 py-1.5 rounded-md text-sm font-bold shadow-sm whitespace-nowrap border border-border-primary">
+                        {spaceName}
                       </div>
                     </Html>
 
-                    {/* Agents in this Workspace */}
-                    {workspaceSessions.map((session, agentIndex) => {
-                      const aCols = 3;
-                      const aX = (agentIndex % aCols) * 4 - 4;
-                      const aZ = Math.floor(agentIndex / aCols) * 4 - 2;
-                      
-                      const colors = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6'];
-                      const color = colors[session.id.length % colors.length];
+                    {workspaceEntries.map(([workspacePath, workspaceSessions], wsIndex) => {
+                      const wsCols = 2;
+                      const wsX = (wsIndex % wsCols) * 16 - 8;
+                      const wsZ = Math.floor(wsIndex / wsCols) * 16 - 8;
+                      const shortPath = workspacePath.split('/').pop() || workspacePath;
 
                       return (
-                        <group key={session.id}>
-                          <Desk position={[aX, -0.2, aZ]} />
-                          <AgentAvatar 
-                            position={[aX, 0.8, aZ - 1]} 
-                            color={color} 
-                            name={session.name || 'Untitled'} 
-                            status={session.status}
-                            onClick={() => onSelectSession(session.id)}
-                          />
+                        <group key={workspacePath} position={[wsX, 0, wsZ]}>
+                          <Box args={[14, 0.2, 14]} position={[0, -0.4, 0]} receiveShadow>
+                            <meshStandardMaterial color="#cbd5e1" />
+                          </Box>
+                          <Html position={[0, 0.5, -6]} center>
+                            <div className="bg-bg-secondary/90 text-text-secondary px-2 py-1 rounded text-[10px] font-mono shadow-sm whitespace-nowrap border border-border-primary">
+                              {shortPath}
+                            </div>
+                          </Html>
+
+                          {workspaceSessions.map((session, agentIndex) => {
+                            const aCols = 3;
+                            const aX = (agentIndex % aCols) * 4 - 4;
+                            const aZ = Math.floor(agentIndex / aCols) * 4 - 2;
+                            return <Desk key={`desk-${session.id}`} position={[aX, -0.2, aZ]} />;
+                          })}
                         </group>
                       );
                     })}
                   </group>
                 );
               })}
-            </group>
+
+              {/* Render Avatars at Root */}
+              {sessions.map(session => {
+                const agent = officeAgents.find(a => a.session_id === session.id);
+                const deskPos = worldDeskPositions[session.id];
+                if (!deskPos) return null;
+
+                // Avatar base position is slightly above desk and behind it
+                const homePos: [number, number, number] = [deskPos[0], 0.8, deskPos[2] - 1];
+                let targetPos = [...homePos] as [number, number, number];
+
+                // Check visiting session
+                if (agent?.visiting_session_id) {
+                  const targetDesk = worldDeskPositions[agent.visiting_session_id];
+                  if (targetDesk) {
+                    targetPos = [targetDesk[0], 0.8, targetDesk[2] - 1]; // Go to their desk
+                  }
+                } 
+                // Idle chit-chat pathing (randomly go to coffee machine if idle and no tasks)
+                else if (agent && agent.current_tasks === 0 && session.status === SessionStatus.READY) {
+                  // Use session ID to create a stable pseudo-random boolean so they don't jitter
+                  // If hash ends in some digit, they go to coffee machine
+                  const charCode = session.id.charCodeAt(session.id.length - 1);
+                  // Make it time-based so they go back and forth
+                  const timeCycle = Math.floor(Date.now() / 15000); // 15 sec cycle
+                  if ((charCode + timeCycle) % 3 === 0) {
+                    // Spread them out around the coffee machine
+                    const offsetX = (charCode % 5) - 2;
+                    const offsetZ = ((charCode * 2) % 3);
+                    targetPos = [COFFEE_MACHINE_POS[0] + offsetX, 0.8, COFFEE_MACHINE_POS[2] + 2 + offsetZ];
+                  }
+                }
+
+                return (
+                  <group key={session.id}>
+                    <AgentConnectionWrapper sessionId={session.id} />
+                    <ProceduralAvatar 
+                      session={session}
+                      agent={agent}
+                      homePosition={homePos}
+                      targetPosition={targetPos}
+                      onClick={() => onSelectSession(session.id)}
+                    />
+                  </group>
+                );
+              })}
+            </>
           );
-        })}
+        })()}
 
       </Canvas>
     </div>

@@ -17,15 +17,19 @@ pub fn init_db() -> Result<DbState> {
         "CREATE TABLE IF NOT EXISTS offices (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            country TEXT,
             created_at INTEGER NOT NULL
         )",
         [],
     )?;
 
+    // Migration for existing offices
+    let _ = conn.execute("ALTER TABLE offices ADD COLUMN country TEXT", []);
+
     // Ensure a Default Office exists
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
     conn.execute(
-        "INSERT OR IGNORE INTO offices (id, name, created_at) VALUES ('default', 'Default Office', ?1)",
+        "INSERT OR IGNORE INTO offices (id, name, country, created_at) VALUES ('default', 'Default Office', 'USA', ?1)",
         params![now],
     )?;
 
@@ -70,6 +74,24 @@ pub fn init_db() -> Result<DbState> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS office_agents (
+            session_id TEXT PRIMARY KEY,
+            office_id TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            role_description TEXT NOT NULL,
+            employment_type TEXT NOT NULL,
+            gender TEXT NOT NULL,
+            experience_level TEXT NOT NULL,
+            personality_traits TEXT NOT NULL DEFAULT '',
+            current_tasks INTEGER NOT NULL DEFAULT 0,
+            specializations TEXT NOT NULL DEFAULT '[]',
+            visiting_session_id TEXT,
+            FOREIGN KEY (office_id) REFERENCES offices(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS recent_projects (
             id TEXT PRIMARY KEY,
             path TEXT NOT NULL,
@@ -103,6 +125,7 @@ pub fn init_db() -> Result<DbState> {
 pub struct Office {
     pub id: String,
     pub name: String,
+    pub country: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -134,16 +157,31 @@ pub struct ActiveSession {
     pub started_at: i64,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct OfficeAgent {
+    pub session_id: String,
+    pub office_id: String,
+    pub agent_name: String,
+    pub role_description: String,
+    pub employment_type: String,
+    pub gender: String,
+    pub experience_level: String,
+    pub personality_traits: String,
+    pub current_tasks: i32,
+    pub specializations: String,
+    pub visiting_session_id: Option<String>,
+}
+
 impl DbState {
-    pub fn create_office(&self, id: &str, name: &str) -> Result<()> {
+    pub fn create_office(&self, id: &str, name: &str, country: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT INTO offices (id, name, created_at) VALUES (?1, ?2, ?3)",
-            params![id, name, now],
+            "INSERT INTO offices (id, name, country, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, name, country, now],
         )?;
         Ok(())
     }
@@ -179,9 +217,104 @@ impl DbState {
         Ok(())
     }
 
+    pub fn get_office_agents(&self, office_id: &str) -> Result<Vec<OfficeAgent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT session_id, office_id, agent_name, role_description, employment_type, gender, experience_level, personality_traits, current_tasks, specializations, visiting_session_id FROM office_agents WHERE office_id = ?1")?;
+        let rows = stmt.query_map([office_id], |row| {
+            Ok(OfficeAgent {
+                session_id: row.get(0)?,
+                office_id: row.get(1)?,
+                agent_name: row.get(2)?,
+                role_description: row.get(3)?,
+                employment_type: row.get(4)?,
+                gender: row.get(5)?,
+                experience_level: row.get(6)?,
+                personality_traits: row.get(7)?,
+                current_tasks: row.get(8)?,
+                specializations: row.get(9)?,
+                visiting_session_id: row.get(10)?,
+            })
+        })?;
+        let mut agents = Vec::new();
+        for row in rows {
+            agents.push(row?);
+        }
+        Ok(agents)
+    }
+
+    pub fn get_agent_by_session_id(&self, session_id: &str) -> Result<Option<OfficeAgent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT session_id, office_id, agent_name, role_description, employment_type, gender, experience_level, personality_traits, current_tasks, specializations, visiting_session_id FROM office_agents WHERE session_id = ?1")?;
+        let mut rows = stmt.query([session_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(OfficeAgent {
+                session_id: row.get(0)?,
+                office_id: row.get(1)?,
+                agent_name: row.get(2)?,
+                role_description: row.get(3)?,
+                employment_type: row.get(4)?,
+                gender: row.get(5)?,
+                experience_level: row.get(6)?,
+                personality_traits: row.get(7)?,
+                current_tasks: row.get(8)?,
+                specializations: row.get(9)?,
+                visiting_session_id: row.get(10)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn add_office_agent(&self, agent: OfficeAgent) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO office_agents (session_id, office_id, agent_name, role_description, employment_type, gender, experience_level, personality_traits, current_tasks, specializations, visiting_session_id) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(session_id) DO UPDATE SET 
+                agent_name=excluded.agent_name, 
+                role_description=excluded.role_description, 
+                employment_type=excluded.employment_type,
+                gender=excluded.gender,
+                experience_level=excluded.experience_level,
+                personality_traits=excluded.personality_traits",
+            params![
+                agent.session_id,
+                agent.office_id,
+                agent.agent_name,
+                agent.role_description,
+                agent.employment_type,
+                agent.gender,
+                agent.experience_level,
+                agent.personality_traits,
+                agent.current_tasks,
+                agent.specializations,
+                agent.visiting_session_id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_agent_tasks(&self, session_id: &str, current_tasks: i32) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE office_agents SET current_tasks = ?1 WHERE session_id = ?2",
+            params![current_tasks, session_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_visiting_session_id(&self, session_id: &str, visiting_session_id: Option<String>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE office_agents SET visiting_session_id = ?1 WHERE session_id = ?2",
+            params![visiting_session_id, session_id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_offices(&self) -> Result<Vec<Office>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, name FROM offices ORDER BY created_at ASC")?;
+        let mut stmt = conn.prepare("SELECT id, name, country FROM offices ORDER BY created_at ASC")?;
 
         let mut offices = Vec::new();
         let mut rows = stmt.query([])?;
@@ -189,6 +322,7 @@ impl DbState {
             offices.push(Office {
                 id: row.get(0)?,
                 name: row.get(1)?,
+                country: row.get(2)?,
             });
         }
 

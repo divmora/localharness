@@ -102,11 +102,12 @@ cat "$file"
 
 #[tauri::command]
 fn create_office(
-    state: tauri::State<db::DbState>,
     id: String,
     name: String,
+    country: String,
+    state: tauri::State<'_, crate::db::DbState>,
 ) -> Result<(), String> {
-    state.create_office(&id, &name).map_err(|e| e.to_string())
+    state.create_office(&id, &name, &country).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -169,6 +170,91 @@ fn get_session_spaces(
     state: tauri::State<db::DbState>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     state.get_session_spaces().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_office_agents(
+    state: tauri::State<db::DbState>,
+    office_id: String,
+) -> Result<Vec<db::OfficeAgent>, String> {
+    state.get_office_agents(&office_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_office_agent(
+    state: tauri::State<db::DbState>,
+    agent: db::OfficeAgent,
+) -> Result<(), String> {
+    state.add_office_agent(agent).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_agent_tasks(
+    state: tauri::State<db::DbState>,
+    session_id: String,
+    current_tasks: i32,
+) -> Result<(), String> {
+    state.update_agent_tasks(&session_id, current_tasks).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn assign_task(
+    state: tauri::State<db::DbState>,
+    session_id: String,
+) -> Result<Option<db::OfficeAgent>, String> {
+    let agent = state.get_agent_by_session_id(&session_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("Agent not found")?;
+
+    let new_task_count = agent.current_tasks + 1;
+    
+    // Check limits
+    let mut limit = 5; // Default for permanent hire
+    if agent.role_description == "Office Manager" {
+        limit = 10;
+    } else if agent.employment_type == "consultancy" {
+        limit = 2;
+    }
+
+    if new_task_count > limit {
+        // Limit breached! Spawn a new agent to handle overflow
+        // Reset the overflowing agent's tasks to limit or limit-1 to signify offloading
+        state.update_agent_tasks(&session_id, limit).map_err(|e| e.to_string())?;
+
+        let new_session_id = uuid::Uuid::new_v4().to_string();
+        
+        let new_agent = db::OfficeAgent {
+            session_id: new_session_id.clone(),
+            office_id: agent.office_id.clone(),
+            agent_name: if agent.role_description == "Office Manager" { "Junior Developer".to_string() } else { "Consultant".to_string() },
+            role_description: if agent.role_description == "Office Manager" { "Junior Developer".to_string() } else { "Consultant".to_string() },
+            employment_type: if agent.role_description == "Office Manager" { "permanent".to_string() } else { "consultancy".to_string() },
+            gender: "none".to_string(),
+            experience_level: "junior".to_string(),
+            personality_traits: "Eager to help".to_string(),
+            current_tasks: 1, // They take the overflow task
+            specializations: "Overflow handler".to_string(),
+            visiting_session_id: None,
+        };
+
+        state.add_office_agent(new_agent.clone()).map_err(|e| e.to_string())?;
+        
+        // Return the new agent so the UI knows a hire happened!
+        Ok(Some(new_agent))
+    } else {
+        // Just increment and return None (no new hire)
+        state.update_agent_tasks(&session_id, new_task_count).map_err(|e| e.to_string())?;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn update_visiting_session_id(
+    state: tauri::State<'_, db::DbState>,
+    session_id: String,
+    visiting_session_id: Option<String>
+) -> Result<(), String> {
+    state.update_visiting_session_id(&session_id, visiting_session_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1265,6 +1351,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_playwright::init())
         .invoke_handler(tauri::generate_handler![
             start_harness,
             list_sessions,
@@ -1279,10 +1366,15 @@ pub fn run() {
             get_office_manager,
             get_all_office_managers,
             set_office_manager,
+            get_office_agents,
+            add_office_agent,
+            update_agent_tasks,
+            update_visiting_session_id,
             create_space,
             get_spaces,
             move_session_to_space,
             get_session_spaces,
+            assign_task,
             add_recent_project,
             get_recent_projects,
             get_wallet_balance,

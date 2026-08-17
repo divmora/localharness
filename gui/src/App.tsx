@@ -4,14 +4,16 @@ import { SessionsManager } from './components/SessionsManager';
 import { CommandPalette } from './components/CommandPalette';
 import { TopBar } from './components/TopBar';
 import { OfficeView } from './components/OfficeView';
-import { ToastProvider } from './components/Toast';
+import { CreateOfficeModal } from './components/CreateOfficeModal';
+import { PromptModal } from './components/PromptModal';
+import { ConfirmModal } from './components/ConfirmModal';
 import { MainPage } from './pages/MainPage';
 import './App.css';
 import { useHarness } from './hooks/useHarness';
+import { useToast } from './components/Toast';
 import { invoke } from '@tauri-apps/api/core';
 import { fromBinary } from '@bufbuild/protobuf';
 import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
-
 export interface Space {
   id: string;
   name: string;
@@ -42,6 +44,13 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     return params.get("office_id") || 'default';
   });
+
+  // Modal states
+  const [officePromptState, setOfficePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
+  const [spacePromptState, setSpacePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
+  const [deleteConfirmState, setDeleteConfirmState] = useState<{ isOpen: boolean, sessionId?: string }>({ isOpen: false });
+
+  const { showToast } = useToast();
   
   const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget, false);
 
@@ -140,36 +149,56 @@ function App() {
     sendPrompt(prompt);
   };
 
-  const handleCreateOffice = async () => {
-    const name = window.prompt("Enter new Office name:");
-    if (name) {
-      const id = crypto.randomUUID();
-      await invoke('create_office', { id, name: name.trim() });
-      // Re-fetch offices
-      const officesList = await invoke<Office[]>('get_offices');
-      setOffices(officesList);
-      setActiveOfficeId(id);
-    }
+  const handleCreateOffice = () => {
+    setOfficePromptState({ isOpen: true });
   };
 
-  const handleDeleteSession = async (sessionId: string) => {
-    if (confirm("Are you sure you want to delete this session?")) {
+  const confirmCreateOffice = async (name: string, country: string) => {
+    if (name && name.trim() !== '') {
+      const id = crypto.randomUUID();
       try {
-        await invoke('delete_session', { sessionId, target: null });
-        if (activeSessionId === sessionId) {
-          setActiveSessionId(null);
-        }
-        loadSessions();
-      } catch (e) {
-        console.error("Failed to delete session:", e);
-        alert("Failed to delete session: " + e);
+        await invoke('create_office', { id, name: name.trim(), country });
+        const officesList = await invoke<Office[]>('get_offices');
+        setOffices(officesList);
+        setActiveOfficeId(id);
+      } catch (err) {
+        console.error("Failed to create office:", err);
+        showToast({ title: 'Error', message: 'Failed to create office', type: 'error' });
       }
     }
+    setOfficePromptState({ isOpen: false });
   };
 
-  const handleCreateSpace = async () => {
+  const handleDeleteSession = (sessionId: string) => {
+    setDeleteConfirmState({ isOpen: true, sessionId });
+  };
+
+  const confirmDeleteSession = async () => {
+    const sessionId = deleteConfirmState.sessionId;
+    setDeleteConfirmState({ isOpen: false });
+    if (!sessionId) return;
+    
+    try {
+      await invoke('delete_session', { sessionId, target: null });
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+      loadSessions();
+      showToast({ title: 'Success', message: 'Session deleted', type: 'success' });
+    } catch (e) {
+      console.error("Failed to delete session:", e);
+      showToast({ title: 'Error', message: `Failed to delete session: ${e}`, type: 'error' });
+    }
+  };
+
+  const handleCreateSpace = () => {
     if (!installationId) return;
-    const spaceName = window.prompt("Enter new Space name:");
+    setSpacePromptState({ isOpen: true });
+  };
+
+  const confirmCreateSpace = async (spaceName: string) => {
+    setSpacePromptState({ isOpen: false });
+    if (!installationId) return;
     if (!spaceName || spaceName.trim() === "") return;
     try {
       await invoke('create_space', {
@@ -178,12 +207,9 @@ function App() {
         installationId: installationId,
         officeId: activeOfficeId
       });
-      // Force reload to get the new space
       if (!activeSessionId) {
-        // Just trigger a state update or we can just reload directly
         setActiveSessionId(null);
       }
-      // Re-run the loadSessions effect
       const [spacesList] = await Promise.all([
         invoke<Space[]>('get_spaces', { 
           installationId: installationId,
@@ -193,7 +219,7 @@ function App() {
       setSpaces(spacesList);
     } catch (err) {
       console.error("Failed to create space:", err);
-      alert("Failed to create space: " + err);
+      showToast({ title: 'Error', message: `Failed to create space: ${err}`, type: 'error' });
     }
   };
 
@@ -208,16 +234,17 @@ function App() {
         invoke<Record<string, string>>('get_session_spaces')
       ]);
       setSessionSpaces(sessionMap);
+      showToast({ title: 'Success', message: 'Session moved to space', type: 'success' });
     } catch (err) {
       console.error("Failed to move session:", err);
-      alert("Failed to move session: " + err);
+      showToast({ title: 'Error', message: `Failed to move session: ${err}`, type: 'error' });
     }
   };
 
   return (
-    <ToastProvider>
+    <>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
-        <TopBar 
+      <TopBar 
           currentView={currentView} 
           onViewChange={setCurrentView} 
           offices={offices}
@@ -233,7 +260,7 @@ function App() {
               onClose={() => setCurrentView('main')} 
             />
           ) : currentView === 'sessions' ? (
-            <SessionsManager sessions={filteredSessions} onSelectSession={handleSelectSession} />
+            <SessionsManager sessions={filteredSessions} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} />
           ) : currentView === 'office' ? (
             <OfficeView 
               sessions={filteredSessions} 
@@ -248,6 +275,7 @@ function App() {
                   setOfficeManagers(prev => ({ ...prev, [activeOfficeId]: sessionId }));
                 } catch (err) {
                   console.error("Failed to set office manager", err);
+                  showToast({ title: 'Error', message: `Failed to set manager: ${err}`, type: 'error' });
                 }
               }}
             />
@@ -280,7 +308,35 @@ function App() {
           )}
         </div>
       </div>
-    </ToastProvider>
+
+      {officePromptState.isOpen && (
+        <CreateOfficeModal
+          onConfirm={confirmCreateOffice}
+          onCancel={() => setOfficePromptState({ isOpen: false })}
+        />
+      )}
+
+      {spacePromptState.isOpen && (
+        <PromptModal
+          title="Create New Space"
+          placeholder="Enter Space name..."
+          confirmText="Create Space"
+          onConfirm={confirmCreateSpace}
+          onCancel={() => setSpacePromptState({ isOpen: false })}
+        />
+      )}
+
+      {deleteConfirmState.isOpen && (
+        <ConfirmModal
+          title="Delete Session"
+          message="Are you sure you want to delete this session? This action cannot be undone."
+          confirmText="Delete"
+          destructive={true}
+          onConfirm={confirmDeleteSession}
+          onCancel={() => setDeleteConfirmState({ isOpen: false, sessionId: undefined })}
+        />
+      )}
+    </>
   );
 }
 

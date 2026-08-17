@@ -16,8 +16,15 @@ coverage.txt
 *.swo
 *~
 
-# OS
+# Misc
 .DS_Store
+scratch/
+
+# Test Results
+test-results/
+playwright-report/
+
+# OS
 Thumbs.db
 
 # Logs

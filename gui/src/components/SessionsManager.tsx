@@ -1,14 +1,15 @@
 import { useState, useMemo, useEffect } from 'react';
 import { SessionInfo as ProtoSessionInfo, SessionStatus } from '../gen/localharness/v1/localharness_pb';
-import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Loader, AlertCircle, CheckCircle, Share2 } from 'lucide-react';
+import { LayoutGrid, List, Search, SlidersHorizontal, Clock, Archive, Plus, Loader, AlertCircle, CheckCircle, Share2, Trash2 } from 'lucide-react';
 import { SkeletonCard } from './SkeletonLoader';
 
 interface SessionsManagerProps {
   sessions: ProtoSessionInfo[];
   onSelectSession: (id: string) => void;
+  onDeleteSession?: (id: string) => void;
 }
 
-export function SessionsManager({ sessions, onSelectSession }: SessionsManagerProps) {
+export function SessionsManager({ sessions, onSelectSession, onDeleteSession }: SessionsManagerProps) {
   const [viewType, setViewType] = useState<'board' | 'list'>('board');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -178,6 +179,16 @@ export function SessionsManager({ sessions, onSelectSession }: SessionsManagerPr
                 </div>
                 <div className="text-xs text-text-secondary flex items-center gap-1.5 flex-1 truncate pr-4">
                   {session.workspace ? `My current workspace directory is \`${session.workspace}\`` : 'Local Workspace'}
+                  <button 
+                    className="p-1.5 text-text-tertiary hover:text-red-500 hover:bg-bg-tertiary rounded transition-colors"
+                    title="Delete Session"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onDeleteSession) onDeleteSession(session.id);
+                    }}
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
                 <div className="text-xs text-text-tertiary whitespace-nowrap">
                   {formatTimeAgo(session.updatedAt)}
