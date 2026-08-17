@@ -26,15 +26,12 @@ export interface Office {
 }
 
 function App() {
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("new_session") === "true" ? crypto.randomUUID() : null;
-  });
-
-  const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [initialBudget, setInitialBudget] = useState<number>(0);
   const [currentView, setCurrentView] = useState<'main' | 'customizations' | 'sessions' | 'office'>('main');
   const [workspace, setWorkspace] = useState<string | null>(null);
   
+  const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [sessionSpaces, setSessionSpaces] = useState<Record<string, string>>({});
   const [installationId, setInstallationId] = useState<string | null>(null);
@@ -45,7 +42,7 @@ function App() {
     return params.get("office_id") || 'default';
   });
   
-  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace);
+  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget);
 
   const [showAgentSidebar, setShowAgentSidebar] = useState(true);
 
@@ -115,8 +112,19 @@ function App() {
     setCurrentView('main');
   };
 
-  const handleStartPromptSession = (prompt: string) => {
+  const handleStartPromptSession = async (prompt: string, allocatedBudget?: number) => {
     const newId = crypto.randomUUID();
+    setInitialBudget(allocatedBudget || 0);
+
+    // Deduct from Office Wallet if budget is allocated
+    if (allocatedBudget && allocatedBudget > 0) {
+      try {
+        await invoke('add_wallet_balance', { officeId: activeOfficeId, amount: -allocatedBudget });
+      } catch (e) {
+        console.error("Failed to deduct budget from office wallet:", e);
+      }
+    }
+
     setActiveSessionId(newId);
     sendPrompt(prompt);
   };

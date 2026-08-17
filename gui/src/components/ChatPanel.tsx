@@ -9,7 +9,7 @@ interface ChatPanelProps {
   connectionError?: string | null;
   steps: StepUpdate[];
   trajectoryState?: TrajectoryState_TrajState;
-  onSend: (text: string) => void;
+  onSend: (text: string, allocatedBudget?: number) => void;
   onInterrupt?: () => void;
   onResume?: (msg?: string) => void;
   onSubmitQuestionResponse?: (requestId: string, answers: any[], skipped: boolean) => void;
@@ -106,7 +106,7 @@ function QuestionForm({ action, state, onSubmit }: { action: any, state: StepUpd
 
 export function ChatPanel({ 
   connected, 
-  connectionError,
+  connectionError, 
   steps, 
   trajectoryState,
   onSend, 
@@ -115,7 +115,16 @@ export function ChatPanel({
   onSubmitQuestionResponse, 
   onSubmitPermissionResponse 
 }: ChatPanelProps) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
+  const [allocatedBudget, setAllocatedBudget] = useState<number>(0);
+
+  const handleSend = () => {
+    if (input.trim() && connected) {
+      onSend(input.trim(), allocatedBudget);
+      setInput("");
+      setAllocatedBudget(0);
+    }
+  };
 
   // Group streaming steps by stepIndex so we have one cohesive message per step
   const messages = useMemo(() => {
@@ -146,12 +155,6 @@ export function ChatPanel({
     
     return Array.from(grouped.values()).sort((a, b) => a.stepIndex - b.stepIndex);
   }, [steps]);
-
-  const handleSend = () => {
-    if (!input.trim() || !connected) return;
-    onSend(input);
-    setInput('');
-  };
 
   const renderAction = (msg: StepUpdate) => {
     if (!msg.action?.case) return null;
@@ -448,6 +451,19 @@ export function ChatPanel({
               <button className="p-1 hover:bg-bg-tertiary rounded-md text-text-tertiary hover:text-text-primary transition-colors">
                 <Plus size={16} />
               </button>
+              <div className="flex items-center gap-2 px-2 py-1 bg-border-primary rounded-md border border-border-highlight mr-2">
+                <span className="text-[10px] font-bold text-text-tertiary">BUDGET (DC)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="10"
+                  value={allocatedBudget}
+                  onChange={(e) => setAllocatedBudget(parseFloat(e.target.value) || 0)}
+                  className="w-12 bg-transparent text-xs font-mono text-text-primary outline-none"
+                  placeholder="0"
+                  disabled={!connected || !!connectionError || trajectoryState === TrajectoryState_TrajState.TRAJ_RUNNING}
+                />
+              </div>
               <div className="flex items-center gap-1.5 text-green-500 font-medium text-xs px-2 py-1 rounded-md hover:bg-bg-tertiary cursor-pointer transition-colors">
                 <MessageCircle size={14} />
                 Ask

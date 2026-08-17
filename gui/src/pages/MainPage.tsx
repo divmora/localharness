@@ -24,7 +24,7 @@ interface MainPageProps {
   onMoveSessionToSpace: (sessionId: string, spaceId: string) => void;
   onOpenCustomizations: () => void;
   onOpenSessionsManager: () => void;
-  onSubmitPrompt: (prompt: string) => void;
+  onSubmitPrompt: (prompt: string, allocatedBudget?: number) => void;
   onSubmitQuestionResponse: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse: (requestId: string, approved: boolean, reason?: string) => void;
   onSelectWorkspace: (path: string) => void;

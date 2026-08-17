@@ -672,6 +672,9 @@ message HarnessConfig {
   int32 max_concurrent_subagents = 15; // Max concurrent children (default: 5)
   string client_source = 27;
 
+  // Initial budget to allocate to the session (in DC)
+  double initial_budget = 30;
+
   // Per-tool configuration (Phase 2)
   ToolConfigs tool_configs = 12;
 

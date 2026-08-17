@@ -27,7 +27,7 @@ interface HarnessConnection {
     api_key: string;
 }
 
-export function useHarness(activeSessionId: string | null, workspacePath?: string | null) {
+export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number) {
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [serverReady, setServerReady] = useState(false);
@@ -161,6 +161,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                 corpusName: ""
                             }
                         ],
+                        initialBudget: initialBudget || 0,
                         builtinTools: {
                             viewFile: true,
                             createFile: true,

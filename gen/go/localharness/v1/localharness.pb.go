@@ -4621,6 +4621,8 @@ type HarnessConfig struct {
 	MaxSubagentDepth       int32               `protobuf:"varint,14,opt,name=max_subagent_depth,json=maxSubagentDepth,proto3" json:"max_subagent_depth,omitempty"`                   // Max nesting depth (default: 3, 0 = disabled)
 	MaxConcurrentSubagents int32               `protobuf:"varint,15,opt,name=max_concurrent_subagents,json=maxConcurrentSubagents,proto3" json:"max_concurrent_subagents,omitempty"` // Max concurrent children (default: 5)
 	ClientSource           string              `protobuf:"bytes,27,opt,name=client_source,json=clientSource,proto3" json:"client_source,omitempty"`
+	// Initial budget to allocate to the session (in DC)
+	InitialBudget float64 `protobuf:"fixed64,30,opt,name=initial_budget,json=initialBudget,proto3" json:"initial_budget,omitempty"`
 	// Per-tool configuration (Phase 2)
 	ToolConfigs *ToolConfigs `protobuf:"bytes,12,opt,name=tool_configs,json=toolConfigs,proto3" json:"tool_configs,omitempty"`
 	// MCP server connections (merged with global ~/.divmora/config/mcp_config.json)
@@ -4785,6 +4787,13 @@ func (x *HarnessConfig) GetClientSource() string {
 		return x.ClientSource
 	}
 	return ""
+}
+
+func (x *HarnessConfig) GetInitialBudget() float64 {
+	if x != nil {
+		return x.InitialBudget
+	}
+	return 0
 }
 
 func (x *HarnessConfig) GetToolConfigs() *ToolConfigs {
@@ -8042,7 +8051,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1a\n" +
 	"\bapproved\x18\x02 \x01(\bR\bapproved\x12#\n" +
-	"\rdenial_reason\x18\x03 \x01(\tR\fdenialReason\"\xdb\v\n" +
+	"\rdenial_reason\x18\x03 \x01(\tR\fdenialReason\"\x82\f\n" +
 	"\rHarnessConfig\x12)\n" +
 	"\x10litellm_endpoint\x18\x01 \x01(\tR\x0flitellmEndpoint\x12&\n" +
 	"\x0flitellm_api_key\x18\x02 \x01(\tR\rlitellmApiKey\x12(\n" +
@@ -8060,7 +8069,8 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x14keep_recent_messages\x18\r \x01(\x05R\x12keepRecentMessages\x12,\n" +
 	"\x12max_subagent_depth\x18\x0e \x01(\x05R\x10maxSubagentDepth\x128\n" +
 	"\x18max_concurrent_subagents\x18\x0f \x01(\x05R\x16maxConcurrentSubagents\x12#\n" +
-	"\rclient_source\x18\x1b \x01(\tR\fclientSource\x12?\n" +
+	"\rclient_source\x18\x1b \x01(\tR\fclientSource\x12%\n" +
+	"\x0einitial_budget\x18\x1e \x01(\x01R\rinitialBudget\x12?\n" +
 	"\ftool_configs\x18\f \x01(\v2\x1c.localharness.v1.ToolConfigsR\vtoolConfigs\x12A\n" +
 	"\vmcp_servers\x18\x10 \x03(\v2 .localharness.v1.McpServerConfigR\n" +
 	"mcpServers\x12f\n" +

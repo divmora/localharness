@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 interface CenteredEmptyStateProps {
   onSelectSession: (id: string) => void;
   sessions: ProtoSessionInfo[];
-  onSubmitPrompt: (prompt: string) => void;
+  onSubmitPrompt: (prompt: string, allocatedBudget?: number) => void;
   onOpenSessionsManager: () => void;
   workspace: string | null;
   onSelectWorkspace: (path: string) => void;
@@ -14,11 +14,12 @@ interface CenteredEmptyStateProps {
 
 export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, onOpenSessionsManager, workspace, onSelectWorkspace }: CenteredEmptyStateProps) {
   const [prompt, setPrompt] = useState("");
+  const [allocatedBudget, setAllocatedBudget] = useState<number>(0);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
 
   const handleSubmit = () => {
     if (prompt.trim()) {
-      onSubmitPrompt(prompt);
+      onSubmitPrompt(prompt, allocatedBudget);
     }
   };
 
@@ -83,9 +84,21 @@ export function CenteredEmptyState({ onSelectSession, sessions, onSubmitPrompt, 
 
             <div className="flex items-center justify-between mt-2">
               <div className="flex items-center gap-2">
-                <button className="p-1.5 rounded-md hover:bg-border-primary text-text-secondary transition-colors">
+                <button className="p-1.5 rounded-md hover:bg-border-primary text-text-secondary transition-colors" title="Attach file">
                   <Plus size={16} />
                 </button>
+                <div className="flex items-center gap-2 px-2 py-1 bg-border-primary rounded-md border border-border-highlight">
+                  <span className="text-[10px] font-bold text-text-tertiary">BUDGET (DC)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="10"
+                    value={allocatedBudget}
+                    onChange={(e) => setAllocatedBudget(parseFloat(e.target.value) || 0)}
+                    className="w-16 bg-transparent text-xs font-mono text-text-primary outline-none"
+                    placeholder="0"
+                  />
+                </div>
                 <div className="flex items-center gap-1.5 px-2 py-1 bg-border-primary rounded-md text-xs font-semibold text-success" style={{ color: 'var(--success)' }}>
                   <MessageSquare size={12} /> Ask
                 </div>
