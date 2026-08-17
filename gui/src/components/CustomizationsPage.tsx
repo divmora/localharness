@@ -53,8 +53,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
       try {
         // Fetch LLM Config
         try {
-          const llmRaw = await invoke<string>('read_file', {
-            path: '/home/nitin/.divmora/config/litellm.json'
+          const llmRaw = await invoke<string>('read_config_file', {
+            name: 'litellm.json'
           });
           const parsed = JSON.parse(llmRaw);
           setLlmConfig(parsed);
@@ -68,8 +68,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
         // Fetch MCP Config
         try {
-          const mcpRaw = await invoke<string>('read_file', {
-            path: '/home/nitin/.divmora/config/mcp_config.json'
+          const mcpRaw = await invoke<string>('read_config_file', {
+            name: 'mcp_config.json'
           });
           setMcpConfig(JSON.parse(mcpRaw));
         } catch (e) {
@@ -78,8 +78,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
         // Fetch Settings
         try {
-          const settingsRaw = await invoke<string>('read_file', {
-            path: '/home/nitin/.divmora/config/settings.json'
+          const settingsRaw = await invoke<string>('read_config_file', {
+            name: 'settings.json'
           });
           setSettings(JSON.parse(settingsRaw));
         } catch (e) {
@@ -88,8 +88,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
         // Fetch Skills
         try {
-          const globalSkills = await invoke<string[]>('list_files', {
-            dir: '/home/nitin/.divmora/localharness/skills'
+          const globalSkills = await invoke<string[]>('list_global_items', {
+            kind: 'skills'
           });
           setSkills(globalSkills.filter(s => s.endsWith('/')));
         } catch (e) {
@@ -98,21 +98,22 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
 
         // Fetch Knowledge Items
         try {
-          const kiDirs = await invoke<string[]>('list_files', {
-            dir: '/home/nitin/.divmora/localharness/knowledge'
+          const globalKnowledge = await invoke<string[]>('list_global_items', {
+            kind: 'knowledge'
           });
-          let allKis: string[] = [];
-          for (const projDir of kiDirs) {
+          let allKnowledge = [...globalKnowledge];
+          for (const projDir of allKnowledge) {
             if (projDir.endsWith('/')) {
               try {
-                const items = await invoke<string[]>('list_files', {
-                  dir: `/home/nitin/.divmora/localharness/knowledge/${projDir}`
+                const projKnowledge = await invoke<string[]>('list_global_items', {
+                  kind: 'knowledge',
+                  projDir: projDir
                 });
-                allKis = [...allKis, ...items.filter(i => i.endsWith('/'))];
+                allKnowledge = [...allKnowledge, ...projKnowledge.map(k => `${projDir}/${k}`)];
               } catch (e) { }
             }
           }
-          setKnowledge(allKis);
+          setKnowledge(allKnowledge);
         } catch (e) {
           setKnowledge([]);
         }
@@ -157,8 +158,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
         newConfig.defaultEndpoint = activeEndpoint;
       }
 
-      await invoke('write_file', {
-        path: '/home/nitin/.divmora/config/litellm.json',
+      await invoke('write_config_file', {
+        name: 'litellm.json',
         content: JSON.stringify(newConfig, null, 2)
       });
 
@@ -177,8 +178,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
         ...llmConfig,
         defaultEndpoint: activeEndpoint
       };
-      await invoke('write_file', {
-        path: '/home/nitin/.divmora/config/litellm.json',
+      await invoke('write_config_file', {
+        name: 'litellm.json',
         content: JSON.stringify(newConfig, null, 2)
       });
       setLlmConfig(newConfig);
@@ -207,8 +208,8 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
         newConfig.defaultEndpoint = Object.keys(newEndpoints)[0] || '';
       }
 
-      await invoke('write_file', {
-        path: '/home/nitin/.divmora/config/litellm.json',
+      await invoke('write_config_file', {
+        name: 'litellm.json',
         content: JSON.stringify(newConfig, null, 2)
       });
 
