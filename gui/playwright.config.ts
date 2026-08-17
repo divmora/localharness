@@ -7,7 +7,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1, // Reduce to 1 worker to avoid multiple app startups
   reporter: 'html',
   
   projects: [
@@ -23,6 +23,6 @@ export default defineConfig({
     command: 'npm run tauri dev',
     port: 1420,
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    timeout: 600 * 1000, // 10 minutes for slow docker cargo builds
   },
 });

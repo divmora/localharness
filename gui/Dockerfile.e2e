@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
     git \
     sudo \
     protobuf-compiler \
+    dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20

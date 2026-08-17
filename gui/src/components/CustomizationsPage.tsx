@@ -160,10 +160,10 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
     }
   };
 
-  const handleSetDefaultEndpoint = async () => {
+  const handleSetDefaultEndpoint = async (name: string) => {
     setLlmSaving(true);
     try {
-      await invoke('set_default_llm_endpoint', { name: activeEndpoint });
+      await invoke('set_default_llm_endpoint', { name });
       const updated = await invoke<any>('get_llm_config');
       setLlmConfig(updated);
     } catch (e: any) {
@@ -173,12 +173,12 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
     }
   };
 
-  const handleDeleteEndpoint = async () => {
-    if (!confirm(`Are you sure you want to delete the endpoint "${activeEndpoint}"?`)) return;
+  const handleDeleteEndpoint = async (name: string) => {
+    if (!confirm(`Are you sure you want to delete the endpoint "${name}"?`)) return;
 
     setLlmSaving(true);
     try {
-      await invoke('delete_llm_endpoint', { name: activeEndpoint });
+      await invoke('delete_llm_endpoint', { name });
       const updated = await invoke<any>('get_llm_config');
 
       setLlmConfig(updated);
@@ -365,10 +365,7 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
                                       {!isDefault && (
                                         <button
                                           onClick={async () => {
-                                            const oldActive = activeEndpoint;
-                                            setActiveEndpoint(name);
-                                            await handleSetDefaultEndpoint();
-                                            setActiveEndpoint(oldActive);
+                                            await handleSetDefaultEndpoint(name);
                                           }}
                                           className="text-[11px] text-text-secondary hover:text-text-primary bg-bg-tertiary hover:bg-border-primary px-2 py-1 rounded transition-colors"
                                         >
@@ -389,11 +386,7 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
                                       {endpointNames.length > 1 && (
                                         <button
                                           onClick={async () => {
-                                            if (!confirm(`Delete endpoint "${name}"?`)) return;
-                                            const oldActive = activeEndpoint;
-                                            setActiveEndpoint(name);
-                                            await handleDeleteEndpoint();
-                                            setActiveEndpoint(oldActive);
+                                            await handleDeleteEndpoint(name);
                                           }}
                                           className="text-[11px] text-text-secondary hover:text-red-400 bg-bg-tertiary hover:bg-border-primary px-2 py-1 rounded transition-colors"
                                         >
