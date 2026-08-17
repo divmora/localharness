@@ -224,7 +224,14 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
   // Ensure unassigned space exists
   groupedData['unassigned'] = {};
 
-  sessions.forEach(session => {
+  // Filter sessions to only those in the current office
+  const officeSessions = sessions.filter(session => {
+    return session.id === managerSessionId || 
+           officeAgents.some(a => a.session_id === session.id) ||
+           !!sessionSpaces[session.id];
+  });
+
+  officeSessions.forEach(session => {
     const spaceId = sessionSpaces[session.id] || 'unassigned';
     const workspacePath = session.workspace || 'No Workspace';
     

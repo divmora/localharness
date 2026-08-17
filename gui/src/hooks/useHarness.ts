@@ -165,7 +165,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                             }
                         ],
                         initialBudget: initialBudget || 0,
-                        systemInstructions: isManager ? "You are the primary Manager agent in this Office. Your responsibility is to act as the single point of contact for the human user. You should gather complete requirements from the human before starting tasks (e.g. asking clarifying questions), plan out tasks carefully to ensure concurrent tasks do not conflict, and delegate specialized work to your team by hiring new agents using the 'hire_agent' tool." : undefined,
+                        systemInstructions: undefined, // Handled below after we fetch agent traits
                         builtinTools: {
                             viewFile: true,
                             createFile: true,
@@ -258,6 +258,20 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                         clientSource: "GUI"
                     })
                 });
+
+                if (isManager) {
+                    initReq.config!.systemInstructions = "You are the primary Manager agent in this Office. Your responsibility is to act as the single point of contact for the human user. You should gather complete requirements from the human before starting tasks (e.g. asking clarifying questions), plan out tasks carefully to ensure concurrent tasks do not conflict, and delegate specialized work to your team by hiring new agents using the 'hire_agent' tool.";
+                } else if (activeOfficeId && activeSessionId) {
+                    try {
+                        const agents: any = await invoke('get_office_agents', { officeId: activeOfficeId });
+                        const agent = agents.find((a: any) => a.session_id === activeSessionId);
+                        if (agent) {
+                            initReq.config!.systemInstructions = `You are a specialized agent: ${agent.agent_name} (${agent.role_description}).\n\nYour demographic profile is a ${agent.experience_level} ${agent.gender} on a ${agent.employment_type} contract.\nYour personality traits are: ${agent.personality_traits || 'Neutral'}.\n\nYou have been hired by a Manager agent to complete a specific task or act as a peer. Do not communicate with the user, but instead complete the task to the best of your ability. When you need to talk to the Manager or other peers, use the 'message_agent' tool. If you are idle and have no tasks, you may periodically use the 'message_agent' tool to chit-chat with other agents in the office.`;
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch agent profile for system prompt", e);
+                    }
+                }
                 
                 const initClientMsg = create(ClientMessageSchema, {
                     payload: {

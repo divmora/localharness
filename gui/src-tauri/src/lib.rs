@@ -231,7 +231,7 @@ fn assign_task(
             employment_type: if agent.role_description == "Office Manager" { "permanent".to_string() } else { "consultancy".to_string() },
             gender: "none".to_string(),
             experience_level: "junior".to_string(),
-            personality_traits: "Eager to help".to_string(),
+            personality_traits: "Eager to help, highly analytical, and strictly follows instructions without small talk.".to_string(),
             current_tasks: 1, // They take the overflow task
             specializations: "Overflow handler".to_string(),
             visiting_session_id: None,

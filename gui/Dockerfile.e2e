@@ -32,8 +32,8 @@ WORKDIR /app/gui
 # Install Node dependencies
 RUN npm ci
 
-# Pre-compile the Rust backend to prevent Playwright socket timeouts during cold starts
-RUN npm run tauri build || true
+# Pre-compile the Rust backend in debug mode to prevent Playwright socket timeouts during cold starts
+RUN cd src-tauri && cargo build || true
 
 # Install Playwright browsers
 RUN npx playwright install --with-deps
