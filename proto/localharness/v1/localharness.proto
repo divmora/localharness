@@ -20,6 +20,7 @@ option go_package = "github.com/divmora/localharness/gen/go/localharness/v1;loca
 message InputConfig {
   string workspace = 1;        // Default workspace path (empty = cwd)
   bool debug = 2;              // Enable debug logging
+  string session_id = 3;       // Optional: Provide to resume an existing session
 }
 
 // OutputConfig is written by the binary to stdout during handshake.
@@ -29,6 +30,7 @@ message OutputConfig {
   int32 port = 1;              // The port the binary bound to (via :0 atomic bind)
   string api_key = 2;          // Crypto-random API key for WebSocket auth header
   string harness_version = 3;  // Binary version string
+  string session_id = 4;       // The active session ID (generated or resumed)
 }
 
 // ═══════════════════════════════════════════════════════════════════════

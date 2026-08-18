@@ -30,6 +30,7 @@ use localharness::v1::{ConversationState, InputConfig, OutputConfig, SessionInfo
 pub struct HarnessConnection {
     pub port: i32,
     pub api_key: String,
+    pub session_id: String,
 }
 
 #[tauri::command]
@@ -942,7 +943,7 @@ use std::io::Read;
 async fn start_harness(
     app: tauri::AppHandle,
     state: tauri::State<'_, db::DbState>,
-    session_id: String,
+    session_id: Option<String>,
     target: Option<ConnectionTarget>,
 ) -> Result<HarnessConnection, String> {
     let target = target.unwrap_or(ConnectionTarget {
@@ -953,33 +954,38 @@ async fn start_harness(
         key_path: None,
     });
 
+    let provided_session_id = session_id.unwrap_or_default();
+
     if target.kind == "local" {
         // 1. Check if session is already running
-        if let Ok(Some(active)) = state.get_active_session(&session_id) {
-            let is_alive = std::process::Command::new("kill")
-                .arg("-0")
-                .arg(active.pid.to_string())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
+        if !provided_session_id.is_empty() {
+            if let Ok(Some(active)) = state.get_active_session(&provided_session_id) {
+                let is_alive = std::process::Command::new("kill")
+                    .arg("-0")
+                    .arg(active.pid.to_string())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
 
-            if is_alive {
-                eprintln!("Session {} is already running at PID {}", session_id, active.pid);
-                let needs_ws = {
-                    let senders = app.state::<WsSenders>();
-                    let map = senders.0.lock().unwrap();
-                    !map.contains_key(&session_id)
-                };
-                if needs_ws {
-                    connect_and_proxy_websocket(app.clone(), session_id.clone(), active.port as u16, active.api_key.clone()).await?;
+                if is_alive {
+                    eprintln!("Session {} is already running at PID {}", provided_session_id, active.pid);
+                    let needs_ws = {
+                        let senders = app.state::<WsSenders>();
+                        let map = senders.0.lock().unwrap();
+                        !map.contains_key(&provided_session_id)
+                    };
+                    if needs_ws {
+                        connect_and_proxy_websocket(app.clone(), provided_session_id.clone(), active.port as u16, active.api_key.clone()).await?;
+                    }
+                    return Ok(HarnessConnection {
+                        port: active.port as i32,
+                        api_key: active.api_key,
+                        session_id: provided_session_id,
+                    });
+                } else {
+                    eprintln!("Session {} PID {} is dead. Respawning.", provided_session_id, active.pid);
+                    let _ = state.delete_active_session(&provided_session_id);
                 }
-                return Ok(HarnessConnection {
-                    port: active.port as i32,
-                    api_key: active.api_key,
-                });
-            } else {
-                eprintln!("Session {} PID {} is dead. Respawning.", session_id, active.pid);
-                let _ = state.delete_active_session(&session_id);
             }
         }
 
@@ -989,6 +995,7 @@ async fn start_harness(
         let input_cfg = InputConfig {
             workspace: String::new(),
             debug: true,
+            session_id: provided_session_id.clone(),
         };
         let mut buf = Vec::new();
         input_cfg.encode(&mut buf).map_err(|e| e.to_string())?;
@@ -1043,7 +1050,7 @@ async fn start_harness(
 
         // 7. Persist to DB
         let active = db::ActiveSession {
-            session_id: session_id.clone(),
+            session_id: output_cfg.session_id.clone(),
             pid,
             port: output_cfg.port as u16,
             api_key: output_cfg.api_key.clone(),
@@ -1052,11 +1059,12 @@ async fn start_harness(
         let _ = state.set_active_session(&active);
 
         // 8. Connect to the Sidecar WebSocket
-        connect_and_proxy_websocket(app.clone(), session_id.clone(), output_cfg.port as u16, output_cfg.api_key.clone()).await?;
+        connect_and_proxy_websocket(app.clone(), output_cfg.session_id.clone(), output_cfg.port as u16, output_cfg.api_key.clone()).await?;
 
         return Ok(HarnessConnection {
             port: output_cfg.port,
             api_key: output_cfg.api_key,
+            session_id: output_cfg.session_id,
         });
     }
 
@@ -1133,6 +1141,7 @@ async fn start_harness(
     let input_cfg = InputConfig {
         workspace: String::new(),
         debug: true,
+        session_id: provided_session_id.clone(),
     };
 
     let mut buf = Vec::new();
@@ -1201,11 +1210,12 @@ async fn start_harness(
                             }
                         });
 
-                        connect_and_proxy_websocket(app.clone(), session_id.clone(), local_port as u16, output_cfg.api_key.clone()).await?;
+                        connect_and_proxy_websocket(app.clone(), output_cfg.session_id.clone(), local_port as u16, output_cfg.api_key.clone()).await?;
 
                         return Ok(HarnessConnection {
                             port: local_port,
                             api_key: output_cfg.api_key,
+                            session_id: output_cfg.session_id,
                         });
                     }
                 }

@@ -18,7 +18,9 @@ type ServerConfig struct {
 	AppDataDir string // ~/.divmora/localharness/ by default
 	Debug      bool
 	Version    bool
-	APIKey     string // Set during pipe handshake (crypto-random)
+	APIKey       string // Set during pipe handshake (crypto-random)
+	SessionID    string // Set during pipe handshake (UUID)
+	IsNewSession bool   // Indicates if the SessionID is newly generated
 }
 
 // HarnessVersion is the current version of the harness binary.

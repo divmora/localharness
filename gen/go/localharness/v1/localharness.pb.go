@@ -359,8 +359,9 @@ func (ConversationState_ConversationStatus) EnumDescriptor() ([]byte, []int) {
 // This message configures the binary before it starts the WebSocket server.
 type InputConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Workspace     string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"` // Default workspace path (empty = cwd)
-	Debug         bool                   `protobuf:"varint,2,opt,name=debug,proto3" json:"debug,omitempty"`        // Enable debug logging
+	Workspace     string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`                  // Default workspace path (empty = cwd)
+	Debug         bool                   `protobuf:"varint,2,opt,name=debug,proto3" json:"debug,omitempty"`                         // Enable debug logging
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // Optional: Provide to resume an existing session
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -409,6 +410,13 @@ func (x *InputConfig) GetDebug() bool {
 	return false
 }
 
+func (x *InputConfig) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 // OutputConfig is written by the binary to stdout during handshake.
 // Wire format: 4-byte little-endian length prefix + protobuf payload.
 // After writing this, the binary closes stdout to signal handshake completion.
@@ -417,6 +425,7 @@ type OutputConfig struct {
 	Port           int32                  `protobuf:"varint,1,opt,name=port,proto3" json:"port,omitempty"`                                          // The port the binary bound to (via :0 atomic bind)
 	ApiKey         string                 `protobuf:"bytes,2,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`                         // Crypto-random API key for WebSocket auth header
 	HarnessVersion string                 `protobuf:"bytes,3,opt,name=harness_version,json=harnessVersion,proto3" json:"harness_version,omitempty"` // Binary version string
+	SessionId      string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`                // The active session ID (generated or resumed)
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -468,6 +477,13 @@ func (x *OutputConfig) GetApiKey() string {
 func (x *OutputConfig) GetHarnessVersion() string {
 	if x != nil {
 		return x.HarnessVersion
+	}
+	return ""
+}
+
+func (x *OutputConfig) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
 	}
 	return ""
 }
@@ -7656,14 +7672,18 @@ var File_localharness_v1_localharness_proto protoreflect.FileDescriptor
 
 const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\n" +
-	"\"localharness/v1/localharness.proto\x12\x0flocalharness.v1\"A\n" +
+	"\"localharness/v1/localharness.proto\x12\x0flocalharness.v1\"`\n" +
 	"\vInputConfig\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x14\n" +
-	"\x05debug\x18\x02 \x01(\bR\x05debug\"d\n" +
+	"\x05debug\x18\x02 \x01(\bR\x05debug\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\x83\x01\n" +
 	"\fOutputConfig\x12\x12\n" +
 	"\x04port\x18\x01 \x01(\x05R\x04port\x12\x17\n" +
 	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\x12'\n" +
-	"\x0fharness_version\x18\x03 \x01(\tR\x0eharnessVersion\"\xbb\x04\n" +
+	"\x0fharness_version\x18\x03 \x01(\tR\x0eharnessVersion\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"\xbb\x04\n" +
 	"\rClientMessage\x122\n" +
 	"\x04init\x18\x01 \x01(\v2\x1c.localharness.v1.InitRequestH\x00R\x04init\x12A\n" +
 	"\fuser_message\x18\x02 \x01(\v2\x1c.localharness.v1.UserMessageH\x00R\vuserMessage\x12G\n" +

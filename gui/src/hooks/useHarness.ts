@@ -25,6 +25,7 @@ import {
 interface HarnessConnection {
     port: number;
     api_key: string;
+    session_id?: string;
 }
 
 export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number, isManager: boolean = false, onSessionCreated?: (sessionId: string) => void, activeOfficeId?: string | null) {
@@ -38,10 +39,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
     useEffect(() => {
         let unlisten_handle: (() => void) | null = null;
         
-        // Generate a new ID if it's a manager and doesn't exist
-        const targetSessionId = activeSessionId || (isManager ? crypto.randomUUID() : null);
+        // Do not generate UUIDs client-side, let the backend do it.
+        const targetSessionId = activeSessionId;
 
-        if (!targetSessionId) {
+        if (!targetSessionId && !isManager) {
             setConnected(false);
             setConnectionError(null);
             setSteps([]);
@@ -57,14 +58,18 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             setTrajectoryState(TrajectoryState_TrajState.TRAJ_UNSPECIFIED);
             
             let conn: HarnessConnection | null = null;
+            let finalSessionId = targetSessionId;
             
             try {
                 console.log("Requesting sidecar from Rust...");
                 try {
-                    await invoke('start_harness', { 
+                    conn = await invoke<HarnessConnection>('start_harness', { 
                         target: null,
                         sessionId: targetSessionId
                     });
+                    if (!finalSessionId && conn?.session_id) {
+                        finalSessionId = conn.session_id;
+                    }
                 } catch (err: any) {
                     if (err.toString().includes('__TAURI_INTERNALS__')) {
                         console.warn("Tauri not detected, falling back to standalone localhost:4000 (web dev mode)");
@@ -78,7 +83,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 // Fetch transcript to hydrate past session UI state
                 try {
                     const home = await homeDir();
-                    const transcriptPath = `${home}/.divmora/localharness/brain/${targetSessionId}/.system_generated/logs/transcript.jsonl`;
+                    const transcriptPath = `${home}/.divmora/localharness/brain/${finalSessionId}/.system_generated/logs/transcript.jsonl`;
                     console.log("Fetching transcript from", transcriptPath);
                     const rawJsonl = await invoke<string>('read_file', { 
                         path: transcriptPath 
@@ -154,7 +159,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 // Send InitRequest
                 const initReq = create(InitRequestSchema, {
                     config: create(HarnessConfigSchema, {
-                        conversationId: activeSessionId || "",
+                        conversationId: finalSessionId || "",
                         workspaces: [
                             {
                                 directory: workspacePath || await homeDir(),
@@ -279,18 +284,18 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 });
                 
                 await invoke('send_harness_message', {
-                    sessionId: targetSessionId,
+                    sessionId: finalSessionId,
                     message: Array.from(toBinary(ClientMessageSchema, initClientMsg))
                 });
                 
                 if (!activeSessionId && isManager && onSessionCreated) {
-                    onSessionCreated(targetSessionId!);
+                    onSessionCreated(finalSessionId!);
                 }
                 
-                console.log(`Connected for session: ${targetSessionId}`);
+                console.log(`Connected for session: ${finalSessionId}`);
                 setConnected(true);
                 
-                unlisten_handle = await listen<Uint8Array>(`harness_event_${targetSessionId}`, (event) => {
+                unlisten_handle = await listen<Uint8Array>(`harness_event_${finalSessionId}`, (event) => {
                     const msg = { type: 'Binary', data: event.payload };
                     if (msg.type === 'Binary') {
                         const buffer = new Uint8Array(msg.data);

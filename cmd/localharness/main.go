@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gorilla/websocket"
@@ -33,6 +34,7 @@ import (
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/server"
+	"github.com/divmora/localharness/internal/util"
 )
 
 func main() {
@@ -75,9 +77,27 @@ func main() {
 		}))
 	}
 
+	if inputCfg.SessionId != "" {
+		// Check if the session actually exists
+		pbPath := filepath.Join(cfg.AppDataDir, "conversations", inputCfg.SessionId+".pb")
+		if _, err := os.Stat(pbPath); err == nil {
+			cfg.SessionID = inputCfg.SessionId
+			cfg.IsNewSession = false
+		} else {
+			// Session not found, fall back to creating a new one
+			logger.Warn("provided session ID not found, generating new one", "session_id", inputCfg.SessionId)
+			cfg.SessionID = util.NewUUID()
+			cfg.IsNewSession = true
+		}
+	} else {
+		cfg.SessionID = util.NewUUID()
+		cfg.IsNewSession = true
+	}
+
 	logger.Debug("received InputConfig",
 		"workspace", inputCfg.Workspace,
 		"debug", inputCfg.Debug,
+		"session_id", cfg.SessionID,
 	)
 
 	// Bind to 127.0.0.1:0 atomically to explicitly use IPv4 loopback
@@ -104,6 +124,7 @@ func main() {
 		Port:           int32(port),
 		ApiKey:         apiKey,
 		HarnessVersion: config.HarnessVersion,
+		SessionId:      cfg.SessionID,
 	}
 	if err := writeOutputConfig(os.Stdout, outputCfg); err != nil {
 		logger.Error("failed to write OutputConfig to stdout", "error", err)

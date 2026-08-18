@@ -354,9 +354,9 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 	}
 
 	// Create or resume conversation
-	if cfg.ConversationId != "" {
+	if !s.serverCfg.IsNewSession {
 		// Resume existing conversation
-		s.conv, err = convMgr.Resume(cfg.ConversationId)
+		s.conv, err = convMgr.Resume(s.serverCfg.SessionID)
 		if err != nil {
 			s.sendError("INIT_ERROR", fmt.Sprintf("cannot resume conversation: %v", err), true)
 			return
@@ -364,12 +364,12 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		s.logger.Info("resumed conversation", "id", s.conv.ID)
 	} else {
 		// Create new conversation
-		s.conv, err = convMgr.Create(cfg)
+		s.conv, err = convMgr.CreateWithID(s.serverCfg.SessionID, cfg)
 		if err != nil {
 			s.sendError("INIT_ERROR", fmt.Sprintf("cannot create conversation: %v", err), true)
 			return
 		}
-		s.logger.Info("created conversation", "id", s.conv.ID)
+		s.logger.Info("created new conversation", "id", s.conv.ID)
 
 		if cfg.InitialBudget > 0 {
 			s.conv.AllocateBudget(cfg.InitialBudget)

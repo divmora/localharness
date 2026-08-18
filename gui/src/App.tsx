@@ -133,7 +133,16 @@ function App() {
   };
 
   const handleStartPromptSession = async (prompt: string, allocatedBudget?: number) => {
-    const newId = crypto.randomUUID();
+    let newId = "";
+    try {
+      const conn: any = await invoke('start_harness', { target: null, sessionId: null });
+      newId = conn.session_id;
+    } catch (err) {
+      console.error("Failed to start harness:", err);
+      showToast({ title: 'Error', message: `Failed to start session: ${err}`, type: 'error' });
+      return;
+    }
+
     setInitialBudget(allocatedBudget || 0);
 
     // Deduct from Office Wallet if budget is allocated
