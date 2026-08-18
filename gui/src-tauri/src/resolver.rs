@@ -90,7 +90,7 @@ pub async fn resolve_localharness() -> Result<PathBuf, String> {
     ))?;
 
     // Download and extract
-    println!("Downloading localharness {} from {}", version, download_url);
+    log::info!("Downloading localharness {} from {}", version, download_url);
     fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
     let tarball_bytes = client

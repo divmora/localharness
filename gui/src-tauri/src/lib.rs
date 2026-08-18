@@ -33,6 +33,17 @@ pub struct HarnessConnection {
     pub session_id: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct SidecarLogEvent {
+    session_id: String,
+    log: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct RustLogEvent {
+    log: String,
+}
+
 #[tauri::command]
 async fn get_installation_id(target: Option<serde_json::Value>) -> Result<String, String> {
     let mut connection_target: Option<ConnectionTarget> = None;
@@ -968,7 +979,7 @@ async fn start_harness(
                     .unwrap_or(false);
 
                 if is_alive {
-                    eprintln!("Session {} is already running at PID {}", provided_session_id, active.pid);
+                    log::error!("Session {} is already running at PID {}", provided_session_id, active.pid);
                     let needs_ws = {
                         let senders = app.state::<WsSenders>();
                         let map = senders.0.lock().unwrap();
@@ -983,7 +994,7 @@ async fn start_harness(
                         session_id: provided_session_id,
                     });
                 } else {
-                    eprintln!("Session {} PID {} is dead. Respawning.", provided_session_id, active.pid);
+                    log::error!("Session {} PID {} is dead. Respawning.", provided_session_id, active.pid);
                     let _ = state.delete_active_session(&provided_session_id);
                 }
             }
@@ -1036,14 +1047,19 @@ async fn start_harness(
         // 6. Spawn stderr background reader
         let stderr = child_proc.stderr.take().unwrap();
         let app_clone = app.clone();
+        let session_id_clone = output_cfg.session_id.clone();
         std::thread::spawn(move || {
             use std::io::{BufRead, BufReader};
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
                 if let Ok(l) = line {
-                    eprintln!("SIDECAR STDERR: {}", l);
+                    log::debug!("SIDECAR [{}]: {}", session_id_clone, l);
                     use tauri::Emitter;
-                    let _ = app_clone.emit("sidecar-log", l);
+                    let event = SidecarLogEvent {
+                        session_id: session_id_clone.clone(),
+                        log: l,
+                    };
+                    let _ = app_clone.emit("sidecar-log", event);
                 }
             }
         });
@@ -1164,7 +1180,7 @@ async fn start_harness(
     while let Some(event) = rx.recv().await {
         match event {
             CommandEvent::Stdout(data) => {
-                eprintln!("STDOUT: {:?}", String::from_utf8_lossy(&data));
+                log::error!("STDOUT: {:?}", String::from_utf8_lossy(&data));
                 stdout_buf.extend_from_slice(&data);
 
                 // Try to parse if we have at least 4 bytes
@@ -1172,7 +1188,7 @@ async fn start_harness(
                     let mut len_bytes = [0u8; 4];
                     len_bytes.copy_from_slice(&stdout_buf[0..4]);
                     let length = u32::from_le_bytes(len_bytes) as usize;
-                    eprintln!("Parsed length: {}", length);
+                    log::error!("Parsed length: {}", length);
 
                     if stdout_buf.len() >= 4 + length {
                         let payload_bytes = &stdout_buf[4..4 + length];
@@ -1200,12 +1216,17 @@ async fn start_harness(
 
                         // Keep processing stderr logs in background so sidecar's pipes aren't closed
                         let app_clone = app.clone();
+                        let session_id_clone = output_cfg.session_id.clone();
                         tauri::async_runtime::spawn(async move {
                             while let Some(event) = rx.recv().await {
                                 if let CommandEvent::Stderr(line) = event {
                                     let log_str = String::from_utf8_lossy(&line).to_string();
-                                    eprintln!("SIDECAR STDERR: {}", log_str);
-                                    let _ = app_clone.emit("sidecar-log", log_str);
+                                    log::debug!("SIDECAR STDERR: {}", log_str);
+                                    let event = SidecarLogEvent {
+                                        session_id: session_id_clone.clone(),
+                                        log: log_str,
+                                    };
+                                    let _ = app_clone.emit("sidecar-log", event);
                                 }
                             }
                         });
@@ -1222,7 +1243,7 @@ async fn start_harness(
             }
             CommandEvent::Stderr(line) => {
                 let s = String::from_utf8_lossy(&line);
-                eprintln!("SIDECAR STDERR: {}", s);
+                log::error!("SIDECAR STDERR: {}", s);
             }
             CommandEvent::Error(err) => {
                 return Err(format!("Sidecar error: {}", err));
@@ -1289,7 +1310,7 @@ async fn setup_ssh_tunnel(
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if let CommandEvent::Stderr(line) = event {
-                eprintln!("SSH TUNNEL STDERR: {}", String::from_utf8_lossy(&line));
+                log::error!("SSH TUNNEL STDERR: {}", String::from_utf8_lossy(&line));
             }
         }
     });
@@ -1307,6 +1328,26 @@ use tauri_plugin_shell::process::CommandChild;
 
 struct AppState {
     children: Mutex<Vec<CommandChild>>,
+}
+
+struct TauriLogger {
+    app_handle: tauri::AppHandle,
+}
+
+impl log::Log for TauriLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let msg = format!("[{}] {}", record.level(), record.args());
+            let _ = self.app_handle.emit("rust-log", RustLogEvent { log: msg.clone() });
+            log::error!("{}", msg);
+        }
+    }
+
+    fn flush(&self) {}
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1327,6 +1368,13 @@ pub fn run() {
         })
         .setup(|app| {
             let handle = app.handle();
+            
+            let logger = Box::new(TauriLogger { app_handle: handle.clone() });
+            log::set_boxed_logger(logger)
+                .map(|()| log::set_max_level(log::LevelFilter::Info))
+                .unwrap_or_else(|e| log::error!("Failed to initialize logger: {}", e));
+            
+            log::info!("Tauri Backend (Rust) logger initialized.");
             
             if let Some(window) = handle.get_webview_window("main") {
                 #[cfg(not(target_os = "macos"))]
@@ -1531,7 +1579,7 @@ async fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, 
                 data_opt = rx.recv() => {
                     if let Some(data) = data_opt {
                         if let Err(e) = write.send(tokio_tungstenite::tungstenite::protocol::Message::Binary(data.into())).await {
-                            eprintln!("Write loop error for {}: {}", session_id_clone, e);
+                            log::error!("Write loop error for {}: {}", session_id_clone, e);
                             break;
                         }
                     } else {
@@ -1540,7 +1588,7 @@ async fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, 
                 }
                 _ = interval.tick() => {
                     if let Err(e) = write.flush().await {
-                        eprintln!("Write loop flush error for {}: {}", session_id_clone, e);
+                        log::error!("Write loop flush error for {}: {}", session_id_clone, e);
                         break;
                     }
                 }
@@ -1567,7 +1615,7 @@ async fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, 
             }
         }
 
-        eprintln!("WebSocket proxy disconnected for {}", session_id_read);
+        log::error!("WebSocket proxy disconnected for {}", session_id_read);
         
         // Cleanup sender
         {

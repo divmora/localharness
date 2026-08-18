@@ -152,7 +152,7 @@ export function MainPage({
                 minSize={10}
                 className="relative bg-bg-secondary"
               >
-                <TerminalPanel steps={steps} />
+                <TerminalPanel steps={steps} activeSessionId={activeSessionId} />
               </Panel>
             </>
           )}

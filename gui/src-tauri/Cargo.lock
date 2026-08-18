@@ -911,6 +911,7 @@ dependencies = [
  "dirs",
  "flate2",
  "futures-util",
+ "log",
  "portable-pty",
  "prost",
  "prost-build",
