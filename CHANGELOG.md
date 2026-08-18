@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.4.0](https://github.com/divmora/localharness/compare/v1.3.0...v1.4.0) (2026-08-18)
+
+
+### Features
+
+* add dynamic agent hiring, cross-agent messaging, and dedicated Office Manager UI ([57c701d](https://github.com/divmora/localharness/commit/57c701d303f9520179580069dbc6f3eed9c04d3a))
+* add terminal toggle icon to topbar in chat mode ([9bf338a](https://github.com/divmora/localharness/commit/9bf338a4109dbccff312d262c30b8b24ed604cee))
+* **gui:** add UI state persistence, fix trajectory state input blocking ([e5947bd](https://github.com/divmora/localharness/commit/e5947bd79bbb2af2381015d82951e4876f652772))
+* implement agent capacity scaling, E2E framework, and test fixtures ([785b476](https://github.com/divmora/localharness/commit/785b476ccef4331fe59fa96954b18048171ad2fc))
+* migrate localharness to tauri event-based architecture managed by rust proxy ([cfd1e01](https://github.com/divmora/localharness/commit/cfd1e012c43a5b3aa6b9451afc68e4ff31039ffe))
+* require archiving sessions before they can be deleted ([99f9393](https://github.com/divmora/localharness/commit/99f93931c08f9ea23bdc1049e5035b8a3040a50d))
+* use backend-generated session IDs for new harnesses ([4651ba6](https://github.com/divmora/localharness/commit/4651ba6ab4b4b11ec76d723118ad643eb6d4938b))
+* validate llm endpoint name to only allow lowercase alphanumeric and internal hyphens ([783cf80](https://github.com/divmora/localharness/commit/783cf80f275b6a4e0f6d6f99e5ea21e4418455d1))
+
+
+### Bug Fixes
+
+* add delete session and save sidebar sizing ([402f193](https://github.com/divmora/localharness/commit/402f193b339a296097e3d5dabd95a40802703d20))
+* await websocket proxy connection during session startup to prevent Disconnected state ([c8fb559](https://github.com/divmora/localharness/commit/c8fb5594291c68eb5f5c51b004fc16436eaa42fc))
+* change budget exhausted error to use DC ([c177d19](https://github.com/divmora/localharness/commit/c177d1999a50b614c4fea79ee06ad5d17b298eb1))
+* explicitly add Connection and Upgrade headers to websocket requests ([aae6a26](https://github.com/divmora/localharness/commit/aae6a26264cf9c324c51819ede362e4aad4d833b))
+* filter sessions by active office and optimize e2e test caching ([f603d2c](https://github.com/divmora/localharness/commit/f603d2c33885a05da531ae02ce5beebadad4307c))
+* keep sidecar stdin open to prevent immediate EOF shutdown ([bda2644](https://github.com/divmora/localharness/commit/bda2644b9fb48c17173b51481e30eaba0fc0e630))
+* periodically flush WebSocket sink to send keepalive pongs ([a226125](https://github.com/divmora/localharness/commit/a22612544a1ab6f3dc6871b4e3dee34f0f080dc9))
+* prevent delete llm endpoint from improperly reopening edit form ([9a552fa](https://github.com/divmora/localharness/commit/9a552fa6af03d94c53fb1e9716ed791ac6f95190))
+* prevent deletion of default llm endpoint ([1dc1e17](https://github.com/divmora/localharness/commit/1dc1e1760f56af217d7fc50030578a7f620270e9))
+* prevent deletion of default llm endpoint in backend ([2d4b3bf](https://github.com/divmora/localharness/commit/2d4b3bfa6c27255176dd86abd5373631adf4179b))
+* prevent terminal state clear on toggle by hiding instead of unmounting ([05b28da](https://github.com/divmora/localharness/commit/05b28dab39607e4d49289a5133ed104233978c36))
+* rename payload to message in send_harness_message tauri command ([1dc21ee](https://github.com/divmora/localharness/commit/1dc21ee39cd474915ead26efbb3991a1b8da4adf))
+* replace window.prompt with custom react state for adding llm endpoints ([0c5671b](https://github.com/divmora/localharness/commit/0c5671beec1533a7a494182486e6ebe61ba7f9fb))
+* resolve ghost session deletion and infinite office websocket reconnection ([35cf379](https://github.com/divmora/localharness/commit/35cf3798f4a09a6d4a3cc71dd73c835a73da483a))
+* resolve react async state bug in llm endpoint deletion and defaulting ([3b3c72d](https://github.com/divmora/localharness/commit/3b3c72dc33457ccfbb251e6839b98bc240bd8788))
+* resolve xterm rendering overlap by removing container padding ([5f9182e](https://github.com/divmora/localharness/commit/5f9182e590f1bf6f1a94050327579b5af7b946fc))
+* use into_client_request to generate required WebSocket handshake headers (Sec-WebSocket-Key) ([94e7757](https://github.com/divmora/localharness/commit/94e77576d7dad397e630043c44eda7d340e0e036))
+
 ## [1.3.0](https://github.com/divmora/localharness/compare/v1.2.0...v1.3.0) (2026-08-17)
 
 
