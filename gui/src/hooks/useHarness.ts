@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import WebSocket from '@tauri-apps/plugin-websocket';
+import { listen } from '@tauri-apps/api/event';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
 import { homeDir } from '@tauri-apps/api/path';
 import { 
@@ -31,13 +31,12 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [serverReady, setServerReady] = useState(false);
-    const [socket, setSocket] = useState<WebSocket | null>(null);
     const [steps, setSteps] = useState<StepUpdate[]>([]);
     const [trajectoryState, setTrajectoryState] = useState<TrajectoryState_TrajState>(TrajectoryState_TrajState.TRAJ_UNSPECIFIED);
     const messageQueueRef = useRef<number[][]>([]);
 
     useEffect(() => {
-        let ws: WebSocket | null = null;
+        let unlisten_handle: (() => void) | null = null;
         
         // Generate a new ID if it's a manager and doesn't exist
         const targetSessionId = activeSessionId || (isManager ? crypto.randomUUID() : null);
@@ -46,7 +45,6 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             setConnected(false);
             setConnectionError(null);
             setSteps([]);
-            setSocket(null);
             setServerReady(false);
             setTrajectoryState(TrajectoryState_TrajState.TRAJ_UNSPECIFIED);
             return;
@@ -63,11 +61,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             try {
                 console.log("Requesting sidecar from Rust...");
                 try {
-                    conn = await invoke<HarnessConnection>('start_harness', { 
+                    await invoke('start_harness', { 
                         target: null,
                         sessionId: targetSessionId
                     });
-                    console.log("Got sidecar port:", conn.port);
                 } catch (err: any) {
                     if (err.toString().includes('__TAURI_INTERNALS__')) {
                         console.warn("Tauri not detected, falling back to standalone localhost:4000 (web dev mode)");
@@ -152,13 +149,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                     console.log("No previous transcript found or failed to load", e);
                 }
                 
-                ws = await WebSocket.connect(`ws://127.0.0.1:${conn.port}/`, {
-                    headers: {
-                        'x-localharness-api-key': conn.api_key,
-                        'Connection': 'Upgrade',
-                        'Upgrade': 'websocket'
-                    }
-                });
+                // WebSocket connection is now handled by Rust backend
                 
                 // Send InitRequest
                 const initReq = create(InitRequestSchema, {
@@ -287,19 +278,20 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                     }
                 });
                 
-                await ws.send({
-                    type: 'Binary',
-                    data: Array.from(toBinary(ClientMessageSchema, initClientMsg))
+                await invoke('send_harness_message', {
+                    sessionId: targetSessionId,
+                    message: Array.from(toBinary(ClientMessageSchema, initClientMsg))
                 });
                 
                 if (!activeSessionId && isManager && onSessionCreated) {
                     onSessionCreated(targetSessionId!);
                 }
                 
-                console.log(`WebSocket connected for session: ${targetSessionId}`);
+                console.log(`Connected for session: ${targetSessionId}`);
                 setConnected(true);
                 
-                ws.addListener((msg) => {
+                unlisten_handle = await listen<Uint8Array>(`harness_event_${targetSessionId}`, (event) => {
+                    const msg = { type: 'Binary', data: event.payload };
                     if (msg.type === 'Binary') {
                         const buffer = new Uint8Array(msg.data);
                         const serverMsg = fromBinary(ServerMessageSchema, buffer);
@@ -323,15 +315,9 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                 invoke('start_harness', {
                                     target: null,
                                     sessionId: childSessionId
-                                }).then(async (childConn: any) => {
+                                }).then(async (_childConn: any) => {
                                     // Initialize child and give it the task
-                                    const childWs = await WebSocket.connect(`ws://127.0.0.1:${childConn.port}/`, {
-                                        headers: { 
-                                            'x-localharness-api-key': childConn.api_key,
-                                            'Connection': 'Upgrade',
-                                            'Upgrade': 'websocket'
-                                        }
-                                    });
+                                    // Initialize child and give it the task
                                     
                                     const childInitReq = create(InitRequestSchema, {
                                         config: create(HarnessConfigSchema, {
@@ -346,19 +332,18 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                         })
                                     });
                                     
-                                    await childWs.send({
-                                        type: 'Binary',
-                                        data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "init", value: childInitReq } })))
+                                    await invoke('send_harness_message', {
+                                        sessionId: childSessionId,
+                                        message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "init", value: childInitReq } })))
                                     });
                                     
                                     // Wait a tiny bit for init to process, then send user message
                                     setTimeout(async () => {
                                         const taskMsg = create(UserMessageSchema, { content: args.task_description, conversationId: childSessionId });
-                                        await childWs.send({
-                                            type: 'Binary',
-                                            data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
+                                        await invoke('send_harness_message', {
+                                            sessionId: childSessionId,
+                                            message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
                                         });
-                                        await childWs.disconnect();
                                         
                                         // Reply to parent that the agent was hired
                                         const { ToolResultSchema } = await import('../gen/localharness/v1/localharness_pb');
@@ -390,9 +375,9 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                             toolName: "hire_agent",
                                             resultJson: JSON.stringify({ success: true, message: `Successfully hired ${args.agent_name} (${args.role_description}). Conversation ID: ${childSessionId}` })
                                         });
-                                        ws?.send({
-                                            type: 'Binary',
-                                            data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                        await invoke('send_harness_message', {
+                                            sessionId: targetSessionId!,
+                                            message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
                                         });
                                     }, 500);
                                 }).catch(err => {
@@ -404,9 +389,9 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                             resultJson: JSON.stringify({ success: false, error: err.toString() }),
                                             isError: true
                                         });
-                                        ws?.send({
-                                            type: 'Binary',
-                                            data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                        invoke('send_harness_message', {
+                                            sessionId: targetSessionId!,
+                                            message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
                                         });
                                     });
                                 });
@@ -423,7 +408,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                                 resultJson: JSON.stringify({ error: "Cannot check capacity: not in an active office." }),
                                                 isError: true
                                             });
-                                            ws?.send({ type: 'Binary', data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
+                                            invoke('send_harness_message', { sessionId: targetSessionId!, message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
                                         });
                                     });
                                 } else {
@@ -448,7 +433,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                                         employment_type: agent.employment_type
                                                     })
                                                 });
-                                                ws?.send({ type: 'Binary', data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
+                                                invoke('send_harness_message', { sessionId: targetSessionId!, message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
                                             });
                                         });
                                     }).catch(err => {
@@ -460,7 +445,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                                     resultJson: JSON.stringify({ error: err.toString() }),
                                                     isError: true
                                                 });
-                                                ws?.send({ type: 'Binary', data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
+                                                invoke('send_harness_message', { sessionId: targetSessionId!, message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } }))) });
                                             });
                                         });
                                     });
@@ -481,33 +466,27 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                     }
 
                                     // Get port from SQLite by getting the active sessions
-                                    const targetConn: any = await invoke('start_harness', { sessionId: args.conversation_id, target: null });
+                                    await invoke('start_harness', { sessionId: args.conversation_id, target: null });
                                     
-                                    const targetWs = await WebSocket.connect(`ws://127.0.0.1:${targetConn.port}/`, {
-                                        headers: { 
-                                            'x-localharness-api-key': targetConn.api_key,
-                                            'Connection': 'Upgrade',
-                                            'Upgrade': 'websocket'
-                                        }
-                                    });
+                                    
                                     
                                     // Send the message
                                     const taskMsg = create(UserMessageSchema, { content: `Message from an agent in the office:\n\n${args.message}`, conversationId: args.conversation_id });
-                                    await targetWs.send({
-                                        type: 'Binary',
-                                        data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
+                                    await invoke('send_harness_message', {
+                                        sessionId: args.conversation_id,
+                                        message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "userMessage", value: taskMsg } })))
                                     });
                                     
-                                    await targetWs.disconnect();
+                                    
                                     
                                     const res = create(ToolResultSchema, {
                                         stepId: stepIndex.toString(),
                                         toolName: "message_agent",
                                         resultJson: JSON.stringify({ success: true, message: "Message sent successfully." })
                                     });
-                                    ws?.send({
-                                        type: 'Binary',
-                                        data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                    invoke('send_harness_message', {
+                                        sessionId: targetSessionId!,
+                                        message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
                                     });
                                 }).catch(err => {
                                     console.error("Failed to message agent", err);
@@ -519,9 +498,9 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                                 resultJson: JSON.stringify({ success: false, error: err.toString() }),
                                                 isError: true
                                             });
-                                            ws?.send({
-                                                type: 'Binary',
-                                                data: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
+                                            invoke('send_harness_message', {
+                                                sessionId: targetSessionId!,
+                                                message: Array.from(toBinary(ClientMessageSchema, create(ClientMessageSchema, { payload: { case: "hostToolResult", value: res } })))
                                             });
                                         });
                                     });
@@ -543,7 +522,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                     }
                 });
                 
-                setSocket(ws);
+                
                 
             } catch (e: any) {
                 console.error("Failed to connect to harness:", e);
@@ -555,20 +534,20 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
         initHarness();
         
         return () => {
-            if (ws) ws.disconnect();
+            if (unlisten_handle) unlisten_handle();
             setConnected(false);
         };
     }, [activeSessionId]);
 
     // Flush queued messages when server is ready
     useEffect(() => {
-        if (serverReady && socket) {
+        if (serverReady && activeSessionId) {
             const flushQueue = async () => {
                 console.log("Flushing message queue, items:", messageQueueRef.current.length);
                 while (messageQueueRef.current.length > 0) {
                     const data = messageQueueRef.current.shift();
                     try {
-                        await socket.send({ type: 'Binary', data: data! });
+                        await invoke('send_harness_message', { sessionId: activeSessionId!, message: data });
                         console.log("Sent queued message successfully");
                     } catch (err) {
                         console.error("Failed to send queued message", err);
@@ -577,7 +556,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             };
             flushQueue();
         }
-    }, [serverReady, socket]);
+    }, [serverReady, activeSessionId]);
 
     const sendPrompt = useCallback(async (text: string) => {
         // Track the task assignment in our simulation backend for capacity scaling
@@ -598,14 +577,14 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
         
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
-        if (!socket || !serverReady) {
-            console.log("Queueing message - socket:", !!socket, "serverReady:", serverReady);
+        if (!serverReady || !activeSessionId) {
+            console.log("Queueing message - serverReady:", serverReady);
             messageQueueRef.current.push(data);
             return;
         }
         
-        await socket.send({ type: 'Binary', data });
-    }, [socket, serverReady, activeSessionId]);
+        await invoke('send_harness_message', { sessionId: activeSessionId!, message: data });
+    }, [serverReady, activeSessionId]);
 
     const submitQuestionResponse = useCallback(async (requestId: string, answers: any[], skipped: boolean) => {
         const qResponse = create(QuestionResponseSchema, {
@@ -623,13 +602,13 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
         
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
-        if (!socket || !serverReady) {
+        if (!serverReady || !activeSessionId) {
             messageQueueRef.current.push(data);
             return;
         }
         
-        await socket.send({ type: 'Binary', data });
-    }, [socket, serverReady]);
+        await invoke('send_harness_message', { sessionId: activeSessionId!, message: data });
+    }, [serverReady, activeSessionId]);
 
     const submitPermissionResponse = useCallback(async (requestId: string, approved: boolean, denialReason: string = "") => {
         const pResponse = create(PermissionResponseSchema, {
@@ -647,13 +626,13 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
         
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
         
-        if (!socket || !serverReady) {
+        if (!serverReady || !activeSessionId) {
             messageQueueRef.current.push(data);
             return;
         }
         
-        await socket.send({ type: 'Binary', data });
-    }, [socket, serverReady]);
+        await invoke('send_harness_message', { sessionId: activeSessionId!, message: data });
+    }, [serverReady, activeSessionId]);
 
     const interrupt = useCallback(async () => {
         const iReq = create(InterruptRequestSchema, {});
@@ -664,10 +643,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             }
         });
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
-        if (socket && serverReady) {
-            await socket.send({ type: 'Binary', data });
+        if (serverReady && activeSessionId) {
+            await invoke('send_harness_message', { sessionId: activeSessionId!, message: data });
         }
-    }, [socket, serverReady]);
+    }, [serverReady, activeSessionId]);
 
     const resume = useCallback(async (message: string = "") => {
         const rReq = create(ResumeRequestSchema, { message });
@@ -678,10 +657,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             }
         });
         const data = Array.from(toBinary(ClientMessageSchema, clientMsg));
-        if (socket && serverReady) {
-            await socket.send({ type: 'Binary', data });
+        if (serverReady && activeSessionId) {
+            await invoke('send_harness_message', { sessionId: activeSessionId!, message: data });
         }
-    }, [socket, serverReady]);
+    }, [serverReady, activeSessionId]);
 
     return { 
         connected, 
