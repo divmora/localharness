@@ -819,6 +819,8 @@ async fn list_sessions(
                                 let is_alive = std::process::Command::new("kill")
                                     .arg("-0")
                                     .arg(active.pid.to_string())
+                                    .stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null())
                                     .status()
                                     .map(|s| s.success())
                                     .unwrap_or(false);
@@ -974,6 +976,8 @@ async fn start_harness(
                 let is_alive = std::process::Command::new("kill")
                     .arg("-0")
                     .arg(active.pid.to_string())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
                     .status()
                     .map(|s| s.success())
                     .unwrap_or(false);

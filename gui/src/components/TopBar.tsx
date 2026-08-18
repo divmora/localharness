@@ -75,9 +75,9 @@ export function TopBar({
       className="flex items-center justify-between h-11 w-full bg-bg-secondary border-b border-border-primary shrink-0 select-none z-50 px-2"
     >
       {/* Left Area (Mac traffic lights space + controls) */}
-      <div className="flex items-center flex-1 h-full pointer-events-none" data-tauri-drag-region>
+      <div className="flex items-center flex-1 h-full" data-tauri-drag-region>
         {isMac && !isFullscreen && <div className="w-[75px] shrink-0" data-tauri-drag-region />}
-        <div className="flex items-center gap-2 pointer-events-auto pl-2">
+        <div className="flex items-center gap-2 pl-2">
           {/* Segmented Control */}
           <div className="flex items-center bg-bg-primary rounded-md p-0.5 border border-border-primary">
             <button 
@@ -149,8 +149,8 @@ export function TopBar({
       </div>
 
       {/* Right Area (Controls and Win/Linux Window Buttons) */}
-      <div className="flex items-center justify-end flex-1 gap-2 h-full pointer-events-none" data-tauri-drag-region>
-        <div className="flex items-center gap-3 pointer-events-auto pr-2">
+      <div className="flex items-center justify-end flex-1 gap-2 h-full" data-tauri-drag-region>
+        <div className="flex items-center gap-3 pr-2">
           
           {/* Office Switcher */}
           {currentView === 'office' && (

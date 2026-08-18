@@ -102,7 +102,8 @@ function App() {
         invoke<Record<string, string>>('get_all_office_managers')
       ]);
       const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
-      setSessions(sessionList.sessions);
+      const sortedSessions = sessionList.sessions.sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
+      setSessions(sortedSessions);
       setOffices(officesList);
       setSpaces(spacesList);
       setSessionSpaces(sessionMap);

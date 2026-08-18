@@ -12,7 +12,7 @@ interface TerminalPanelProps {
   activeSessionId?: string | null;
 }
 
-type OutputSourceType = 'agent' | 'rust' | 'go';
+type OutputSourceType = 'agent' | 'rust' | 'go' | 'react';
 
 interface OutputSource {
   id: string;
@@ -43,6 +43,7 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
   const [outputSources, setOutputSources] = useState<OutputSource[]>([
     { id: 'agent', type: 'agent', label: 'Agent Commands' },
     { id: 'rust', type: 'rust', label: 'Tauri Backend (Rust)' },
+    { id: 'react', type: 'react', label: 'React App (Frontend)' },
   ]);
   const [activeOutputId, setActiveOutputId] = useState<string>('agent');
 
@@ -62,6 +63,47 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
       }
     }
   }, [activeSessionId]);
+
+  useEffect(() => {
+    const originalConsoleLog = console.log;
+    const originalConsoleWarn = console.warn;
+    const originalConsoleError = console.error;
+
+    const logToTerminal = (level: string, ...args: any[]) => {
+      const term = outputTerminalsRef.current.get('react');
+      if (term) {
+        const msg = args.map(a => {
+          if (a instanceof Error) return a.stack || a.message;
+          return typeof a === 'object' ? JSON.stringify(a) : String(a);
+        }).join(' ');
+        
+        let color = '\x1b[0m'; // default
+        if (level === 'WARN') color = '\x1b[33m'; // yellow
+        if (level === 'ERROR') color = '\x1b[31m'; // red
+        
+        term.writeln(`${color}[${level}]\x1b[0m ${msg}`);
+      }
+    };
+
+    console.log = (...args) => {
+      originalConsoleLog(...args);
+      logToTerminal('INFO', ...args);
+    };
+    console.warn = (...args) => {
+      originalConsoleWarn(...args);
+      logToTerminal('WARN', ...args);
+    };
+    console.error = (...args) => {
+      originalConsoleError(...args);
+      logToTerminal('ERROR', ...args);
+    };
+
+    return () => {
+      console.log = originalConsoleLog;
+      console.warn = originalConsoleWarn;
+      console.error = originalConsoleError;
+    };
+  }, []);
 
   const initOutputTerminal = (id: string, el: HTMLDivElement | null) => {
     if (!el || outputTerminalsRef.current.has(id)) return;
@@ -92,6 +134,8 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
       term.writeln('\x1b[1;34m$ \x1b[0m local-harness agent output ready.');
     } else if (id === 'rust') {
       term.writeln('\x1b[1;34m$ \x1b[0m Tauri Backend (Rust) log capture active.');
+    } else if (id === 'react') {
+      term.writeln('\x1b[1;34m$ \x1b[0m React App Console captured.');
     } else {
       term.writeln(`\x1b[1;34m$ \x1b[0m Local Harness (Go) connected.`);
     }
