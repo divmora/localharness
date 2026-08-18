@@ -965,6 +965,14 @@ async fn start_harness(
 
             if is_alive {
                 eprintln!("Session {} is already running at PID {}", session_id, active.pid);
+                let needs_ws = {
+                    let senders = app.state::<WsSenders>();
+                    let map = senders.0.lock().unwrap();
+                    !map.contains_key(&session_id)
+                };
+                if needs_ws {
+                    connect_and_proxy_websocket(app.clone(), session_id.clone(), active.port as u16, active.api_key.clone()).await?;
+                }
                 return Ok(HarnessConnection {
                     port: active.port as i32,
                     api_key: active.api_key,
@@ -1043,8 +1051,8 @@ async fn start_harness(
         };
         let _ = state.set_active_session(&active);
 
-        // 8. Connect to the Sidecar WebSocket in the background
-        connect_and_proxy_websocket(app.clone(), session_id.clone(), output_cfg.port as u16, output_cfg.api_key.clone());
+        // 8. Connect to the Sidecar WebSocket
+        connect_and_proxy_websocket(app.clone(), session_id.clone(), output_cfg.port as u16, output_cfg.api_key.clone()).await?;
 
         return Ok(HarnessConnection {
             port: output_cfg.port,
@@ -1192,6 +1200,8 @@ async fn start_harness(
                                 }
                             }
                         });
+
+                        connect_and_proxy_websocket(app.clone(), session_id.clone(), local_port as u16, output_cfg.api_key.clone()).await?;
 
                         return Ok(HarnessConnection {
                             port: local_port,
@@ -1465,58 +1475,65 @@ async fn send_harness_message(
     }
 }
 
-fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, port: u16, api_key: String) {
-    tauri::async_runtime::spawn(async move {
-        let ws_url = format!("ws://127.0.0.1:{}/ws", port);
-        
-        // Ensure ws_url is a valid url::Url
-        let mut request = match tokio_tungstenite::tungstenite::handshake::client::Request::builder().uri(ws_url).body(()) {
-            Ok(req) => req,
-            Err(e) => {
-                eprintln!("Invalid WebSocket URL for {}: {}", session_id, e);
-                return;
-            }
-        };
-
-        request.headers_mut().insert("x-localharness-api-key", api_key.parse().unwrap());
-        
-        let ws_stream = match connect_async(request).await {
-            Ok((stream, _)) => stream,
-            Err(e) => {
-                eprintln!("Failed to connect WebSocket for {}: {}", session_id, e);
-                return;
-            }
-        };
-
-        let (mut write, mut read) = ws_stream.split();
-        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
-
-        // Store the sender in Tauri state
-        {
-            let senders = app.state::<WsSenders>();
-            let mut map = senders.0.lock().unwrap();
-            map.insert(session_id.clone(), tx);
+async fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, port: u16, api_key: String) -> Result<(), String> {
+    let ws_url = format!("ws://127.0.0.1:{}/ws", port);
+    
+    // Ensure ws_url is a valid url::Url
+    let mut request = match tokio_tungstenite::tungstenite::handshake::client::Request::builder().uri(ws_url).body(()) {
+        Ok(req) => req,
+        Err(e) => {
+            return Err(format!("Invalid WebSocket URL for {}: {}", session_id, e));
         }
+    };
 
-        // Write loop: reads from MPSC channel and writes to WebSocket
-        let session_id_clone = session_id.clone();
-        tauri::async_runtime::spawn(async move {
-            while let Some(data) = rx.recv().await {
-                if let Err(e) = write.send(WsMessage::Binary(data.into())).await {
-                    eprintln!("Write loop error for {}: {}", session_id_clone, e);
-                    break;
+    request.headers_mut().insert("x-localharness-api-key", api_key.parse().unwrap());
+    
+    let mut retries = 0;
+    let ws_stream = loop {
+        match connect_async(request.clone()).await {
+            Ok((stream, _)) => break stream,
+            Err(e) => {
+                if retries >= 10 {
+                    return Err(format!("Failed to connect WebSocket for {}: {}", session_id, e));
                 }
+                retries += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
-            let _ = write.close().await;
-        });
+        }
+    };
 
-        // Read loop: reads from WebSocket and emits Tauri events
-        use tauri::Emitter;
-        let event_name = format!("harness_event_{}", session_id);
+    let (mut write, mut read) = ws_stream.split();
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(100);
+
+    // Store the sender in Tauri state
+    {
+        let senders = app.state::<WsSenders>();
+        let mut map = senders.0.lock().unwrap();
+        map.insert(session_id.clone(), tx);
+    }
+
+    // Write loop: reads from MPSC channel and writes to WebSocket
+    let session_id_clone = session_id.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(data) = rx.recv().await {
+            if let Err(e) = write.send(WsMessage::Binary(data.into())).await {
+                eprintln!("Write loop error for {}: {}", session_id_clone, e);
+                break;
+            }
+        }
+        let _ = write.close().await;
+    });
+
+    // Read loop: reads from WebSocket and emits Tauri events
+    use tauri::Emitter;
+    let event_name = format!("harness_event_{}", session_id);
+    let session_id_read = session_id.clone();
+    let app_read = app.clone();
+    tauri::async_runtime::spawn(async move {
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(WsMessage::Binary(data)) => {
-                    let _ = app.emit(&event_name, data.to_vec());
+                    let _ = app_read.emit(&event_name, data.to_vec());
                 }
                 Ok(WsMessage::Close(_)) | Err(_) => {
                     break; // Connection closed
@@ -1525,15 +1542,17 @@ fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, port: 
             }
         }
 
-        eprintln!("WebSocket proxy disconnected for {}", session_id);
+        eprintln!("WebSocket proxy disconnected for {}", session_id_read);
         
         // Cleanup sender
         {
-            let senders = app.state::<WsSenders>();
+            let senders = app_read.state::<WsSenders>();
             let mut map = senders.0.lock().unwrap();
-            map.remove(&session_id);
+            map.remove(&session_id_read);
         }
     });
+
+    Ok(())
 }
 
 
