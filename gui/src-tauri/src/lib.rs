@@ -1449,7 +1449,7 @@ async fn unarchive_session(state: tauri::State<'_, db::DbState>, session_id: Str
 #[tauri::command]
 async fn send_harness_message(
     session_id: String,
-    payload: Vec<u8>,
+    message: Vec<u8>,
     senders: tauri::State<'_, WsSenders>,
 ) -> Result<(), String> {
     let sender = {
@@ -1458,7 +1458,7 @@ async fn send_harness_message(
     };
 
     if let Some(sender) = sender {
-        sender.send(payload).await.map_err(|e| format!("Failed to send message: {}", e))?;
+        sender.send(message).await.map_err(|e| format!("Failed to send message: {}", e))?;
         Ok(())
     } else {
         Err(format!("No active WebSocket connection for session {}", session_id))
