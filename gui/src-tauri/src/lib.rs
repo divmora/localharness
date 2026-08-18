@@ -1515,10 +1515,26 @@ async fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, 
     // Write loop: reads from MPSC channel and writes to WebSocket
     let session_id_clone = session_id.clone();
     tauri::async_runtime::spawn(async move {
-        while let Some(data) = rx.recv().await {
-            if let Err(e) = write.send(WsMessage::Binary(data.into())).await {
-                eprintln!("Write loop error for {}: {}", session_id_clone, e);
-                break;
+        use futures_util::SinkExt;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        loop {
+            tokio::select! {
+                data_opt = rx.recv() => {
+                    if let Some(data) = data_opt {
+                        if let Err(e) = write.send(tokio_tungstenite::tungstenite::protocol::Message::Binary(data.into())).await {
+                            eprintln!("Write loop error for {}: {}", session_id_clone, e);
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                _ = interval.tick() => {
+                    if let Err(e) = write.flush().await {
+                        eprintln!("Write loop flush error for {}: {}", session_id_clone, e);
+                        break;
+                    }
+                }
             }
         }
         let _ = write.close().await;
