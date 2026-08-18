@@ -1477,9 +1477,8 @@ async fn send_harness_message(
 
 async fn connect_and_proxy_websocket(app: tauri::AppHandle, session_id: String, port: u16, api_key: String) -> Result<(), String> {
     let ws_url = format!("ws://127.0.0.1:{}/ws", port);
-    
-    // Ensure ws_url is a valid url::Url
-    let mut request = match tokio_tungstenite::tungstenite::handshake::client::Request::builder().uri(ws_url).body(()) {
+    // Ensure ws_url is a valid request with all WebSocket headers
+    let mut request = match tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url.clone()) {
         Ok(req) => req,
         Err(e) => {
             return Err(format!("Invalid WebSocket URL for {}: {}", session_id, e));
