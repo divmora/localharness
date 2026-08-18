@@ -1347,7 +1347,7 @@ impl log::Log for TauriLogger {
         if self.enabled(record.metadata()) {
             let msg = format!("[{}] {}", record.level(), record.args());
             let _ = self.app_handle.emit("rust-log", RustLogEvent { log: msg.clone() });
-            log::error!("{}", msg);
+            eprintln!("{}", msg);
         }
     }
 
