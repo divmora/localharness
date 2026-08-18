@@ -324,6 +324,7 @@ function App() {
               onOpenCustomizations={() => setCurrentView('customizations')}
               onOpenSessionsManager={() => setCurrentView('sessions')}
               onSubmitPrompt={handleStartPromptSession}
+              onSendPrompt={sendPrompt}
               onSubmitQuestionResponse={submitQuestionResponse}
               onSubmitPermissionResponse={submitPermissionResponse}
               onSelectWorkspace={setWorkspace}

@@ -25,6 +25,7 @@ interface MainPageProps {
   onOpenCustomizations: () => void;
   onOpenSessionsManager: () => void;
   onSubmitPrompt: (prompt: string, allocatedBudget?: number) => void;
+  onSendPrompt: (prompt: string) => void;
   onSubmitQuestionResponse: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse: (requestId: string, approved: boolean, reason?: string) => void;
   onSelectWorkspace: (path: string) => void;
@@ -52,6 +53,7 @@ export function MainPage({
   onOpenCustomizations,
   onOpenSessionsManager,
   onSubmitPrompt,
+  onSendPrompt,
   onSubmitQuestionResponse,
   onSubmitPermissionResponse,
   onSelectWorkspace,
@@ -114,7 +116,7 @@ export function MainPage({
                     trajectoryState={trajectoryState}
                     onInterrupt={onInterrupt}
                     onResume={onResume}
-                    onSend={onSubmitPrompt}
+                    onSend={onSendPrompt}
                     onSubmitQuestionResponse={onSubmitQuestionResponse}
                     onSubmitPermissionResponse={onSubmitPermissionResponse}
                   />
@@ -138,17 +140,17 @@ export function MainPage({
             </PanelGroup>
           </Panel>
 
-          {activeSessionId && (
+          {activeSessionId && showTerminal && (
             <>
               <PanelResizeHandle
-                className={`h-[1px] bg-border-primary transition-colors hover:opacity-80 ${!showTerminal ? 'hidden' : ''}`}
+                className="h-[1px] bg-border-primary transition-colors hover:opacity-80"
               />
 
               {/* Bottom Section: Terminal */}
               <Panel
                 defaultSize={30}
                 minSize={10}
-                className={`relative bg-bg-secondary ${!showTerminal ? 'hidden' : ''}`}
+                className="relative bg-bg-secondary"
               >
                 <TerminalPanel steps={steps} />
               </Panel>
