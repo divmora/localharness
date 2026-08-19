@@ -8,7 +8,7 @@ import (
 )
 
 // TokenGuard is a PostTurnMiddleware and StepMiddleware that tracks cumulative
-// token usage and enforces budget limits with configurable warning thresholds.
+// token usage and enforces limits with configurable warning thresholds.
 //
 // When the cumulative token count exceeds a warning threshold, a warning is
 // logged. When it exceeds the hard limit, PostTurn returns an error and
@@ -21,7 +21,7 @@ import (
 //
 //	// Later: check usage
 //	fmt.Println(guard.TotalTokens())     // cumulative tokens used
-//	fmt.Println(guard.BudgetExhausted()) // true if over limit
+//	fmt.Println(guard.LimitExhausted()) // true if over limit
 type TokenGuard struct {
 	maxTokens     int
 	warnThreshold float64 // fraction (0.0-1.0) at which to warn
@@ -33,7 +33,7 @@ type TokenGuard struct {
 	exhausted   bool
 }
 
-// NewTokenGuard creates a token budget middleware.
+// NewTokenGuard creates a token limit middleware.
 //
 // Parameters:
 //   - maxTokens: hard limit on cumulative tokens. 0 = unlimited (guard only logs).
@@ -58,13 +58,13 @@ func NewTokenGuard(maxTokens int, warnThreshold float64, logger *slog.Logger) *T
 
 func (t *TokenGuard) Name() string { return "token_guard" }
 
-// PreTurn rejects turns if the token budget is exhausted.
+// PreTurn rejects turns if the token limit is exhausted.
 func (t *TokenGuard) PreTurn(ctx context.Context, req *TurnRequest) (*TurnRequest, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.exhausted {
-		return nil, fmt.Errorf("token budget exhausted: %d / %d tokens used", t.totalTokens, t.maxTokens)
+		return nil, fmt.Errorf("token limit exhausted: %d / %d tokens used", t.totalTokens, t.maxTokens)
 	}
 
 	return req, nil
@@ -96,7 +96,7 @@ func (t *TokenGuard) PostTurn(ctx context.Context, resp *TurnResponse) (*TurnRes
 	// Check warning threshold
 	if !t.warned && t.warnThreshold > 0 && usage >= t.warnThreshold {
 		t.warned = true
-		t.logger.Warn("token budget warning threshold reached",
+		t.logger.Warn("token limit warning threshold reached",
 			"cumulative", t.totalTokens,
 			"max", t.maxTokens,
 			"usage_pct", fmt.Sprintf("%.1f%%", usage*100),
@@ -107,13 +107,13 @@ func (t *TokenGuard) PostTurn(ctx context.Context, resp *TurnResponse) (*TurnRes
 	// Check hard limit
 	if t.totalTokens >= t.maxTokens {
 		t.exhausted = true
-		t.logger.Error("token budget exhausted",
+		t.logger.Error("token limit exhausted",
 			"cumulative", t.totalTokens,
 			"max", t.maxTokens,
 		)
 		// Don't return an error here — let this turn's response through.
 		// The NEXT PreTurn will reject.
-		resp.Metadata["token_budget_exhausted"] = true
+		resp.Metadata["token_limit_exhausted"] = true
 	}
 
 	return resp, nil
@@ -126,8 +126,8 @@ func (t *TokenGuard) TotalTokens() int {
 	return t.totalTokens
 }
 
-// BudgetExhausted returns true if the token budget has been exceeded.
-func (t *TokenGuard) BudgetExhausted() bool {
+// LimitExhausted returns true if the token limit has been exceeded.
+func (t *TokenGuard) LimitExhausted() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.exhausted

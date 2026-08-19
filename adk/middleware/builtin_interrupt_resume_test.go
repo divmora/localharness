@@ -86,7 +86,7 @@ func TestInterruptResume_BuildResumePrompt(t *testing.T) {
 	cp := TurnCheckpoint{
 		Prompt:          "Fix the bug in auth.go",
 		PartialResponse: "I found the issue in line 42",
-		Reason:          InterruptBudget,
+		Reason:          InterruptLimit,
 	}
 
 	prompt := ir.BuildResumePrompt(cp)
@@ -96,7 +96,7 @@ func TestInterruptResume_BuildResumePrompt(t *testing.T) {
 	if !strings.Contains(prompt, "I found the issue in line 42") {
 		t.Fatal("expected partial response in resume")
 	}
-	if !strings.Contains(prompt, "budget") {
+	if !strings.Contains(prompt, "limit") {
 		t.Fatal("expected reason in resume")
 	}
 }
@@ -216,7 +216,7 @@ func TestInterruptResume_MultipleInterrupts(t *testing.T) {
 
 	// Turn 2
 	ir.PreTurn(context.Background(), &TurnRequest{Prompt: "task 2", Metadata: make(map[string]any)})
-	cp2 := ir.Interrupt(InterruptBudget, "second")
+	cp2 := ir.Interrupt(InterruptLimit, "second")
 
 	if cp1.Prompt != "task 1" || cp2.Prompt != "task 2" {
 		t.Fatal("each interrupt should capture its turn's prompt")

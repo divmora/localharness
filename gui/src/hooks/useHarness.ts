@@ -28,7 +28,7 @@ interface HarnessConnection {
     session_id?: string;
 }
 
-export function useHarness(activeSessionId: string | null, workspacePath?: string | null, initialBudget?: number, isManager: boolean = false, onSessionCreated?: (sessionId: string) => void, activeOfficeId?: string | null) {
+export function useHarness(activeSessionId: string | null, workspacePath?: string | null, isManager: boolean = false, onSessionCreated?: (sessionId: string) => void, activeOfficeId?: string | null) {
     const [connected, setConnected] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [serverReady, setServerReady] = useState(false);
@@ -202,7 +202,6 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                 corpusName: ""
                             }
                         ],
-                        initialBudget: initialBudget || 0,
                         systemInstructions: undefined, // Handled below after we fetch agent traits
                         builtinTools: {
                             viewFile: true,
@@ -368,7 +367,6 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                                 { directory: workspacePath || await homeDir(), name: "Project", corpusName: "" },
                                                 { directory: await join(await homeDir(), `.divmora/localharness/offices/${activeOfficeId}/agents/${childSessionId}`), name: "Private Scratch", corpusName: "" }
                                             ],
-                                            initialBudget: initialBudget || 0,
                                             systemInstructions: `You are a specialized agent: ${args.agent_name} (${args.role_description}).\n\nYour demographic profile is a ${args.experience_level} ${args.gender} on a ${args.employment_type} contract.\nYour personality traits are: ${args.personality_traits || 'Neutral'}.\n\nYou have been hired by a Manager agent to complete a specific task or act as a peer. Do not communicate with the user, but instead complete the task to the best of your ability. When you need to talk to the Manager or other peers, use the 'message_agent' tool. If you are idle and have no tasks, you may periodically use the 'message_agent' tool to chit-chat with other agents in the office.`,
                                             builtinTools: {
                                                 viewFile: true, createFile: true, editFile: true, listDir: true, searchDir: true, findFile: true, runCommand: true, finish: true, schedule: true

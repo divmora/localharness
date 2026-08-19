@@ -371,9 +371,7 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		}
 		s.logger.Info("created new conversation", "id", s.conv.ID)
 
-		if cfg.InitialBudget > 0 {
-			s.conv.AllocateBudget(cfg.InitialBudget)
-		}
+
 	}
 
 	// Allow only the brain and knowledge subdirectories so agents can write

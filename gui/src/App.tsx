@@ -30,38 +30,36 @@ export interface Space {
 export interface Office {
   id: string;
   name: string;
+  country?: string;
   workspace_path?: string;
 }
 
-import { usePixelPanelSizes } from './hooks/usePixelSize';
 
 function App() {
-  const sidebarSizes = usePixelPanelSizes(250, 400, 250);
   const navigate = useNavigate();
   const location = useLocation();
   const officeMatch = useMatch('/office/:officeId/*');
   const [lastOfficeId, setLastOfficeId] = usePersistentState<string>('ui.lastOfficeId', 'default');
-  
+
   const activeOfficeId = officeMatch?.params.officeId || lastOfficeId;
-  
+
   useEffect(() => {
     if (officeMatch?.params.officeId) {
       setLastOfficeId(officeMatch.params.officeId);
     }
   }, [officeMatch?.params.officeId, setLastOfficeId]);
-  
+
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [initialBudget, setInitialBudget] = useState<number>(0);
   const [workspace, setWorkspace] = usePersistentState<string | null>('ui.workspace', null);
-  
+
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [sessionSpaces, setSessionSpaces] = useState<Record<string, string>>({});
   const [officeManagers, setOfficeManagers] = useState<Record<string, string>>({});
   const [installationId, setInstallationId] = useState<string | null>(null);
-  
+
   const [offices, setOffices] = useState<Office[]>([]);
-  
+
   // Persist the last route so the app remembers where you left off
   const [lastRoute, setLastRoute] = usePersistentState<string>('ui.lastRoute', '/');
   const [hasRestoredRoute, setHasRestoredRoute] = useState(false);
@@ -76,15 +74,15 @@ function App() {
       setLastRoute(location.pathname);
     }
   }, [location.pathname, hasRestoredRoute, lastRoute, navigate, setLastRoute]);
-  
+
   // Modal states
   const [officePromptState, setOfficePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
   const [spacePromptState, setSpacePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
   const [deleteConfirmState, setDeleteConfirmState] = useState<{ isOpen: boolean, sessionId?: string }>({ isOpen: false });
 
   const { showToast } = useToast();
-  
-  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, initialBudget, false);
+
+  const { connected, connectionError, steps, trajectoryState, sendPrompt, submitQuestionResponse, submitPermissionResponse, interrupt, resume } = useHarness(activeSessionId, workspace, false);
 
   const [showAgentSidebar, setShowAgentSidebar] = usePersistentState('ui.showAgentSidebar', true);
   const [showTerminal, setShowTerminal] = usePersistentState('ui.showTerminal', true);
@@ -146,7 +144,7 @@ function App() {
       const [result, officesList, spacesList, sessionMap, managerMap, archivedIds] = await Promise.all([
         invoke<number[]>('list_sessions', { target: null }),
         invoke<Office[]>('get_offices'),
-        invoke<Space[]>('get_spaces', { 
+        invoke<Space[]>('get_spaces', {
           installationId: iid,
           officeId: activeOfficeId
         }),
@@ -161,7 +159,7 @@ function App() {
       setOffices(officesList);
       setSpaces(spacesList);
       setSessionSpaces(sessionMap);
-      
+
       // Filter out office managers that point to deleted or archived sessions
       const activeSessionIds = new Set(activeSessions.map(s => s.id));
       const validManagerMap: Record<string, string> = {};
@@ -178,7 +176,7 @@ function App() {
 
   useEffect(() => {
     loadSessions();
-    
+
     const interval = setInterval(() => {
       if (!activeSessionId) {
         loadSessions();
@@ -196,41 +194,15 @@ function App() {
     navigate('/');
   };
 
-  const handleStartPromptSession = async (prompt: string, allocatedBudget?: number) => {
-    let newId = "";
+  const handleStartPromptSession = async (prompt: string) => {
     try {
-      const conn: any = await invoke('start_harness', { target: null, sessionId: null });
-      newId = conn.session_id;
+      const conn: any = await invoke('start_harness', { target: prompt, sessionId: null, workspacePath: workspace || null });
+      setActiveSessionId(conn.session_id);
+      loadSessions();
     } catch (err) {
       console.error("Failed to start harness:", err);
       showToast({ title: 'Error', message: `Failed to start session: ${err}`, type: 'error' });
-      return;
     }
-
-    setInitialBudget(allocatedBudget || 0);
-
-    // Deduct from Office Wallet if budget is allocated
-    if (allocatedBudget && allocatedBudget > 0) {
-      try {
-        await invoke('add_wallet_balance', { officeId: activeOfficeId, amount: -allocatedBudget });
-      } catch (e) {
-        console.error("Failed to deduct budget from office wallet:", e);
-      }
-    }
-
-    setSessions(prev => [{
-      id: newId,
-      name: 'New Session',
-      status: 0,
-      createdAt: BigInt(Date.now()),
-      updatedAt: BigInt(Date.now()),
-      workspace: workspace || '',
-      budgetAllocated: allocatedBudget || 0,
-      budgetSpent: 0
-    } as any, ...prev]);
-
-    setActiveSessionId(newId);
-    sendPrompt(prompt);
   };
 
   const handleCreateOffice = () => {
@@ -258,7 +230,7 @@ function App() {
     try {
       const targetOffice = offices.find(o => o.id === id);
       const name = targetOffice ? targetOffice.name : "Office";
-      
+
       await invoke('spawn_or_focus_office', { id, name });
     } catch (e) {
       console.error("Failed to spawn new window:", e);
@@ -286,7 +258,7 @@ function App() {
     const sessionId = deleteConfirmState.sessionId;
     setDeleteConfirmState({ isOpen: false });
     if (!sessionId) return;
-    
+
     try {
       await invoke('delete_session', { sessionId, target: null });
       if (activeSessionId === sessionId) {
@@ -320,7 +292,7 @@ function App() {
         setActiveSessionId(null);
       }
       const [spacesList] = await Promise.all([
-        invoke<Space[]>('get_spaces', { 
+        invoke<Space[]>('get_spaces', {
           installationId: installationId,
           officeId: activeOfficeId
         })
@@ -363,7 +335,7 @@ function App() {
   return (
     <>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
-        <TopBar 
+        <TopBar
           offices={offices}
           activeOfficeId={activeOfficeId}
           onSelectOffice={handleSelectOffice}
@@ -382,12 +354,12 @@ function App() {
             <Route path="/customizations" element={
               <CustomizationsPage onClose={() => navigate(-1)} />
             } />
-            
+
             <Route path="/sessions" element={
               <PanelGroup id="sessions-layout" orientation="horizontal" className="flex-1 overflow-hidden">
                 {showAgentSidebar && (
                   <>
-                    <Panel defaultSize={sidebarSizes.defaultSize} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
+                    <Panel defaultSize="20" minSize="15" maxSize="30" className="flex flex-col">
                       <AgentSidebar
                         activeSessionId={activeSessionId}
                         onSelectSession={handleSelectSession}
@@ -416,7 +388,7 @@ function App() {
             } />
 
             <Route path="/office/:officeId/settings" element={
-              <OfficeSettingsPage 
+              <OfficeSettingsPage
                 officeId={activeOfficeId}
                 onClose={() => navigate(`/office/${activeOfficeId}`)}
                 onOfficeUpdated={() => {
@@ -428,13 +400,13 @@ function App() {
                 }}
               />
             } />
-            
+
             <Route path="/office/:officeId/*" element={
               (() => {
                 const activeOffice = offices.find(o => o.id === activeOfficeId);
                 return (
-                  <OfficeView 
-                    sessions={filteredSessions} 
+                  <OfficeView
+                    sessions={filteredSessions}
                     onSelectSession={handleSelectSession}
                     spaces={spaces}
                     sessionSpaces={sessionSpaces}
@@ -442,6 +414,7 @@ function App() {
                     managerSessionId={officeManagers[activeOfficeId]}
                     onManagerCreated={(sessionId) => handleManagerCreated(sessionId, activeOfficeId)}
                     workspacePath={activeOffice?.workspace_path || null}
+                    onRefreshSessions={loadSessions}
                   />
                 );
               })()

@@ -15,8 +15,8 @@ const (
 	// InterruptUser indicates the user requested an interrupt.
 	InterruptUser InterruptReason = "user"
 
-	// InterruptBudget indicates a token budget was exceeded.
-	InterruptBudget InterruptReason = "budget"
+	// InterruptLimit indicates a token limit was exceeded.
+	InterruptLimit InterruptReason = "limit"
 
 	// InterruptTimeout indicates a turn exceeded the time limit.
 	InterruptTimeout InterruptReason = "timeout"
@@ -75,7 +75,7 @@ type InterruptResumeConfig struct {
 }
 
 // InterruptResume is a middleware that enables stateless interrupt and resume
-// at turn boundaries. When a turn is interrupted (by user, budget, or timeout),
+// at turn boundaries. When a turn is interrupted (by user, limit, or timeout),
 // it saves a checkpoint that can be used to construct a resume prompt.
 //
 // This implements the "stateless approach" — no engine state serialization.
@@ -185,7 +185,7 @@ func (ir *InterruptResume) ProcessStep(ctx context.Context, event *StepEvent) (*
 }
 
 // Interrupt manually creates a checkpoint at the current point.
-// Call this from a user cancellation handler or budget exceeded hook.
+// Call this from a user cancellation handler or limit exceeded hook.
 func (ir *InterruptResume) Interrupt(reason InterruptReason, detail string) TurnCheckpoint {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()

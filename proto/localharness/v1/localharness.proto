@@ -142,8 +142,6 @@ message SessionInfo {
   SessionStatus status = 4;
   string workspace = 5;
   string client_source = 6;
-  double budget_allocated = 7;
-  double budget_spent = 8;
 }
 
 message SessionList {
@@ -539,7 +537,6 @@ message SubagentInvocation {
   string role = 2;         // 2-5 word job title (e.g. "Codebase Researcher")
   string prompt = 3;       // Task description for the subagent
   string workspace = 4;    // Workspace mode: "inherit" (default), "branch", "share"
-  double allocated_budget = 5; // The budget given by the manager
 }
 
 // SubagentLaunchResult reports a successfully launched subagent.
@@ -673,9 +670,6 @@ message HarnessConfig {
   int32 max_subagent_depth = 14;    // Max nesting depth (default: 3, 0 = disabled)
   int32 max_concurrent_subagents = 15; // Max concurrent children (default: 5)
   string client_source = 27;
-
-  // Initial budget to allocate to the session (in DC)
-  double initial_budget = 30;
 
   // Per-tool configuration (Phase 2)
   ToolConfigs tool_configs = 12;
@@ -1058,10 +1052,6 @@ message ConversationState {
   string agent_role = 13;              // Human-readable role: "developer", "reviewer"
   string agent_type_name = 14;         // Type name: "research", "self", custom
   int32  agent_depth = 15;             // 0 = root, 1 = child, 2 = grandchild, etc.
-
-  // Economics
-  double budget_allocated = 16;
-  double budget_spent = 17;
 
   // Conversation status
   ConversationStatus status = 10;

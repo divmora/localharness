@@ -533,14 +533,6 @@ drained:
 			// Not paused
 		}
 
-		// Budget Check
-		if e.conv != nil && e.conv.State.BudgetAllocated > 0 {
-			if e.conv.State.BudgetSpent >= e.conv.State.BudgetAllocated {
-				e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
-				return fmt.Errorf("budget exhausted: spent %.2f / %.2f DC", e.conv.State.BudgetSpent, e.conv.State.BudgetAllocated)
-			}
-		}
-
 		e.logger.Info("agentic turn", "turn", turn, "history_len", len(e.history))
 
 		// Pre-compaction: reduce redundant tool results (zero-cost, no LLM call)
@@ -859,9 +851,6 @@ func (e *Engine) handleFinalResponse(resp *llm.GenerateResponse) error {
 
 	if e.conv != nil {
 		e.conv.AddUsage(step.Usage)
-		// Burn rate: $0.01 per 1000 tokens
-		cost := float64(step.Usage.TotalTokens) * 0.00001
-		e.conv.AddSpend(cost)
 	}
 
 	e.emitStep(step)
@@ -904,9 +893,6 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 
 	if e.conv != nil {
 		e.conv.AddUsage(toolUsage)
-		// Burn rate: $0.01 per 1000 tokens
-		cost := float64(toolUsage.TotalTokens) * 0.00001
-		e.conv.AddSpend(cost)
 	}
 
 	e.emitStep(step)

@@ -211,7 +211,7 @@ func main() {
 See the [Examples](examples/) folder for advanced SDK usage patterns:
 - **[Policy Enforcement](examples/adk-policy/)**: Declarative safety rules.
 - **[Safe Defaults](examples/adk-safe-agent/)**: Read-only access with write approval confirmation handlers.
-- **[Logging & Token Budget](examples/adk-budget-logging/)**: Configuring custom `slog.Logger`, toggling `Verbose` debug logs, and setting a session-level `MaxTotalTokens` budget.
+- **[Logging & Token Limits](examples/adk-logging/)**: Configuring custom `slog.Logger`, toggling `Verbose` debug logs, and setting a session-level `MaxTotalTokens` limit.
 
 Detailed architectural specifications can be found in [docs/architecture.md](docs/architecture.md).
 

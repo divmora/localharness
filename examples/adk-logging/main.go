@@ -1,9 +1,9 @@
-// Example: Go ADK usage with Custom Logging and Token Budgets.
+// Example: Go ADK usage with Custom Logging and Token Limits.
 //
 // Demonstrates how to:
 //  1. Enable verbose debug logging.
 //  2. Pass a custom slog.Logger to control where logs go.
-//  3. Configure a maximum session-level token budget limit safety guardrail.
+//  3. Configure a maximum session-level token limit safety guardrail.
 //
 // Prerequisites:
 //   - LITELLM_API_KEY environment variable set
@@ -11,7 +11,7 @@
 //
 // Usage:
 //
-//	go run ./examples/adk-budget-logging/main.go
+//	go run ./examples/adk-logging/main.go
 package main
 
 import (

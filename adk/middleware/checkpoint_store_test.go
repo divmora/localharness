@@ -65,7 +65,7 @@ func TestCheckpointStore_LoadByTurn(t *testing.T) {
 	store.Save(TurnCheckpoint{
 		TurnIndex: 2,
 		Prompt:    "task 2",
-		Reason:    InterruptBudget,
+		Reason:    InterruptLimit,
 		Timestamp: time.Now(),
 	})
 

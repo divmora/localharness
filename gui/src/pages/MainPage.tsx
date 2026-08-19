@@ -6,7 +6,6 @@ import { TerminalPanel } from '../components/TerminalPanel';
 import { SessionInfo as ProtoSessionInfo, StepUpdate, TrajectoryState_TrajState } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
 import { CenteredEmptyState } from '../components/CenteredEmptyState';
-import { usePixelPanelSizes } from '../hooks/usePixelSize';
 
 interface MainPageProps {
   activeSessionId: string | null;
@@ -25,7 +24,7 @@ interface MainPageProps {
   onMoveSessionToSpace: (sessionId: string, spaceId: string) => void;
   onOpenCustomizations: () => void;
   onOpenSessionsManager: () => void;
-  onSubmitPrompt: (prompt: string, allocatedBudget?: number) => void;
+  onSubmitPrompt: (prompt: string) => void;
   onSendPrompt: (prompt: string) => void;
   onSubmitQuestionResponse: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse: (requestId: string, approved: boolean, reason?: string) => void;
@@ -66,15 +65,13 @@ export function MainPage({
   onResume,
   showTerminal = true
 }: MainPageProps) {
-  const sidebarSizes = usePixelPanelSizes(250, 400, 250);
-
   return (
     // @ts-ignore
     <PanelGroup id="harness-main-layout" orientation="horizontal" className="flex-1 overflow-hidden">
       {/* Left Pane: Agent Sidebar */}
       {showAgentSidebar && (
         <>
-          <Panel defaultSize={sidebarSizes.defaultSize} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
+          <Panel defaultSize="20" minSize="15" maxSize="30" className="flex flex-col">
             <AgentSidebar
               activeSessionId={activeSessionId}
               onSelectSession={onSelectSession}

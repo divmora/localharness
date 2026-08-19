@@ -23,7 +23,7 @@ func TestTokenGuard_Unlimited(t *testing.T) {
 	if guard.TotalTokens() != 50000 {
 		t.Fatalf("expected 50000 tokens, got %d", guard.TotalTokens())
 	}
-	if guard.BudgetExhausted() {
+	if guard.LimitExhausted() {
 		t.Fatal("should not be exhausted with no limit")
 	}
 }
@@ -54,13 +54,13 @@ func TestTokenGuard_WithLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !guard.BudgetExhausted() {
+	if !guard.LimitExhausted() {
 		t.Fatal("should be exhausted at 110/100")
 	}
 
 	// Exhausted metadata flag
-	if v, ok := resp.Metadata["token_budget_exhausted"]; !ok || v != true {
-		t.Fatal("expected token_budget_exhausted metadata")
+	if v, ok := resp.Metadata["token_limit_exhausted"]; !ok || v != true {
+		t.Fatal("expected token_limit_exhausted metadata")
 	}
 
 	// Next PreTurn should be blocked
@@ -76,13 +76,13 @@ func TestTokenGuard_Reset(t *testing.T) {
 	resp := &TurnResponse{TotalTokens: 110, Metadata: make(map[string]any)}
 	guard.PostTurn(context.Background(), resp)
 
-	if !guard.BudgetExhausted() {
+	if !guard.LimitExhausted() {
 		t.Fatal("should be exhausted")
 	}
 
 	guard.Reset()
 
-	if guard.BudgetExhausted() {
+	if guard.LimitExhausted() {
 		t.Fatal("should not be exhausted after reset")
 	}
 	if guard.TotalTokens() != 0 {

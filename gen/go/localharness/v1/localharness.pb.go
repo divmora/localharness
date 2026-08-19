@@ -1239,17 +1239,15 @@ func (*ServerMessage_Error) isServerMessage_Payload() {}
 func (*ServerMessage_TraceEvent) isServerMessage_Payload() {}
 
 type SessionInfo struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name            string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	UpdatedAt       int64                  `protobuf:"varint,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	Status          SessionStatus          `protobuf:"varint,4,opt,name=status,proto3,enum=localharness.v1.SessionStatus" json:"status,omitempty"`
-	Workspace       string                 `protobuf:"bytes,5,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	ClientSource    string                 `protobuf:"bytes,6,opt,name=client_source,json=clientSource,proto3" json:"client_source,omitempty"`
-	BudgetAllocated float64                `protobuf:"fixed64,7,opt,name=budget_allocated,json=budgetAllocated,proto3" json:"budget_allocated,omitempty"`
-	BudgetSpent     float64                `protobuf:"fixed64,8,opt,name=budget_spent,json=budgetSpent,proto3" json:"budget_spent,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	UpdatedAt     int64                  `protobuf:"varint,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Status        SessionStatus          `protobuf:"varint,4,opt,name=status,proto3,enum=localharness.v1.SessionStatus" json:"status,omitempty"`
+	Workspace     string                 `protobuf:"bytes,5,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	ClientSource  string                 `protobuf:"bytes,6,opt,name=client_source,json=clientSource,proto3" json:"client_source,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SessionInfo) Reset() {
@@ -1322,20 +1320,6 @@ func (x *SessionInfo) GetClientSource() string {
 		return x.ClientSource
 	}
 	return ""
-}
-
-func (x *SessionInfo) GetBudgetAllocated() float64 {
-	if x != nil {
-		return x.BudgetAllocated
-	}
-	return 0
-}
-
-func (x *SessionInfo) GetBudgetSpent() float64 {
-	if x != nil {
-		return x.BudgetSpent
-	}
-	return 0
 }
 
 type SessionList struct {
@@ -3789,14 +3773,13 @@ func (x *ActionInvokeSubagent) GetErrorMessage() string {
 
 // SubagentInvocation describes a single subagent to launch.
 type SubagentInvocation struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	TypeName        string                 `protobuf:"bytes,1,opt,name=type_name,json=typeName,proto3" json:"type_name,omitempty"`                        // Name from registry (e.g. "research", "self")
-	Role            string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`                                                // 2-5 word job title (e.g. "Codebase Researcher")
-	Prompt          string                 `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"`                                            // Task description for the subagent
-	Workspace       string                 `protobuf:"bytes,4,opt,name=workspace,proto3" json:"workspace,omitempty"`                                      // Workspace mode: "inherit" (default), "branch", "share"
-	AllocatedBudget float64                `protobuf:"fixed64,5,opt,name=allocated_budget,json=allocatedBudget,proto3" json:"allocated_budget,omitempty"` // The budget given by the manager
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TypeName      string                 `protobuf:"bytes,1,opt,name=type_name,json=typeName,proto3" json:"type_name,omitempty"` // Name from registry (e.g. "research", "self")
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`                         // 2-5 word job title (e.g. "Codebase Researcher")
+	Prompt        string                 `protobuf:"bytes,3,opt,name=prompt,proto3" json:"prompt,omitempty"`                     // Task description for the subagent
+	Workspace     string                 `protobuf:"bytes,4,opt,name=workspace,proto3" json:"workspace,omitempty"`               // Workspace mode: "inherit" (default), "branch", "share"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SubagentInvocation) Reset() {
@@ -3855,13 +3838,6 @@ func (x *SubagentInvocation) GetWorkspace() string {
 		return x.Workspace
 	}
 	return ""
-}
-
-func (x *SubagentInvocation) GetAllocatedBudget() float64 {
-	if x != nil {
-		return x.AllocatedBudget
-	}
-	return 0
 }
 
 // SubagentLaunchResult reports a successfully launched subagent.
@@ -4637,8 +4613,6 @@ type HarnessConfig struct {
 	MaxSubagentDepth       int32               `protobuf:"varint,14,opt,name=max_subagent_depth,json=maxSubagentDepth,proto3" json:"max_subagent_depth,omitempty"`                   // Max nesting depth (default: 3, 0 = disabled)
 	MaxConcurrentSubagents int32               `protobuf:"varint,15,opt,name=max_concurrent_subagents,json=maxConcurrentSubagents,proto3" json:"max_concurrent_subagents,omitempty"` // Max concurrent children (default: 5)
 	ClientSource           string              `protobuf:"bytes,27,opt,name=client_source,json=clientSource,proto3" json:"client_source,omitempty"`
-	// Initial budget to allocate to the session (in DC)
-	InitialBudget float64 `protobuf:"fixed64,30,opt,name=initial_budget,json=initialBudget,proto3" json:"initial_budget,omitempty"`
 	// Per-tool configuration (Phase 2)
 	ToolConfigs *ToolConfigs `protobuf:"bytes,12,opt,name=tool_configs,json=toolConfigs,proto3" json:"tool_configs,omitempty"`
 	// MCP server connections (merged with global ~/.divmora/config/mcp_config.json)
@@ -4803,13 +4777,6 @@ func (x *HarnessConfig) GetClientSource() string {
 		return x.ClientSource
 	}
 	return ""
-}
-
-func (x *HarnessConfig) GetInitialBudget() float64 {
-	if x != nil {
-		return x.InitialBudget
-	}
-	return 0
 }
 
 func (x *HarnessConfig) GetToolConfigs() *ToolConfigs {
@@ -7059,9 +7026,6 @@ type ConversationState struct {
 	AgentRole            string `protobuf:"bytes,13,opt,name=agent_role,json=agentRole,proto3" json:"agent_role,omitempty"`                                    // Human-readable role: "developer", "reviewer"
 	AgentTypeName        string `protobuf:"bytes,14,opt,name=agent_type_name,json=agentTypeName,proto3" json:"agent_type_name,omitempty"`                      // Type name: "research", "self", custom
 	AgentDepth           int32  `protobuf:"varint,15,opt,name=agent_depth,json=agentDepth,proto3" json:"agent_depth,omitempty"`                                // 0 = root, 1 = child, 2 = grandchild, etc.
-	// Economics
-	BudgetAllocated float64 `protobuf:"fixed64,16,opt,name=budget_allocated,json=budgetAllocated,proto3" json:"budget_allocated,omitempty"`
-	BudgetSpent     float64 `protobuf:"fixed64,17,opt,name=budget_spent,json=budgetSpent,proto3" json:"budget_spent,omitempty"`
 	// Conversation status
 	Status        ConversationState_ConversationStatus `protobuf:"varint,10,opt,name=status,proto3,enum=localharness.v1.ConversationState_ConversationStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -7192,20 +7156,6 @@ func (x *ConversationState) GetAgentTypeName() string {
 func (x *ConversationState) GetAgentDepth() int32 {
 	if x != nil {
 		return x.AgentDepth
-	}
-	return 0
-}
-
-func (x *ConversationState) GetBudgetAllocated() float64 {
-	if x != nil {
-		return x.BudgetAllocated
-	}
-	return 0
-}
-
-func (x *ConversationState) GetBudgetSpent() float64 {
-	if x != nil {
-		return x.BudgetSpent
 	}
 	return 0
 }
@@ -7736,7 +7686,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\v2\x1b.localharness.v1.ErrorEventH\x00R\x05error\x12>\n" +
 	"\vtrace_event\x18\x05 \x01(\v2\x1b.localharness.v1.TraceEventH\x00R\n" +
 	"traceEventB\t\n" +
-	"\apayload\"\x99\x02\n" +
+	"\apayload\"\xcb\x01\n" +
 	"\vSessionInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
@@ -7744,9 +7694,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"updated_at\x18\x03 \x01(\x03R\tupdatedAt\x126\n" +
 	"\x06status\x18\x04 \x01(\x0e2\x1e.localharness.v1.SessionStatusR\x06status\x12\x1c\n" +
 	"\tworkspace\x18\x05 \x01(\tR\tworkspace\x12#\n" +
-	"\rclient_source\x18\x06 \x01(\tR\fclientSource\x12)\n" +
-	"\x10budget_allocated\x18\a \x01(\x01R\x0fbudgetAllocated\x12!\n" +
-	"\fbudget_spent\x18\b \x01(\x01R\vbudgetSpent\"G\n" +
+	"\rclient_source\x18\x06 \x01(\tR\fclientSource\"G\n" +
 	"\vSessionList\x128\n" +
 	"\bsessions\x18\x01 \x03(\v2\x1c.localharness.v1.SessionInfoR\bsessions\"`\n" +
 	"\fInitResponse\x12'\n" +
@@ -8005,13 +7953,12 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x13child_trajectory_id\x18\f \x01(\tB\x02\x18\x01R\x11childTrajectoryId\x12C\n" +
 	"\vchild_usage\x18\r \x01(\v2\x1e.localharness.v1.UsageMetadataB\x02\x18\x01R\n" +
 	"childUsage\x12#\n" +
-	"\rerror_message\x18\x0e \x01(\tR\ferrorMessage\"\xa6\x01\n" +
+	"\rerror_message\x18\x0e \x01(\tR\ferrorMessage\"{\n" +
 	"\x12SubagentInvocation\x12\x1b\n" +
 	"\ttype_name\x18\x01 \x01(\tR\btypeName\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x16\n" +
 	"\x06prompt\x18\x03 \x01(\tR\x06prompt\x12\x1c\n" +
-	"\tworkspace\x18\x04 \x01(\tR\tworkspace\x12)\n" +
-	"\x10allocated_budget\x18\x05 \x01(\x01R\x0fallocatedBudget\"p\n" +
+	"\tworkspace\x18\x04 \x01(\tR\tworkspace\"p\n" +
 	"\x14SubagentLaunchResult\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x1b\n" +
 	"\ttype_name\x18\x02 \x01(\tR\btypeName\x12\x12\n" +
@@ -8071,7 +8018,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1a\n" +
 	"\bapproved\x18\x02 \x01(\bR\bapproved\x12#\n" +
-	"\rdenial_reason\x18\x03 \x01(\tR\fdenialReason\"\x82\f\n" +
+	"\rdenial_reason\x18\x03 \x01(\tR\fdenialReason\"\xdb\v\n" +
 	"\rHarnessConfig\x12)\n" +
 	"\x10litellm_endpoint\x18\x01 \x01(\tR\x0flitellmEndpoint\x12&\n" +
 	"\x0flitellm_api_key\x18\x02 \x01(\tR\rlitellmApiKey\x12(\n" +
@@ -8089,8 +8036,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x14keep_recent_messages\x18\r \x01(\x05R\x12keepRecentMessages\x12,\n" +
 	"\x12max_subagent_depth\x18\x0e \x01(\x05R\x10maxSubagentDepth\x128\n" +
 	"\x18max_concurrent_subagents\x18\x0f \x01(\x05R\x16maxConcurrentSubagents\x12#\n" +
-	"\rclient_source\x18\x1b \x01(\tR\fclientSource\x12%\n" +
-	"\x0einitial_budget\x18\x1e \x01(\x01R\rinitialBudget\x12?\n" +
+	"\rclient_source\x18\x1b \x01(\tR\fclientSource\x12?\n" +
 	"\ftool_configs\x18\f \x01(\v2\x1c.localharness.v1.ToolConfigsR\vtoolConfigs\x12A\n" +
 	"\vmcp_servers\x18\x10 \x03(\v2 .localharness.v1.McpServerConfigR\n" +
 	"mcpServers\x12f\n" +
@@ -8287,7 +8233,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x10\n" +
 	"\x03eof\x18\x03 \x01(\bR\x03eof\x12\x1d\n" +
 	"\n" +
-	"latency_ms\x18\x04 \x01(\x05R\tlatencyMs\"\xf7\x06\n" +
+	"latency_ms\x18\x04 \x01(\x05R\tlatencyMs\"\xa9\x06\n" +
 	"\x11ConversationState\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x1d\n" +
 	"\n" +
@@ -8308,9 +8254,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"agent_role\x18\r \x01(\tR\tagentRole\x12&\n" +
 	"\x0fagent_type_name\x18\x0e \x01(\tR\ragentTypeName\x12\x1f\n" +
 	"\vagent_depth\x18\x0f \x01(\x05R\n" +
-	"agentDepth\x12)\n" +
-	"\x10budget_allocated\x18\x10 \x01(\x01R\x0fbudgetAllocated\x12!\n" +
-	"\fbudget_spent\x18\x11 \x01(\x01R\vbudgetSpent\x12M\n" +
+	"agentDepth\x12M\n" +
 	"\x06status\x18\n" +
 	" \x01(\x0e25.localharness.v1.ConversationState.ConversationStatusR\x06status\"g\n" +
 	"\x12ConversationStatus\x12\x16\n" +

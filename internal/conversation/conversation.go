@@ -288,19 +288,7 @@ func (c *Conversation) AddUsage(usage *pb.UsageMetadata) {
 	c.State.TotalUsage.CachedTokens += usage.CachedTokens
 }
 
-// AllocateBudget sets the total budget.
-func (c *Conversation) AllocateBudget(amount float64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.State.BudgetAllocated = amount
-}
 
-// AddSpend adds to the spent budget.
-func (c *Conversation) AddSpend(amount float64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.State.BudgetSpent += amount
-}
 
 // ─── Transcript Logging (JSONL to logs/transcript.jsonl) ────────────────
 

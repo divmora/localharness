@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { type as osType } from '@tauri-apps/plugin-os';
-import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink, PanelBottom, PanelLeft, Settings } from 'lucide-react';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { Search, Minus, Square, X, PanelBottom, PanelLeft, Settings } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { Office } from '../App';
@@ -32,36 +32,15 @@ export function TopBar({
   onToggleSidebar
 }: TopBarProps) {
   const [platform, setPlatform] = useState<string>('');
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const window = getCurrentWebviewWindow();
-
-    const checkFullscreen = async () => {
-      try {
-        setIsFullscreen(await window.isFullscreen());
-      } catch (e) {
-        console.error(e);
-      }
-    };
-
-    checkFullscreen();
-
-    const unlisten = window.onResized(() => {
-      checkFullscreen();
-    });
-
     try {
       setPlatform(osType()); // 'macos', 'windows', 'linux'
     } catch {
       setPlatform('unknown');
     }
-
-    return () => {
-      unlisten.then(f => f());
-    };
   }, []);
 
   const handleMinimize = () => getCurrentWebviewWindow().minimize();
@@ -96,23 +75,10 @@ export function TopBar({
             </button>
           </div>
 
-          {/* Search Icon */}
-          <button className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors ml-1">
-            <Search size={16} />
-          </button>
-
-          {/* Toggle Sidebar Icon */}
-          <button className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors" title="Toggle Agent Sidebar (⌘B)">
-            <SplitSquareHorizontal size={16} />
-          </button>
-
-          {/* Back / Forward */}
-          <div className="flex items-center ml-1">
-            <button className="p-1 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors">
-              <ArrowLeft size={16} />
-            </button>
-            <button className="p-1 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors">
-              <ArrowRight size={16} />
+          {/* Quick Actions */}
+          <div className="flex items-center gap-1.5 ml-2 border-l border-border-primary pl-4">
+            <button className="h-7 w-7 rounded-md flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary transition-colors" title="Settings">
+              <Settings size={14} />
             </button>
           </div>
         </div>
@@ -191,22 +157,12 @@ export function TopBar({
             </button>
           )}
 
-          {/* Model and Budget */}
+          {/* Model */}
           <div className="flex items-center gap-2 pl-2 border-l border-border-primary ml-1 h-6">
             <select className="appearance-none bg-transparent hover:bg-bg-tertiary text-text-secondary hover:text-text-primary text-xs font-medium rounded px-2 py-0.5 outline-none cursor-pointer transition-colors">
               <option>SWE-1.6 Slow</option>
               <option>Devin Local</option>
             </select>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-bg-tertiary rounded border border-border-primary hover:border-border-highlight transition-colors cursor-pointer group">
-              <span className="text-[10px] font-bold text-text-tertiary group-hover:text-text-secondary">BUDGET</span>
-              <select className="appearance-none bg-transparent text-xs font-mono text-text-primary outline-none cursor-pointer pr-1">
-                <option value="0">0 DC</option>
-                <option value="10">10 DC</option>
-                <option value="50">50 DC</option>
-                <option value="100">100 DC</option>
-                <option value="500">500 DC</option>
-              </select>
-            </div>
           </div>
 
           <div className="w-[1px] h-4 bg-border-primary mx-1" />

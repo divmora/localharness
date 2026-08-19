@@ -12,7 +12,7 @@ interface ChatPanelProps {
   connectionError?: string | null;
   steps: StepUpdate[];
   trajectoryState?: TrajectoryState_TrajState;
-  onSend: (text: string, allocatedBudget?: number) => void;
+  onSend: (text: string) => void;
   onInterrupt?: () => void;
   onResume?: (msg?: string) => void;
   onSubmitQuestionResponse?: (requestId: string, answers: any[], skipped: boolean) => void;
@@ -39,13 +39,11 @@ export function ChatPanel({
   clientSource
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
-  const [allocatedBudget, setAllocatedBudget] = useState<number>(0);
 
   const handleSend = () => {
     if (input.trim() && connected) {
-      onSend(input.trim(), allocatedBudget);
+      onSend(input.trim());
       setInput("");
-      setAllocatedBudget(0);
     }
   };
 
