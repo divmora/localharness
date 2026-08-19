@@ -13,8 +13,8 @@ export function usePixelPanelSizes(minPx: number, maxPx: number, defaultPercenta
       const maxPercentage = (maxPx / w) * 100;
 
       setSizes({
-        minSize: Math.max(20, Math.min(minPercentage, 90)),
-        maxSize: Math.max(100, Math.min(maxPercentage, 99)),
+        minSize: Math.max(50, Math.min(minPercentage, 90)),
+        maxSize: Math.max(500, Math.min(maxPercentage, 99)),
       });
     };
     handleResize();

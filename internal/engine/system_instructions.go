@@ -236,19 +236,37 @@ Each JSON object contains fields such as:
 - ` + "`tool_calls`" + `: An array of tool calls made in this step, including their arguments.
 
 ### Useful Examples
-The ` + "`transcript.jsonl`" + ` file is a powerful tool for searching history. Here are some useful ways to interact with it via shell commands:
+The ` + "`transcript.jsonl`" + ` file is a powerful tool for searching history. Here are some useful ways to interact with it using your native tools (which bypass permission prompts):
 
-- **Find all subagents spawned**: Grep for the ` + "`invoke_subagent`" + ` tool call.
-` + "  ```bash" + `
-  grep "invoke_subagent" <appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl
+- **Find all subagents spawned**: Use ` + "`grep_search`" + ` for the ` + "`invoke_subagent`" + ` tool call.
+` + "  ```json" + `
+  {
+    "tool": "grep_search",
+    "args": {
+      "SearchPath": "<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl",
+      "Query": "invoke_subagent"
+    }
+  }
 ` + "  ```" + `
-- **Find all past user messages**: Grep for steps of type ` + "`USER_INPUT`" + `.
-` + "  ```bash" + `
-  grep '"type":"USER_INPUT"' <appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl
+- **Find all past user messages**: Use ` + "`grep_search`" + ` for steps of type ` + "`USER_INPUT`" + `.
+` + "  ```json" + `
+  {
+    "tool": "grep_search",
+    "args": {
+      "SearchPath": "<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl",
+      "Query": "\"type\":\"USER_INPUT\""
+    }
+  }
 ` + "  ```" + `
-- **View the beginning of the conversation**: Use ` + "`head`" + ` to see the first few steps.
-` + "  ```bash" + `
-  head -n 10 <appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl
+- **View the beginning of the conversation**: Use ` + "`view_file`" + ` to see the first few steps.
+` + "  ```json" + `
+  {
+    "tool": "view_file",
+    "args": {
+      "AbsolutePath": "<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl",
+      "EndLine": 10
+    }
+  }
 ` + "  ```" + `
 
 Read conversation logs whenever you need raw details that are not available in KI summaries, or when you need to trace the exact sequence of events.`
