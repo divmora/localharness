@@ -66,7 +66,7 @@ export function MainPage({
   onResume,
   showTerminal = true
 }: MainPageProps) {
-  const sidebarSizes = usePixelPanelSizes(250, 400, 20);
+  const sidebarSizes = usePixelPanelSizes(250, 400, 250);
 
   return (
     // @ts-ignore
@@ -74,7 +74,7 @@ export function MainPage({
       {/* Left Pane: Agent Sidebar */}
       {showAgentSidebar && (
         <>
-          <Panel defaultSize={20} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
+          <Panel defaultSize={sidebarSizes.defaultSize} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
             <AgentSidebar
               activeSessionId={activeSessionId}
               onSelectSession={onSelectSession}

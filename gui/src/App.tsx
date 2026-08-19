@@ -34,7 +34,7 @@ export interface Office {
 import { usePixelPanelSizes } from './hooks/usePixelSize';
 
 function App() {
-  const sidebarSizes = usePixelPanelSizes(250, 400, 20);
+  const sidebarSizes = usePixelPanelSizes(250, 400, 250);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [initialBudget, setInitialBudget] = useState<number>(0);
   const [currentView, setCurrentView] = usePersistentState<'main' | 'customizations' | 'sessions' | 'office'>('ui.currentView', 'main');
@@ -328,7 +328,7 @@ function App() {
             <PanelGroup id="sessions-layout" orientation="horizontal" className="flex-1 overflow-hidden">
               {showAgentSidebar && (
                 <>
-                  <Panel defaultSize={20} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
+                  <Panel defaultSize={sidebarSizes.defaultSize} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
                     <AgentSidebar
                       activeSessionId={activeSessionId}
                       onSelectSession={handleSelectSession}
