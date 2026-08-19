@@ -91,7 +91,9 @@ export function MainPage({
               mcpServerCount={0}
             />
           </Panel>
-          <PanelResizeHandle className="w-[1px] bg-border-primary transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--border-primary)' }} />
+          <PanelResizeHandle className="w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-500/10 transition-colors group z-10">
+            <div className="w-[1px] h-full bg-border-primary group-hover:bg-blue-500/50 transition-colors" />
+          </PanelResizeHandle>
         </>
       )}
 
@@ -132,7 +134,9 @@ export function MainPage({
 
               {activeSessionId && (
                 <>
-                  <PanelResizeHandle className="w-[1px] bg-border-primary transition-colors hover:opacity-80" style={{ backgroundColor: 'var(--border-primary)' }} />
+                  <PanelResizeHandle className="w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-500/10 transition-colors group z-10">
+                    <div className="w-[1px] h-full bg-border-primary group-hover:bg-blue-500/50 transition-colors" />
+                  </PanelResizeHandle>
 
                   {/* Editor */}
                   <Panel defaultSize={50} minSize={20} className="flex flex-col">
@@ -149,9 +153,9 @@ export function MainPage({
 
           {activeSessionId && showTerminal && (
             <>
-              <PanelResizeHandle
-                className="h-[1px] bg-border-primary transition-colors hover:opacity-80"
-              />
+              <PanelResizeHandle className="h-1.5 flex flex-col items-center justify-center cursor-row-resize hover:bg-blue-500/10 transition-colors group z-10">
+                <div className="h-[1px] w-full bg-border-primary group-hover:bg-blue-500/50 transition-colors" />
+              </PanelResizeHandle>
 
               {/* Bottom Section: Terminal */}
               <Panel

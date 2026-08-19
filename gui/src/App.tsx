@@ -336,7 +336,9 @@ function App() {
                       mcpServerCount={0}
                     />
                   </Panel>
-                  <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-blue-500/50 transition-colors cursor-col-resize" />
+                  <PanelResizeHandle className="w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-500/10 transition-colors group">
+                    <div className="w-[1px] h-full bg-border-primary group-hover:bg-blue-500/50 transition-colors" />
+                  </PanelResizeHandle>
                 </>
               )}
               <Panel className="flex flex-col min-w-0">
