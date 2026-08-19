@@ -1,3 +1,5 @@
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels';
+import { AgentSidebar } from './components/AgentSidebar';
 import { useState, useEffect, useCallback } from 'react';
 import { CustomizationsPage } from './components/CustomizationsPage';
 import { SessionsManager } from './components/SessionsManager';
@@ -29,7 +31,10 @@ export interface Office {
   name: string;
 }
 
+import { usePixelPanelSizes } from './hooks/usePixelSize';
+
 function App() {
+  const sidebarSizes = usePixelPanelSizes(250, 400, 20);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [initialBudget, setInitialBudget] = useState<number>(0);
   const [currentView, setCurrentView] = usePersistentState<'main' | 'customizations' | 'sessions' | 'office'>('ui.currentView', 'main');
@@ -190,6 +195,18 @@ function App() {
     setOfficePromptState({ isOpen: false });
   };
 
+  const handleArchiveSession = async (sessionId: string) => {
+    try {
+      await invoke("archive_session", { sessionId });
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+      loadSessions();
+    } catch (e) {
+      console.error("Failed to archive session:", e);
+    }
+  };
+
   const handleDeleteSession = (sessionId: string) => {
     setDeleteConfirmState({ isOpen: true, sessionId });
   };
@@ -296,7 +313,33 @@ function App() {
               onClose={() => setCurrentView('main')} 
             />
           ) : currentView === 'sessions' ? (
-            <SessionsManager sessions={filteredSessions} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} />
+            <PanelGroup id="sessions-layout" orientation="horizontal" className="flex-1 overflow-hidden">
+              {showAgentSidebar && (
+                <>
+                  <Panel defaultSize={20} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
+                    <AgentSidebar
+                      activeSessionId={activeSessionId}
+                      onSelectSession={handleSelectSession}
+                      onNewSession={handleNewSession}
+                      onCreateSpace={handleCreateSpace}
+                      onMoveSessionToSpace={handleMoveSessionToSpace}
+                      onOpenCustomizations={() => setCurrentView('customizations')}
+                      onOpenSessionsManager={() => setCurrentView('sessions')}
+                      onDeleteSession={handleDeleteSession}
+                      onArchiveSession={handleArchiveSession}
+                      sessions={filteredSessions}
+                      spaces={spaces}
+                      sessionSpaces={sessionSpaces}
+                      mcpServerCount={0}
+                    />
+                  </Panel>
+                  <PanelResizeHandle className="w-[1px] bg-border-primary hover:bg-blue-500/50 transition-colors cursor-col-resize" />
+                </>
+              )}
+              <Panel className="flex flex-col min-w-0">
+                <SessionsManager sessions={filteredSessions} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} />
+              </Panel>
+            </PanelGroup>
           ) : currentView === 'office' ? (
             <OfficeView 
               sessions={filteredSessions} 
@@ -330,6 +373,7 @@ function App() {
               onSubmitPermissionResponse={submitPermissionResponse}
               onSelectWorkspace={setWorkspace}
               onDeleteSession={handleDeleteSession}
+                      onArchiveSession={handleArchiveSession}
               trajectoryState={trajectoryState}
               onInterrupt={interrupt}
               onResume={resume}

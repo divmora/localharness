@@ -1,10 +1,13 @@
+import { QuestionForm } from './QuestionForm';
+import { PermissionForm } from './PermissionForm';
 import { useState, useMemo } from 'react';
-import { TerminalSquare, Bot, Users, Globe, FileCode, ShieldAlert, Check, X, Brain, ThumbsUp, ThumbsDown, Copy, GitFork, BarChart2, MoreHorizontal, Square, ChevronDown, Plus, MessageCircle, Mic, ArrowUp, Monitor, Folder, Server, Wand2 } from 'lucide-react';
+import { TerminalSquare, Bot, Users, Globe, FileCode, ShieldAlert, Brain, ThumbsUp, ThumbsDown, Copy, GitFork, BarChart2, MoreHorizontal, Square, ChevronDown, Plus, Mic, ArrowUp, Monitor, Folder } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { clone } from '@bufbuild/protobuf';
 import { StepUpdate, StepUpdate_Source, StepUpdate_State, StepUpdateSchema, TrajectoryState_TrajState } from '../gen/localharness/v1/localharness_pb';
 
 interface ChatPanelProps {
+  activeSessionId?: string | null;
   connected: boolean;
   connectionError?: string | null;
   steps: StepUpdate[];
@@ -16,95 +19,11 @@ interface ChatPanelProps {
   onSubmitPermissionResponse?: (requestId: string, approved: boolean, reason?: string) => void;
 }
 
-function QuestionForm({ action, state, onSubmit }: { action: any, state: StepUpdate_State, onSubmit: (answers: any[], skipped: boolean) => void }) {
-  const [answers, setAnswers] = useState<any[]>(
-    action.questions?.map(() => ({ selectedIndices: [], selectedOptions: [], text: '' })) || []
-  );
 
-  const isDone = state === StepUpdate_State.DONE;
 
-  if (isDone) {
-    if (action.skipped) return <div className="text-text-tertiary italic text-xs mt-2">Skipped question.</div>;
-    return (
-      <div className="mt-2 flex flex-col gap-2">
-        {action.questions?.map((q: any, i: number) => (
-          <div key={i} className="bg-bg-tertiary p-2 rounded border border-border-primary">
-            <div className="font-semibold text-xs mb-1">{q.question}</div>
-            <div className="text-xs text-blue-400">
-              {action.answers?.[i]?.selectedOptions?.length > 0 
-                ? action.answers[i].selectedOptions.join(", ") 
-                : action.answers?.[i]?.text || "No answer"}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  const handleToggle = (qIdx: number, optIdx: number, optText: string, isMulti: boolean) => {
-    setAnswers(prev => {
-      const next = [...prev];
-      const cur = { ...next[qIdx] };
-      if (isMulti) {
-        if (cur.selectedIndices.includes(optIdx)) {
-          cur.selectedIndices = cur.selectedIndices.filter((x: number) => x !== optIdx);
-          cur.selectedOptions = cur.selectedOptions.filter((x: string) => x !== optText);
-        } else {
-          cur.selectedIndices = [...cur.selectedIndices, optIdx];
-          cur.selectedOptions = [...cur.selectedOptions, optText];
-        }
-      } else {
-        cur.selectedIndices = [optIdx];
-        cur.selectedOptions = [optText];
-      }
-      next[qIdx] = cur;
-      return next;
-    });
-  };
-
-  return (
-    <div className="mt-2 flex flex-col gap-3">
-      {action.questions?.map((q: any, i: number) => (
-        <div key={i} className="bg-bg-tertiary p-3 rounded border border-border-primary shadow-sm">
-          <div className="font-semibold text-xs mb-2">{q.question}</div>
-          {q.options && q.options.length > 0 ? (
-            <div className="flex flex-col gap-1">
-              {q.options.map((opt: string, optIdx: number) => (
-                <label key={optIdx} className="flex items-center gap-2 text-xs cursor-pointer hover:text-text-primary">
-                  <input 
-                    type={q.isMultiSelect ? "checkbox" : "radio"} 
-                    checked={answers[i].selectedIndices.includes(optIdx)}
-                    onChange={() => handleToggle(i, optIdx, opt, q.isMultiSelect)}
-                    className="accent-blue-500"
-                  />
-                  {opt}
-                </label>
-              ))}
-            </div>
-          ) : (
-            <input 
-              type="text" 
-              className="w-full bg-bg-primary border border-border-primary rounded px-2 py-1 text-xs outline-none focus:border-blue-500" 
-              placeholder="Type your answer..."
-              value={answers[i].text}
-              onChange={(e) => {
-                const next = [...answers];
-                next[i] = { ...next[i], text: e.target.value };
-                setAnswers(next);
-              }}
-            />
-          )}
-        </div>
-      ))}
-      <div className="flex gap-2 justify-end mt-1">
-        <button onClick={() => onSubmit([], true)} className="px-3 py-1 text-xs rounded bg-border-primary hover:bg-border-highlight transition-colors">Skip</button>
-        <button onClick={() => onSubmit(answers, false)} className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 transition-colors text-text-primary font-medium flex items-center gap-1"><Check size={12}/> Submit</button>
-      </div>
-    </div>
-  );
-}
 
 export function ChatPanel({ 
+  activeSessionId,
   connected, 
   connectionError, 
   steps, 
@@ -213,53 +132,12 @@ export function ChatPanel({
           </div>
         );
       case 'permissionRequest':
-        const pr = msg.action.value as any;
         return (
-          <div className="mt-3 border border-blue-400 rounded-xl overflow-hidden shadow-sm max-w-full bg-blue-500/5">
-            <div className="flex items-center justify-between px-3 py-2 text-xs text-text-primary bg-blue-500/10 border-b border-blue-400/30 font-medium">
-              <div className="flex items-center gap-2">
-                <Square size={12} className="text-blue-500" />
-                <span className="truncate">Command {pr.toolName}</span>
-              </div>
-              <div className="flex items-center gap-2 text-text-tertiary">
-                <Copy size={12} className="cursor-pointer hover:text-text-primary transition-colors" />
-                <X size={12} className="cursor-pointer hover:text-text-primary transition-colors" />
-              </div>
-            </div>
-            <div className="p-4 text-[11px] font-mono overflow-x-auto">
-              <div className="flex items-center gap-2 mb-2 text-blue-400 font-semibold">
-                <div className="w-2 h-2 rounded-full border border-blue-400 bg-transparent"></div>
-                {pr.argsSummary || pr.argsJson}
-              </div>
-              {msg.state !== StepUpdate_State.DONE ? (
-                <div className="flex justify-end items-center gap-2 mt-4 text-xs font-sans">
-                  <button className="p-1.5 rounded-md bg-gray-200 dark:bg-gray-700/50 text-text-secondary hover:text-text-primary hover:bg-gray-300 dark:hover:bg-gray-700 transition-colors">
-                    <Wand2 size={14} />
-                  </button>
-                  <div className="flex items-center rounded-md overflow-hidden bg-blue-500 hover:bg-blue-600 text-white font-medium shadow-sm cursor-pointer transition-colors">
-                    <button 
-                      onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, true)}
-                      className="px-3 py-1.5 flex items-center gap-1 flex-1"
-                    >
-                      Allow <Check size={12} className="ml-1 opacity-70" />
-                    </button>
-                    <div className="w-px h-full min-h-[28px] bg-blue-400/50"></div>
-                    <button className="px-1.5 py-1.5 hover:bg-blue-700 transition-colors flex items-center justify-center">
-                      <ChevronDown size={14} />
-                    </button>
-                  </div>
-                  <button 
-                    onClick={() => onSubmitPermissionResponse && onSubmitPermissionResponse(pr.requestId, false, "Denied by user")}
-                    className="flex items-center gap-1 bg-gray-200 dark:bg-gray-700/80 text-gray-800 dark:text-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium shadow-sm"
-                  >
-                    Reject <X size={12} className="opacity-70" />
-                  </button>
-                </div>
-              ) : (
-                <div className="text-[11px] text-text-secondary italic mt-2 text-right opacity-70">Response submitted</div>
-              )}
-            </div>
-          </div>
+          <PermissionForm 
+            pr={msg.action.value} 
+            state={msg.state} 
+            onSubmitPermissionResponse={onSubmitPermissionResponse} 
+          />
         );
       case 'writeToFile':
       case 'replaceFileContent':
@@ -330,7 +208,7 @@ export function ChatPanel({
       <div className="p-4 border-b border-border-primary font-semibold flex items-center justify-between shadow-sm z-10">
         <div className="flex items-center gap-2">
           <TerminalSquare size={18} className="text-blue-400" />
-          LocalHarness
+          {activeSessionId ? `Session ${activeSessionId.split('-')[0]}` : "LocalHarness"}
         </div>
         <div className="flex items-center gap-2 text-xs">
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]'}`} />
@@ -451,32 +329,8 @@ export function ChatPanel({
               <button className="p-1 hover:bg-bg-tertiary rounded-md text-text-tertiary hover:text-text-primary transition-colors">
                 <Plus size={16} />
               </button>
-              <div className="flex items-center gap-2 px-2 py-1 bg-border-primary rounded-md border border-border-highlight mr-2">
-                <span className="text-[10px] font-bold text-text-tertiary">BUDGET (DC)</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="10"
-                  value={allocatedBudget}
-                  onChange={(e) => setAllocatedBudget(parseFloat(e.target.value) || 0)}
-                  className="w-12 bg-transparent text-xs font-mono text-text-primary outline-none"
-                  placeholder="0"
-                  disabled={!connected || !!connectionError || trajectoryState === TrajectoryState_TrajState.TRAJ_RUNNING}
-                />
-              </div>
-              <div className="flex items-center gap-1.5 text-green-500 font-medium text-xs px-2 py-1 rounded-md hover:bg-bg-tertiary cursor-pointer transition-colors">
-                <MessageCircle size={14} />
-                Ask
-              </div>
-              <div className="flex items-center text-xs text-text-secondary px-2 py-1 rounded-md hover:bg-bg-tertiary cursor-pointer transition-colors font-medium">
-                SWE-1.6 Slow
-              </div>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 text-xs text-text-tertiary font-medium">
-                <Server size={14} />
-                Devin Local
-              </div>
               <button className="text-text-tertiary hover:text-text-primary transition-colors">
                 <Mic size={16} />
               </button>

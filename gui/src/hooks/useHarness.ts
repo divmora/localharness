@@ -37,7 +37,8 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
     const messageQueueRef = useRef<number[][]>([]);
 
     useEffect(() => {
-        let unlisten_handle: (() => void) | null = null;
+        let isMounted = true;
+        let unlistenPromise: Promise<() => void> | null = null;
         
         // Do not generate UUIDs client-side, let the backend do it.
         const targetSessionId = activeSessionId;
@@ -96,18 +97,16 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                         try {
                             const entry = JSON.parse(line);
                             let source = StepUpdate_Source.UNSPECIFIED;
-                            if (entry.source === 'USER_EXPLICIT' || entry.source === 'SOURCE_USER' || entry.type === 'USER_INPUT') source = StepUpdate_Source.USER;
-                            if (entry.source === 'MODEL' || entry.source === 'SOURCE_MODEL' || entry.type === 'PLANNER_RESPONSE') source = StepUpdate_Source.MODEL;
-                            if (entry.source === 'SYSTEM' || entry.source === 'SOURCE_SYSTEM' || entry.type === 'TOOL_RESULT') source = StepUpdate_Source.SYSTEM;
+                            if (entry.source === 'USER_EXPLICIT' || entry.source === 'SOURCE_USER' || entry.type === 'USER_INPUT') {
+                                source = StepUpdate_Source.USER;
+                            } else if (entry.source === 'MODEL' || entry.source === 'SOURCE_MODEL' || entry.type === 'PLANNER_RESPONSE') {
+                                source = StepUpdate_Source.MODEL;
+                            } else if (entry.source === 'SYSTEM' || entry.source === 'SOURCE_SYSTEM' || entry.type === 'TOOL_RESULT') {
+                                source = StepUpdate_Source.SYSTEM;
+                            }
                             
-                            const step = create(StepUpdateSchema, {
-                                stepIndex: entry.step_index,
-                                source: source,
-                                state: StepUpdate_State.DONE,
-                                text: entry.content || "",
-                                thinking: entry.thinking || "",
-                            });
-                            
+                            let action: any = undefined;
+
                             // Map tool calls if present (for MODEL)
                             if (entry.tool_calls && entry.tool_calls.length > 0) {
                                 const tc = entry.tool_calls[0];
@@ -134,14 +133,38 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                     return obj;
                                 };
 
-                                const caseName = toCamel(tc.name);
+                                let caseName = toCamel(tc.name);
                                 const value = tc.args ? deepCamel(tc.args) : {};
                                 
-                                step.action = {
-                                    case: caseName as any,
-                                    value: value
+                                let mappedValue = value;
+                                if (tc.name === 'ask_question') {
+                                    caseName = 'userQuestion';
+                                    mappedValue = { questions: value.questions || [] };
+                                }
+                                else if (tc.name === 'list_dir') mappedValue = { path: tc.args?.DirectoryPath || value.directoryPath || '' };
+                                else if (tc.name === 'view_file') mappedValue = { path: tc.args?.AbsolutePath || value.absolutePath || '', startLine: tc.args?.StartLine || value.startLine || 0, endLine: tc.args?.EndLine || value.endLine || 0 };
+                                else if (tc.name === 'edit_file') mappedValue = { path: tc.args?.TargetFile || value.targetFile || '', instruction: tc.args?.Instruction || value.instruction || '', description: tc.args?.Description || value.description || '' };
+                                else if (tc.name === 'create_file') mappedValue = { path: tc.args?.TargetFile || value.targetFile || '', content: tc.args?.CodeContent || value.codeContent || '', overwrite: tc.args?.Overwrite || value.overwrite || false };
+                                else if (tc.name === 'run_command') mappedValue = { command: tc.args?.CommandLine || value.commandLine || '', cwd: tc.args?.Cwd || value.cwd || '', timeoutMs: tc.args?.WaitMsBeforeAsync || value.waitMsBeforeAsync || 0 };
+                                else if (tc.name === 'search_dir') mappedValue = { path: tc.args?.DirectoryPath || value.directoryPath || '', query: tc.args?.Query || value.query || '' };
+                                else if (tc.name === 'find_file') mappedValue = { path: tc.args?.DirectoryPath || value.directoryPath || '', pattern: tc.args?.Pattern || value.pattern || '' };
+                                else if (tc.name === 'grep_search') mappedValue = { path: tc.args?.SearchPath || value.searchPath || '', query: tc.args?.Query || value.query || '', isRegex: tc.args?.IsRegex || value.isRegex || false, caseInsensitive: tc.args?.CaseInsensitive || value.caseInsensitive || false };
+                                
+                                action = {
+                                    case: caseName,
+                                    value: mappedValue
                                 };
                             }
+
+                            const step = create(StepUpdateSchema, {
+                                stepIndex: entry.step_index,
+                                source: source,
+                                state: StepUpdate_State.DONE,
+                                text: entry.content || "",
+                                thinking: entry.thinking || "",
+                                action: action
+                            });
+                            
                             pastSteps.push(step);
                         } catch (e) {
                             console.warn("Failed to parse transcript line", line, e);
@@ -295,7 +318,9 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                 console.log(`Connected for session: ${finalSessionId}`);
                 setConnected(true);
                 
-                unlisten_handle = await listen<Uint8Array>(`harness_event_${finalSessionId}`, (event) => {
+                if (!isMounted) return;
+                
+                unlistenPromise = listen<Uint8Array>(`harness_event_${finalSessionId}`, (event) => {
                     const msg = { type: 'Binary', data: event.payload };
                     if (msg.type === 'Binary') {
                         const buffer = new Uint8Array(msg.data);
@@ -539,10 +564,13 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
         initHarness();
         
         return () => {
-            if (unlisten_handle) unlisten_handle();
+            isMounted = false;
+            if (unlistenPromise) {
+                unlistenPromise.then(unlisten => unlisten());
+            }
             setConnected(false);
         };
-    }, [activeSessionId]);
+    }, [activeSessionId, isManager]);
 
     // Flush queued messages when server is ready
     useEffect(() => {
@@ -616,6 +644,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
     }, [serverReady, activeSessionId]);
 
     const submitPermissionResponse = useCallback(async (requestId: string, approved: boolean, denialReason: string = "") => {
+        console.log("Submitting permission response:", requestId, approved, denialReason);
         const pResponse = create(PermissionResponseSchema, {
             requestId: requestId,
             approved: approved,

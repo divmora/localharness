@@ -234,7 +234,7 @@ export function CustomizationsPage({ onClose }: CustomizationsPageProps) {
               {activeTab === 'llm' && (
                 <div className="flex flex-col gap-6">
                   <div>
-                    <h3 className="text-lg font-semibold text-text-primary mb-1">LLM Configuration</h3>
+                    <h3 data-testid="page-customizations" className="text-lg font-semibold text-text-primary mb-1">LLM Configuration</h3>
                     <p className="text-xs text-text-tertiary">
                       Configure the LiteLLM proxy settings for your local machine.
                     </p>

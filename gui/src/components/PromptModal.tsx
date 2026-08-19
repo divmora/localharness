@@ -41,6 +41,7 @@ export function PromptModal({
         
         <form onSubmit={handleSubmit}>
           <input
+            data-testid="input-prompt-modal"
             ref={inputRef}
             type="text"
             className="w-full bg-bg-secondary border border-border-primary text-text-primary text-sm rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/50 mb-6"
@@ -51,6 +52,7 @@ export function PromptModal({
           
           <div className="flex justify-end gap-2">
             <button
+              data-testid="btn-cancel-prompt-modal"
               type="button"
               className="px-4 py-2 text-sm font-medium text-text-secondary bg-bg-secondary hover:bg-bg-tertiary border border-border-primary rounded transition-colors"
               onClick={onCancel}
@@ -58,6 +60,7 @@ export function PromptModal({
               {cancelText}
             </button>
             <button
+              data-testid="btn-confirm-prompt-modal"
               type="submit"
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
               disabled={!value.trim()}

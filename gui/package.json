@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:e2e": "playwright test",
+    "test:e2e": "rm -f /tmp/tauri-playwright.sock && rm -rf ~/.divmora/localharness/conversations ~/.divmora/localharness/brain ~/.divmora/localharness/projects.json && npx playwright test",
     "test:e2e:headless": "rm -rf ~/.divmora/localharness/conversations ~/.divmora/localharness/brain ~/.divmora/localharness/projects.json && WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a npx playwright test"
   },
   "dependencies": {

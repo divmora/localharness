@@ -13,6 +13,7 @@ interface AgentSidebarProps {
   onOpenCustomizations: () => void;
   onOpenSessionsManager: () => void;
   onDeleteSession?: (sessionId: string) => void;
+  onArchiveSession?: (sessionId: string) => void;
   sessions: ProtoSessionInfo[];
   spaces?: Space[];
   sessionSpaces?: Record<string, string>;
@@ -28,6 +29,7 @@ export function AgentSidebar({
   onOpenCustomizations,
   onOpenSessionsManager,
   onDeleteSession,
+  onArchiveSession,
   sessions,
   spaces = [],
   sessionSpaces = {},
@@ -46,6 +48,7 @@ export function AgentSidebar({
       {/* Top action */}
       <div className="p-3 pb-2">
         <button 
+          data-testid="btn-new-session"
           onClick={onNewSession}
           className="w-full flex items-center gap-2 bg-bg-secondary hover:bg-bg-tertiary text-text-primary px-3 py-2 rounded-md text-sm font-medium transition-colors border border-border-primary"
         >
@@ -58,6 +61,7 @@ export function AgentSidebar({
       {/* Main Nav */}
       <div className="px-2">
         <div 
+          data-testid="btn-sessions-manager"
           className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-text-primary bg-bg-secondary cursor-pointer hover:bg-bg-tertiary transition-colors rounded-sm"
           onClick={onOpenSessionsManager}
         >
@@ -71,7 +75,7 @@ export function AgentSidebar({
         <span>Spaces</span>
         <div className="flex items-center gap-2">
           <Search size={14} className="cursor-pointer hover:text-text-primary" />
-          <Plus size={14} className="cursor-pointer hover:text-text-primary" onClick={onCreateSpace} />
+          <Plus data-testid="btn-create-space" size={14} className="cursor-pointer hover:text-text-primary" onClick={onCreateSpace} />
           <Filter size={14} className="cursor-pointer hover:text-text-primary" />
         </div>
       </div>
@@ -124,6 +128,7 @@ export function AgentSidebar({
                 {spaceSessions.map((session: ProtoSessionInfo) => (
                   <div 
                     key={session.id}
+                    data-testid="session-item"
                     onClick={() => onSelectSession(session.id)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -174,6 +179,12 @@ export function AgentSidebar({
           )}
           <div className="border-t border-border-primary my-1"></div>
           <button
+            className="w-full text-left px-3 py-1.5 text-text-primary hover:bg-bg-tertiary transition-colors"
+            onClick={() => onArchiveSession?.(contextMenu.sessionId)}
+          >
+            Archive Session
+          </button>
+          <button
             className="w-full text-left px-3 py-1.5 text-red-500 hover:bg-bg-tertiary hover:text-red-400"
             onClick={() => onDeleteSession?.(contextMenu.sessionId)}
           >
@@ -186,6 +197,7 @@ export function AgentSidebar({
       <div className="p-3 border-t border-border-primary flex flex-col gap-2">
         <div className="flex gap-2">
           <button 
+            data-testid="btn-customizations"
             onClick={onOpenCustomizations}
             className="flex flex-1 items-center justify-between px-2 py-1.5 text-xs font-semibold text-text-primary hover:bg-bg-secondary rounded-md transition-colors"
           >

@@ -6,6 +6,7 @@ import { TerminalPanel } from '../components/TerminalPanel';
 import { SessionInfo as ProtoSessionInfo, StepUpdate, TrajectoryState_TrajState } from '../gen/localharness/v1/localharness_pb';
 import { Space } from '../App';
 import { CenteredEmptyState } from '../components/CenteredEmptyState';
+import { usePixelPanelSizes } from '../hooks/usePixelSize';
 
 interface MainPageProps {
   activeSessionId: string | null;
@@ -30,6 +31,7 @@ interface MainPageProps {
   onSubmitPermissionResponse: (requestId: string, approved: boolean, reason?: string) => void;
   onSelectWorkspace: (path: string) => void;
   onDeleteSession?: (sessionId: string) => void;
+  onArchiveSession?: (sessionId: string) => void;
   trajectoryState: TrajectoryState_TrajState;
   onInterrupt: () => void;
   onResume: (msg?: string) => void;
@@ -58,18 +60,21 @@ export function MainPage({
   onSubmitPermissionResponse,
   onSelectWorkspace,
   onDeleteSession,
+  onArchiveSession,
   trajectoryState,
   onInterrupt,
   onResume,
   showTerminal = true
 }: MainPageProps) {
+  const sidebarSizes = usePixelPanelSizes(250, 400, 20);
+
   return (
     // @ts-ignore
-    <PanelGroup autoSaveId="harness-main-layout" orientation="horizontal" className="flex-1">
+    <PanelGroup id="harness-main-layout" orientation="horizontal" className="flex-1 overflow-hidden">
       {/* Left Pane: Agent Sidebar */}
       {showAgentSidebar && (
         <>
-          <Panel defaultSize={20} minSize={10} className="flex flex-col" collapsible>
+          <Panel defaultSize={20} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
             <AgentSidebar
               activeSessionId={activeSessionId}
               onSelectSession={onSelectSession}
@@ -79,6 +84,7 @@ export function MainPage({
               onOpenCustomizations={onOpenCustomizations}
               onOpenSessionsManager={onOpenSessionsManager}
               onDeleteSession={onDeleteSession}
+              onArchiveSession={onArchiveSession}
               sessions={sessions}
               spaces={spaces}
               sessionSpaces={sessionSpaces}
@@ -92,11 +98,11 @@ export function MainPage({
       {/* Main Workspace Area (Chat + Editor + Terminal) */}
       <Panel className="flex flex-col bg-bg-primary">
         {/* @ts-ignore */}
-        <PanelGroup autoSaveId="harness-vertical-layout" orientation="vertical">
+        <PanelGroup id="harness-vertical-layout" orientation="vertical">
           {/* Top Section: Chat + Editor */}
           <Panel defaultSize={70} minSize={20} className="flex flex-col">
             {/* @ts-ignore */}
-            <PanelGroup autoSaveId="harness-chat-editor-layout" orientation="horizontal">
+            <PanelGroup id="harness-chat-editor-layout" orientation="horizontal">
               {/* Chat / Main Content */}
               <Panel defaultSize={50} minSize={30} className="flex flex-col">
                 {!activeSessionId ? (
@@ -110,6 +116,7 @@ export function MainPage({
                   />
                 ) : (
                   <ChatPanel
+                    activeSessionId={activeSessionId}
                     connected={connected}
                     connectionError={connectionError}
                     steps={steps}

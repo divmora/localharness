@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SplitSquareHorizontal, Trash2, X, ChevronDown } from 'lucide-react';
 import { StepUpdate } from '../gen/localharness/v1/localharness_pb';
 import '@xterm/xterm/css/xterm.css';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
 interface TerminalPanelProps {
@@ -171,11 +171,8 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
       invoke('spawn_pty', { rows: term.rows, cols: term.cols }).catch(console.error);
     }, 50);
 
-    let unlistenFn: UnlistenFn | null = null;
-    listen<number[]>('pty-output', (event) => {
+    const unlistenFnPromise = listen<number[]>('pty-output', (event) => {
       term.write(new Uint8Array(event.payload));
-    }).then(unlisten => {
-      unlistenFn = unlisten;
     });
 
     const onDataDisposable = term.onData((data) => {
@@ -193,10 +190,13 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
         }
       });
     });
-    resizeObserver.observe(terminalRef.current);
+    
+    if (terminalRef.current) {
+      resizeObserver.observe(terminalRef.current);
+    }
     
     return () => {
-      if (unlistenFn) unlistenFn();
+      unlistenFnPromise.then(unlisten => unlisten());
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
       resizeObserver.disconnect();
@@ -207,10 +207,7 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
 
   // Set up global observers and output streams
   useEffect(() => {
-    let unlistenSidecar: UnlistenFn | null = null;
-    let unlistenRust: UnlistenFn | null = null;
-
-    listen<SidecarLogEvent>('sidecar-log', (event) => {
+    const unlistenSidecarPromise = listen<SidecarLogEvent>('sidecar-log', (event) => {
       const id = `go:${event.payload.session_id}`;
       
       setOutputSources(prev => {
@@ -226,14 +223,14 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
              term.writeln(`\x1b[36m[Sidecar]\x1b[0m ${event.payload.log}`);
           }
       }, 0);
-    }).then(u => unlistenSidecar = u);
+    });
 
-    listen<RustLogEvent>('rust-log', (event) => {
+    const unlistenRustPromise = listen<RustLogEvent>('rust-log', (event) => {
       const term = outputTerminalsRef.current.get('rust');
       if (term) {
         term.writeln(`\x1b[32m[Rust]\x1b[0m ${event.payload.log}`);
       }
-    }).then(u => unlistenRust = u);
+    });
 
     const resizeObserver = new ResizeObserver(() => {
       requestAnimationFrame(() => {
@@ -247,8 +244,8 @@ export function TerminalPanel({ steps = [], activeSessionId }: TerminalPanelProp
     }
 
     return () => {
-      if (unlistenSidecar) unlistenSidecar();
-      if (unlistenRust) unlistenRust();
+      unlistenSidecarPromise.then(unlisten => unlisten());
+      unlistenRustPromise.then(unlisten => unlisten());
       resizeObserver.disconnect();
       // Dispose all dynamic terminals
       outputTerminalsRef.current.forEach(term => term.dispose());

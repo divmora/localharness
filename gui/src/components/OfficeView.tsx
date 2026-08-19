@@ -296,7 +296,7 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
 
       {/* Manager Chat Overlay */}
       <div 
-        className={`absolute top-4 bottom-4 left-4 z-10 w-96 bg-bg-primary/95 backdrop-blur-md border border-border-primary rounded-lg shadow-xl flex flex-col overflow-hidden transition-transform duration-300 ${isChatOpen ? 'translate-x-0' : '-translate-x-[110%]'}`}
+        className={`absolute top-4 bottom-4 right-4 z-10 w-96 bg-bg-primary/95 backdrop-blur-md border border-border-primary rounded-lg shadow-xl flex flex-col overflow-hidden transition-transform duration-300 ${isChatOpen ? 'translate-x-0' : 'translate-x-[120%]'}`}
       >
         <div className="flex items-center justify-between p-3 border-b border-border-primary bg-bg-secondary shrink-0">
           <div className="font-bold text-sm text-text-primary flex items-center gap-2">
@@ -321,7 +321,7 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
       {!isChatOpen && (
         <button 
           onClick={() => setIsChatOpen(true)}
-          className="absolute top-4 left-4 z-10 bg-bg-primary border border-border-primary rounded-lg p-3 shadow-lg hover:bg-bg-secondary transition-colors"
+          className="absolute top-4 right-4 z-10 bg-bg-primary border border-border-primary rounded-lg p-3 shadow-lg hover:bg-bg-secondary transition-colors"
           title="Open Manager Chat"
         >
           <div className="w-2 h-2 rounded-full bg-blue-500 mb-1"></div>

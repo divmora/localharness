@@ -91,6 +91,7 @@ export function TopBar({
               Agent
             </button>
             <button 
+              data-testid="office-tab"
               onClick={() => onViewChange?.('office')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 currentView === 'office' 
@@ -211,6 +212,24 @@ export function TopBar({
               <PanelBottom size={16} />
             </button>
           )}
+
+          {/* Model and Budget */}
+          <div className="flex items-center gap-2 pl-2 border-l border-border-primary ml-1 h-6">
+            <select className="appearance-none bg-transparent hover:bg-bg-tertiary text-text-secondary hover:text-text-primary text-xs font-medium rounded px-2 py-0.5 outline-none cursor-pointer transition-colors">
+              <option>SWE-1.6 Slow</option>
+              <option>Devin Local</option>
+            </select>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-bg-tertiary rounded border border-border-primary hover:border-border-highlight transition-colors cursor-pointer group">
+              <span className="text-[10px] font-bold text-text-tertiary group-hover:text-text-secondary">BUDGET</span>
+              <select className="appearance-none bg-transparent text-xs font-mono text-text-primary outline-none cursor-pointer pr-1">
+                <option value="0">0 DC</option>
+                <option value="10">10 DC</option>
+                <option value="50">50 DC</option>
+                <option value="100">100 DC</option>
+                <option value="500">500 DC</option>
+              </select>
+            </div>
+          </div>
           
           <div className="w-[1px] h-4 bg-border-primary mx-1" />
           <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ring-bg-primary overflow-hidden">

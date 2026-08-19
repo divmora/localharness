@@ -16,6 +16,7 @@
     "notification:default",
     "core:tray:default",
     "os:default",
-    "core:window:default"
+    "core:window:default",
+    "playwright:default"
   ]
 }
