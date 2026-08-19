@@ -8,13 +8,13 @@ export function usePixelPanelSizes(minPx: number, maxPx: number, defaultPercenta
       const w = window.innerWidth;
       // Safeguard against tiny windows
       if (w === 0) return;
-      
+
       const minPercentage = (minPx / w) * 100;
       const maxPercentage = (maxPx / w) * 100;
-      
+
       setSizes({
-        minSize: Math.max(1, Math.min(minPercentage, 90)),
-        maxSize: Math.max(10, Math.min(maxPercentage, 99)),
+        minSize: Math.max(20, Math.min(minPercentage, 90)),
+        maxSize: Math.max(100, Math.min(maxPercentage, 99)),
       });
     };
     handleResize();

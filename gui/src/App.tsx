@@ -114,7 +114,16 @@ function App() {
       setOffices(officesList);
       setSpaces(spacesList);
       setSessionSpaces(sessionMap);
-      setOfficeManagers(managerMap);
+      
+      // Filter out office managers that point to deleted or archived sessions
+      const activeSessionIds = new Set(activeSessions.map(s => s.id));
+      const validManagerMap: Record<string, string> = {};
+      for (const [officeId, managerId] of Object.entries(managerMap)) {
+        if (activeSessionIds.has(managerId)) {
+          validManagerMap[officeId] = managerId;
+        }
+      }
+      setOfficeManagers(validManagerMap);
     } catch (err) {
       console.error("Failed to list sessions:", err);
     }
