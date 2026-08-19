@@ -38,7 +38,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [initialBudget, setInitialBudget] = useState<number>(0);
   const [currentView, setCurrentView] = usePersistentState<'main' | 'customizations' | 'sessions' | 'office'>('ui.currentView', 'main');
-  const [workspace, setWorkspace] = useState<string | null>(null);
+  const [workspace, setWorkspace] = usePersistentState<string | null>('ui.workspace', null);
   
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
   const [spaces, setSpaces] = useState<Space[]>([]);
@@ -96,7 +96,7 @@ function App() {
       const iid = await invoke<string>('get_installation_id', { target: null });
       setInstallationId(iid);
 
-      const [result, officesList, spacesList, sessionMap, managerMap] = await Promise.all([
+      const [result, officesList, spacesList, sessionMap, managerMap, archivedIds] = await Promise.all([
         invoke<number[]>('list_sessions', { target: null }),
         invoke<Office[]>('get_offices'),
         invoke<Space[]>('get_spaces', { 
@@ -104,10 +104,12 @@ function App() {
           officeId: activeOfficeId
         }),
         invoke<Record<string, string>>('get_session_spaces'),
-        invoke<Record<string, string>>('get_all_office_managers')
+        invoke<Record<string, string>>('get_all_office_managers'),
+        invoke<string[]>('get_archived_sessions')
       ]);
       const sessionList = fromBinary(SessionListSchema, new Uint8Array(result));
-      const sortedSessions = sessionList.sessions.sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
+      const activeSessions = sessionList.sessions.filter(s => !archivedIds.includes(s.id));
+      const sortedSessions = activeSessions.sort((a, b) => Number(b.updatedAt) - Number(a.updatedAt));
       setSessions(sortedSessions);
       setOffices(officesList);
       setSpaces(spacesList);
@@ -303,6 +305,7 @@ function App() {
           showTerminal={showTerminal}
           onToggleTerminal={() => setShowTerminal(!showTerminal)}
           showSidebar={showAgentSidebar}
+          showSidebarToggle={currentView !== 'customizations'}
           onToggleSidebar={() => setShowAgentSidebar(!showAgentSidebar)}
         />
         <div className="flex flex-1 overflow-hidden relative">

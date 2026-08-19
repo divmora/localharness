@@ -91,11 +91,22 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                     });
                     
                     const pastSteps: StepUpdate[] = [];
+                    let currentTrajectoryId = "traj_0";
+                    let trajCounter = 0;
                     const lines = rawJsonl.split('\n');
                     for (const line of lines) {
                         if (!line.trim()) continue;
                         try {
                             const entry = JSON.parse(line);
+                            
+                            if (entry.type === 'TRAJECTORY_STATE' && (entry.status === 'TRAJ_RUNNING' || entry.status === 'TRAJ_IDLE')) {
+                                if (entry.status === 'TRAJ_RUNNING') {
+                                    trajCounter++;
+                                    currentTrajectoryId = `traj_${trajCounter}`;
+                                }
+                                continue;
+                            }
+                            
                             let source = StepUpdate_Source.UNSPECIFIED;
                             if (entry.source === 'USER_EXPLICIT' || entry.source === 'SOURCE_USER' || entry.type === 'USER_INPUT') {
                                 source = StepUpdate_Source.USER;
@@ -157,6 +168,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                             }
 
                             const step = create(StepUpdateSchema, {
+                                trajectoryId: entry.trajectory_id || currentTrajectoryId,
                                 stepIndex: entry.step_index,
                                 source: source,
                                 state: StepUpdate_State.DONE,
@@ -570,7 +582,7 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
             }
             setConnected(false);
         };
-    }, [activeSessionId, isManager]);
+    }, [activeSessionId, isManager, workspacePath]);
 
     // Flush queued messages when server is ready
     useEffect(() => {

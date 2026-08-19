@@ -912,9 +912,14 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 	e.emitStep(step)
 
 	// ── Permission check (if handler registered) ──
-	// Skip permission for paths inside appDataDir — the brain directory is the
-	// agent's own workspace for artifacts, plans, and scratch files.
-	if e.permissionHandler != nil && !e.isAppDataDirPath(tc) {
+	// Skip permission for interactive/internal tools that don't touch the workspace.
+	requiresPermission := true
+	switch tc.Name {
+	case "ask_question", "ask_permission", "list_permissions", "finish":
+		requiresPermission = false
+	}
+
+	if e.permissionHandler != nil && requiresPermission && !e.isAppDataDirPath(tc) {
 		approved, reason, err := e.requestPermission(ctx, tc, step)
 		if err != nil {
 			step.State = pb.StepUpdate_STATE_ERROR

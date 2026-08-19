@@ -16,20 +16,22 @@ interface TopBarProps {
   showTerminal?: boolean;
   onToggleTerminal?: () => void;
   showSidebar?: boolean;
+  showSidebarToggle?: boolean;
   onToggleSidebar?: () => void;
 }
 
-export function TopBar({ 
-  currentView = 'main', 
-  onViewChange, 
-  offices = [], 
-  activeOfficeId = 'default', 
-  onSelectOffice, 
+export function TopBar({
+  currentView = 'main',
+  onViewChange,
+  offices = [],
+  activeOfficeId = 'default',
+  onSelectOffice,
   onCreateOffice,
   isChatMode,
   showTerminal,
   onToggleTerminal,
   showSidebar,
+  showSidebarToggle,
   onToggleSidebar
 }: TopBarProps) {
   const [platform, setPlatform] = useState<string>('');
@@ -37,7 +39,7 @@ export function TopBar({
 
   useEffect(() => {
     const window = getCurrentWebviewWindow();
-    
+
     const checkFullscreen = async () => {
       try {
         setIsFullscreen(await window.isFullscreen());
@@ -45,9 +47,9 @@ export function TopBar({
         console.error(e);
       }
     };
-    
+
     checkFullscreen();
-    
+
     const unlisten = window.onResized(() => {
       checkFullscreen();
     });
@@ -70,8 +72,8 @@ export function TopBar({
   const isMac = platform === 'macos';
 
   return (
-    <div 
-      data-tauri-drag-region 
+    <div
+      data-tauri-drag-region
       className="flex items-center justify-between h-11 w-full bg-bg-secondary border-b border-border-primary shrink-0 select-none z-50 px-2"
     >
       {/* Left Area (Mac traffic lights space + controls) */}
@@ -80,24 +82,22 @@ export function TopBar({
         <div className="flex items-center gap-2 pl-2">
           {/* Segmented Control */}
           <div className="flex items-center bg-bg-primary rounded-md p-0.5 border border-border-primary">
-            <button 
+            <button
               onClick={() => onViewChange?.('main')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                currentView === 'main' 
-                  ? 'bg-bg-tertiary text-text-primary' 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${currentView === 'main'
+                  ? 'bg-bg-tertiary text-text-primary'
                   : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-secondary'
-              }`}
+                }`}
             >
               Agent
             </button>
-            <button 
+            <button
               data-testid="office-tab"
               onClick={() => onViewChange?.('office')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                currentView === 'office' 
-                  ? 'bg-bg-tertiary text-text-primary' 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${currentView === 'office'
+                  ? 'bg-bg-tertiary text-text-primary'
                   : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-secondary'
-              }`}
+                }`}
             >
               Office
             </button>
@@ -128,14 +128,13 @@ export function TopBar({
       {/* Center (Omnibar) */}
       <div className="flex-1 max-w-md flex justify-center h-full items-center pointer-events-none" data-tauri-drag-region>
         <div className="flex items-center w-full max-w-sm gap-2">
-          {isChatMode && (
+          {showSidebarToggle && (
             <button
               onClick={onToggleSidebar}
-              className={`p-1.5 rounded-md pointer-events-auto transition-colors ${
-                showSidebar 
-                  ? 'text-text-primary bg-bg-tertiary' 
+              className={`p-1.5 rounded-md pointer-events-auto transition-colors ${showSidebar
+                  ? 'text-text-primary bg-bg-tertiary'
                   : 'text-text-tertiary hover:text-text-primary hover:bg-bg-secondary'
-              }`}
+                }`}
               title="Toggle Sidebar"
             >
               <PanelLeft size={16} />
@@ -152,7 +151,7 @@ export function TopBar({
       {/* Right Area (Controls and Win/Linux Window Buttons) */}
       <div className="flex items-center justify-end flex-1 gap-2 h-full" data-tauri-drag-region>
         <div className="flex items-center gap-3 pr-2">
-          
+
           {/* Office Switcher */}
           {currentView === 'office' && (
             <div className="flex items-center gap-1">
@@ -230,7 +229,7 @@ export function TopBar({
               </select>
             </div>
           </div>
-          
+
           <div className="w-[1px] h-4 bg-border-primary mx-1" />
           <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ring-bg-primary overflow-hidden">
             NG

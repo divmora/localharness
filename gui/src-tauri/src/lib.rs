@@ -880,6 +880,7 @@ async fn list_sessions(
 #[tauri::command]
 async fn delete_session(
     app: tauri::AppHandle,
+    state: tauri::State<'_, db::DbState>,
     session_id: String,
     target: Option<ConnectionTarget>,
 ) -> Result<(), String> {
@@ -930,6 +931,15 @@ async fn delete_session(
             return Err(format!("SSH rm failed: {}", String::from_utf8_lossy(&output.stderr)));
         }
     } else {
+        // Kill the process if it's running locally
+        if let Ok(Some(active)) = state.get_active_session(&session_id) {
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(active.pid.to_string())
+                .status();
+        }
+        let _ = state.delete_active_session(&session_id);
+
         let home = dirs::home_dir().ok_or("Could not find home dir")?;
         let conv_file = home.join(format!(".divmora/localharness/conversations/{}.pb", session_id));
         let brain_dir = home.join(format!(".divmora/localharness/brain/{}", session_id));

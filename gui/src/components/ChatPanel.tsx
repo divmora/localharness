@@ -45,34 +45,36 @@ export function ChatPanel({
     }
   };
 
-  // Group streaming steps by stepIndex so we have one cohesive message per step
+  // Group streaming steps by trajectoryId and stepIndex so we have one cohesive message per step
   const messages = useMemo(() => {
-    const grouped = new Map<number, StepUpdate>();
+    const grouped = new Map<string, StepUpdate>();
     
     for (const step of steps) {
-      if (!grouped.has(step.stepIndex)) {
-        grouped.set(step.stepIndex, clone(StepUpdateSchema, step));
+      const key = `${step.trajectoryId}-${step.stepIndex}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, clone(StepUpdateSchema, step));
       } else {
-        const existing = grouped.get(step.stepIndex)!;
+        const existing = grouped.get(key)!;
         // Merge text if it's a streaming update
-        if (step.textDelta) {
-          existing.text += step.textDelta;
-        } else if (step.text) {
+        if (step.text) {
           existing.text = step.text;
         }
-        
-        // If the new step has an action (e.g. results), merge it
-        if (step.action?.case) {
+        if (step.thinking) {
+          existing.thinking = step.thinking;
+        }
+        if (step.state) {
+          existing.state = step.state;
+        }
+        if (step.action) {
           existing.action = step.action;
         }
-        // Always take the latest state
-        existing.state = step.state;
-        
-        grouped.set(step.stepIndex, existing);
+        grouped.set(key, existing);
       }
     }
     
-    return Array.from(grouped.values()).sort((a, b) => a.stepIndex - b.stepIndex);
+    // Convert Map values to array.
+    // The Map preserves insertion order, which is correct chronologically.
+    return Array.from(grouped.values());
   }, [steps]);
 
   const renderAction = (msg: StepUpdate) => {
