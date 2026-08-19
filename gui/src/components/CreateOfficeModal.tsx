@@ -1,23 +1,24 @@
 import { useState, useRef, useEffect } from 'react';
 
 interface CreateOfficeModalProps {
-  onConfirm: (name: string, country: string) => void;
+  onConfirm: (name: string, country: string, workspacePath: string | null) => void;
   onCancel: () => void;
 }
 
-const COUNTRIES = [
+export const COUNTRIES = [
   'USA',
-  'India',
-  'China',
-  'Japan',
+  'Canada',
   'UK',
   'Germany',
-  'Canada'
+  'Japan',
+  'Australia',
+  'India'
 ];
 
 export function CreateOfficeModal({ onConfirm, onCancel }: CreateOfficeModalProps) {
   const [name, setName] = useState('');
   const [country, setCountry] = useState('USA');
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -26,7 +27,23 @@ export function CreateOfficeModal({ onConfirm, onCancel }: CreateOfficeModalProp
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onConfirm(name, country);
+    onConfirm(name, country, workspacePath);
+  };
+
+  const handleSelectWorkspace = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Office Workspace',
+      });
+      if (selected && typeof selected === 'string') {
+        setWorkspacePath(selected);
+      }
+    } catch (err) {
+      console.error("Failed to open dialog:", err);
+    }
   };
 
   return (
@@ -58,6 +75,29 @@ export function CreateOfficeModal({ onConfirm, onCancel }: CreateOfficeModalProp
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-xs text-text-secondary mb-1">Workspace Directory (Optional)</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                readOnly
+                className="flex-1 px-3 py-2 bg-bg-secondary border border-border-primary rounded text-text-secondary text-sm"
+                value={workspacePath || 'Auto-generated (Isolated)'}
+                placeholder="Auto-generated"
+              />
+              <button
+                type="button"
+                onClick={handleSelectWorkspace}
+                className="px-3 py-2 text-sm font-medium text-text-primary bg-bg-tertiary border border-border-primary rounded hover:bg-bg-hover transition-colors whitespace-nowrap"
+              >
+                Browse...
+              </button>
+            </div>
+            <p className="text-[10px] text-text-secondary mt-1">
+              Select an existing project folder, or leave blank to create an isolated workspace.
+            </p>
           </div>
           
           <div className="flex justify-end gap-2">

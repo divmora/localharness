@@ -17,6 +17,8 @@ interface ChatPanelProps {
   onResume?: (msg?: string) => void;
   onSubmitQuestionResponse?: (requestId: string, answers: any[], skipped: boolean) => void;
   onSubmitPermissionResponse?: (requestId: string, approved: boolean, reason?: string) => void;
+  workspacePath?: string | null;
+  clientSource?: string | null;
 }
 
 
@@ -32,7 +34,9 @@ export function ChatPanel({
   onInterrupt,
   onResume,
   onSubmitQuestionResponse, 
-  onSubmitPermissionResponse 
+  onSubmitPermissionResponse,
+  workspacePath,
+  clientSource
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [allocatedBudget, setAllocatedBudget] = useState<number>(0);
@@ -372,8 +376,11 @@ export function ChatPanel({
           </div>
         </div>
         <div className="flex items-center gap-4 text-[11px] text-text-tertiary px-1 font-medium">
-          <span className="flex items-center gap-1.5 hover:text-text-secondary cursor-pointer transition-colors"><Monitor size={12} /> Local</span>
-          <span className="flex items-center gap-1.5 hover:text-text-secondary cursor-pointer transition-colors"><Folder size={12} /> otel-aws-log-parser</span>
+          <span className="flex items-center gap-1.5 hover:text-text-secondary cursor-pointer transition-colors"><Monitor size={12} /> {clientSource || 'Local'}</span>
+          <span className="flex items-center gap-1.5 hover:text-text-secondary cursor-pointer transition-colors">
+            <Folder size={12} /> 
+            {workspacePath ? (workspacePath.split('/').pop() || workspacePath) : 'No Workspace'}
+          </span>
         </div>
       </div>
     </div>

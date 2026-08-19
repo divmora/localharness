@@ -8,8 +8,8 @@ import { TopBar } from './components/TopBar';
 import { OfficeView } from './components/OfficeView';
 import { CreateOfficeModal } from './components/CreateOfficeModal';
 import { PromptModal } from './components/PromptModal';
-import { ConfirmModal } from './components/ConfirmModal';
 import { MainPage } from './pages/MainPage';
+import { OfficeSettingsPage } from './pages/OfficeSettingsPage';
 import './App.css';
 import { useHarness } from './hooks/useHarness';
 import { useToast } from './components/Toast';
@@ -17,6 +17,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { fromBinary } from '@bufbuild/protobuf';
 import { SessionListSchema, SessionInfo as ProtoSessionInfo } from './gen/localharness/v1/localharness_pb';
 import { usePersistentState } from './hooks/usePersistentState';
+import { Routes, Route, useNavigate, useMatch, Navigate, useLocation } from 'react-router-dom';
 
 export interface Space {
   id: string;
@@ -29,15 +30,28 @@ export interface Space {
 export interface Office {
   id: string;
   name: string;
+  workspace_path?: string;
 }
 
 import { usePixelPanelSizes } from './hooks/usePixelSize';
 
 function App() {
   const sidebarSizes = usePixelPanelSizes(250, 400, 250);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const officeMatch = useMatch('/office/:officeId/*');
+  const [lastOfficeId, setLastOfficeId] = usePersistentState<string>('ui.lastOfficeId', 'default');
+  
+  const activeOfficeId = officeMatch?.params.officeId || lastOfficeId;
+  
+  useEffect(() => {
+    if (officeMatch?.params.officeId) {
+      setLastOfficeId(officeMatch.params.officeId);
+    }
+  }, [officeMatch?.params.officeId, setLastOfficeId]);
+  
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [initialBudget, setInitialBudget] = useState<number>(0);
-  const [currentView, setCurrentView] = usePersistentState<'main' | 'customizations' | 'sessions' | 'office'>('ui.currentView', 'main');
   const [workspace, setWorkspace] = usePersistentState<string | null>('ui.workspace', null);
   
   const [sessions, setSessions] = useState<ProtoSessionInfo[]>([]);
@@ -47,7 +61,21 @@ function App() {
   const [installationId, setInstallationId] = useState<string | null>(null);
   
   const [offices, setOffices] = useState<Office[]>([]);
-  const [activeOfficeId, setActiveOfficeId] = usePersistentState<string>('ui.activeOfficeId', 'default');
+  
+  // Persist the last route so the app remembers where you left off
+  const [lastRoute, setLastRoute] = usePersistentState<string>('ui.lastRoute', '/');
+  const [hasRestoredRoute, setHasRestoredRoute] = useState(false);
+
+  useEffect(() => {
+    if (!hasRestoredRoute) {
+      if (location.pathname === '/' && lastRoute !== '/') {
+        navigate(lastRoute, { replace: true });
+      }
+      setHasRestoredRoute(true);
+    } else {
+      setLastRoute(location.pathname);
+    }
+  }, [location.pathname, hasRestoredRoute, lastRoute, navigate, setLastRoute]);
   
   // Modal states
   const [officePromptState, setOfficePromptState] = useState<{ isOpen: boolean }>({ isOpen: false });
@@ -66,7 +94,7 @@ function App() {
 
   const filteredSessions = sessions.filter(session => {
     // Hide office managers from the Chat view
-    if (currentView !== 'office' && managerSessionIds.has(session.id)) {
+    if (!location.pathname.startsWith('/office') && managerSessionIds.has(session.id)) {
       return false;
     }
 
@@ -88,8 +116,27 @@ function App() {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showAgentSidebar, setShowAgentSidebar]);
+
+  // Update window title dynamically based on active office
+  useEffect(() => {
+    import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
+      const window = getCurrentWebviewWindow();
+      if (location.pathname.startsWith('/office') && activeOfficeId !== 'default') {
+        const office = offices.find(o => o.id === activeOfficeId);
+        if (office) {
+          window.setTitle(`Divmora - ${office.name}`);
+        } else {
+          window.setTitle('Divmora - Office');
+        }
+      } else {
+        window.setTitle('Divmora');
+      }
+    }).catch(console.error);
+  }, [location.pathname, activeOfficeId, offices]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -146,7 +193,7 @@ function App() {
 
   const handleSelectSession = (id: string) => {
     setActiveSessionId(id);
-    setCurrentView('main');
+    navigate('/');
   };
 
   const handleStartPromptSession = async (prompt: string, allocatedBudget?: number) => {
@@ -190,20 +237,33 @@ function App() {
     setOfficePromptState({ isOpen: true });
   };
 
-  const confirmCreateOffice = async (name: string, country: string) => {
-    if (name && name.trim() !== '') {
-      const id = crypto.randomUUID();
+  const confirmCreateOffice = async (name: string, country: string, workspacePath: string | null) => {
+    if (name.trim()) {
       try {
-        await invoke('create_office', { id, name: name.trim(), country });
+        const id = await invoke<string>('create_office', { name: name.trim(), country, workspacePath });
         const officesList = await invoke<Office[]>('get_offices');
         setOffices(officesList);
-        setActiveOfficeId(id);
+        navigate('/office/' + id);
       } catch (err) {
         console.error("Failed to create office:", err);
         showToast({ title: 'Error', message: 'Failed to create office', type: 'error' });
       }
     }
     setOfficePromptState({ isOpen: false });
+  };
+
+  const handleSelectOffice = async (id: string) => {
+    if (id === activeOfficeId) return;
+
+    try {
+      const targetOffice = offices.find(o => o.id === id);
+      const name = targetOffice ? targetOffice.name : "Office";
+      
+      await invoke('spawn_or_focus_office', { id, name });
+    } catch (e) {
+      console.error("Failed to spawn new window:", e);
+      showToast({ title: 'Error', message: 'Failed to open office window.', type: 'error' });
+    }
   };
 
   const handleArchiveSession = async (sessionId: string) => {
@@ -303,97 +363,122 @@ function App() {
   return (
     <>
       <div className="flex flex-col h-screen w-screen overflow-hidden bg-bg-primary text-text-primary transition-colors">
-      <TopBar 
-          currentView={currentView} 
-          onViewChange={setCurrentView} 
+        <TopBar 
           offices={offices}
           activeOfficeId={activeOfficeId}
-          onSelectOffice={setActiveOfficeId}
+          onSelectOffice={handleSelectOffice}
           onCreateOffice={handleCreateOffice}
-          isChatMode={activeSessionId !== null && currentView === 'main'}
+          isChatMode={activeSessionId !== null && location.pathname === '/'}
           showTerminal={showTerminal}
           onToggleTerminal={() => setShowTerminal(!showTerminal)}
           showSidebar={showAgentSidebar}
-          showSidebarToggle={currentView !== 'customizations'}
+          showSidebarToggle={location.pathname !== '/customizations'}
           onToggleSidebar={() => setShowAgentSidebar(!showAgentSidebar)}
         />
         <div className="flex flex-1 overflow-hidden relative">
           <CommandPalette />
 
-          {currentView === 'customizations' ? (
-            <CustomizationsPage 
-              onClose={() => setCurrentView('main')} 
-            />
-          ) : currentView === 'sessions' ? (
-            <PanelGroup id="sessions-layout" orientation="horizontal" className="flex-1 overflow-hidden">
-              {showAgentSidebar && (
-                <>
-                  <Panel defaultSize={sidebarSizes.defaultSize} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
-                    <AgentSidebar
-                      activeSessionId={activeSessionId}
-                      onSelectSession={handleSelectSession}
-                      onNewSession={handleNewSession}
-                      onCreateSpace={handleCreateSpace}
-                      onMoveSessionToSpace={handleMoveSessionToSpace}
-                      onOpenCustomizations={() => setCurrentView('customizations')}
-                      onOpenSessionsManager={() => setCurrentView('sessions')}
-                      onDeleteSession={handleDeleteSession}
-                      onArchiveSession={handleArchiveSession}
-                      sessions={filteredSessions}
-                      spaces={spaces}
-                      sessionSpaces={sessionSpaces}
-                      mcpServerCount={0}
-                    />
-                  </Panel>
-                  <PanelResizeHandle className="w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-500/10 transition-colors group">
-                    <div className="w-[1px] h-full bg-border-primary group-hover:bg-blue-500/50 transition-colors" />
-                  </PanelResizeHandle>
-                </>
-              )}
-              <Panel className="flex flex-col min-w-0">
-                <SessionsManager sessions={filteredSessions} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} />
-              </Panel>
-            </PanelGroup>
-          ) : currentView === 'office' ? (
-            <OfficeView 
-              sessions={filteredSessions} 
-              onSelectSession={handleSelectSession}
-              spaces={spaces}
-              sessionSpaces={sessionSpaces}
-              activeOfficeId={activeOfficeId}
-              managerSessionId={officeManagers[activeOfficeId]}
-              onManagerCreated={(sessionId) => handleManagerCreated(sessionId, activeOfficeId)}
-            />
-          ) : (
-            <MainPage
-              activeSessionId={activeSessionId}
-              sessions={filteredSessions}
-              spaces={spaces}
-              sessionSpaces={sessionSpaces}
-              showAgentSidebar={showAgentSidebar}
-              connected={connected}
-              connectionError={connectionError}
-              steps={steps}
-              workspace={workspace}
-              onSelectSession={handleSelectSession}
-              onNewSession={handleNewSession}
-              onCreateSpace={handleCreateSpace}
-              onMoveSessionToSpace={handleMoveSessionToSpace}
-              onOpenCustomizations={() => setCurrentView('customizations')}
-              onOpenSessionsManager={() => setCurrentView('sessions')}
-              onSubmitPrompt={handleStartPromptSession}
-              onSendPrompt={sendPrompt}
-              onSubmitQuestionResponse={submitQuestionResponse}
-              onSubmitPermissionResponse={submitPermissionResponse}
-              onSelectWorkspace={setWorkspace}
-              onDeleteSession={handleDeleteSession}
-                      onArchiveSession={handleArchiveSession}
-              trajectoryState={trajectoryState}
-              onInterrupt={interrupt}
-              onResume={resume}
-              showTerminal={showTerminal}
-            />
-          )}
+          <Routes>
+            <Route path="/customizations" element={
+              <CustomizationsPage onClose={() => navigate(-1)} />
+            } />
+            
+            <Route path="/sessions" element={
+              <PanelGroup id="sessions-layout" orientation="horizontal" className="flex-1 overflow-hidden">
+                {showAgentSidebar && (
+                  <>
+                    <Panel defaultSize={sidebarSizes.defaultSize} minSize={sidebarSizes.minSize} maxSize={sidebarSizes.maxSize} className="flex flex-col">
+                      <AgentSidebar
+                        activeSessionId={activeSessionId}
+                        onSelectSession={handleSelectSession}
+                        onNewSession={handleNewSession}
+                        onCreateSpace={handleCreateSpace}
+                        onMoveSessionToSpace={handleMoveSessionToSpace}
+                        onOpenCustomizations={() => navigate('/customizations')}
+                        onOpenSessionsManager={() => navigate('/sessions')}
+                        onDeleteSession={handleDeleteSession}
+                        onArchiveSession={handleArchiveSession}
+                        sessions={filteredSessions}
+                        spaces={spaces}
+                        sessionSpaces={sessionSpaces}
+                        mcpServerCount={0}
+                      />
+                    </Panel>
+                    <PanelResizeHandle className="w-1.5 flex items-center justify-center cursor-col-resize hover:bg-blue-500/10 transition-colors group">
+                      <div className="w-[1px] h-full bg-border-primary group-hover:bg-blue-500/50 transition-colors" />
+                    </PanelResizeHandle>
+                  </>
+                )}
+                <Panel className="flex flex-col min-w-0">
+                  <SessionsManager sessions={filteredSessions} onSelectSession={handleSelectSession} onDeleteSession={handleDeleteSession} />
+                </Panel>
+              </PanelGroup>
+            } />
+
+            <Route path="/office/:officeId/settings" element={
+              <OfficeSettingsPage 
+                officeId={activeOfficeId}
+                onClose={() => navigate(`/office/${activeOfficeId}`)}
+                onOfficeUpdated={() => {
+                  invoke<Office[]>('get_offices').then(setOffices);
+                }}
+                onOfficeDeleted={() => {
+                  navigate(`/office/default`);
+                  invoke<Office[]>('get_offices').then(setOffices);
+                }}
+              />
+            } />
+            
+            <Route path="/office/:officeId/*" element={
+              (() => {
+                const activeOffice = offices.find(o => o.id === activeOfficeId);
+                return (
+                  <OfficeView 
+                    sessions={filteredSessions} 
+                    onSelectSession={handleSelectSession}
+                    spaces={spaces}
+                    sessionSpaces={sessionSpaces}
+                    activeOfficeId={activeOfficeId}
+                    managerSessionId={officeManagers[activeOfficeId]}
+                    onManagerCreated={(sessionId) => handleManagerCreated(sessionId, activeOfficeId)}
+                    workspacePath={activeOffice?.workspace_path || null}
+                  />
+                );
+              })()
+            } />
+
+            <Route path="/" element={
+              <MainPage
+                activeSessionId={activeSessionId}
+                sessions={filteredSessions}
+                spaces={spaces}
+                sessionSpaces={sessionSpaces}
+                showAgentSidebar={showAgentSidebar}
+                connected={connected}
+                connectionError={connectionError}
+                steps={steps}
+                workspace={workspace}
+                onSelectSession={handleSelectSession}
+                onNewSession={handleNewSession}
+                onCreateSpace={handleCreateSpace}
+                onMoveSessionToSpace={handleMoveSessionToSpace}
+                onOpenCustomizations={() => navigate('/customizations')}
+                onOpenSessionsManager={() => navigate('/sessions')}
+                onSubmitPrompt={handleStartPromptSession}
+                onSendPrompt={sendPrompt}
+                onSubmitQuestionResponse={submitQuestionResponse}
+                onSubmitPermissionResponse={submitPermissionResponse}
+                onSelectWorkspace={setWorkspace}
+                onDeleteSession={handleDeleteSession}
+                onArchiveSession={handleArchiveSession}
+                trajectoryState={trajectoryState}
+                onInterrupt={interrupt}
+                onResume={resume}
+                showTerminal={showTerminal}
+              />
+            } />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </div>
       </div>
 
@@ -415,13 +500,12 @@ function App() {
       )}
 
       {deleteConfirmState.isOpen && (
-        <ConfirmModal
+        <PromptModal
           title="Delete Session"
-          message="Are you sure you want to delete this session? This action cannot be undone."
-          confirmText="Delete"
-          destructive={true}
+          message="Are you sure you want to permanently delete this session? This will remove all files and chat history and cannot be undone."
           onConfirm={confirmDeleteSession}
-          onCancel={() => setDeleteConfirmState({ isOpen: false, sessionId: undefined })}
+          onCancel={() => setDeleteConfirmState({ isOpen: false })}
+          confirmText="Delete"
         />
       )}
     </>

@@ -23,6 +23,8 @@ mod resolver;
 mod llm_config;
 mod mcp_config;
 mod settings;
+pub mod session;
+mod office;
 mod assets;
 use localharness::v1::{ConversationState, InputConfig, OutputConfig, SessionInfo, SessionList};
 
@@ -128,35 +130,6 @@ cat "$file"
     Ok(content.trim().to_string())
 }
 
-#[tauri::command]
-fn create_office(
-    id: String,
-    name: String,
-    country: String,
-    state: tauri::State<'_, crate::db::DbState>,
-) -> Result<(), String> {
-    state.create_office(&id, &name, &country).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_office_manager(state: tauri::State<db::DbState>, office_id: String) -> Result<Option<String>, String> {
-    state.get_office_manager(&office_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_all_office_managers(state: tauri::State<db::DbState>) -> Result<std::collections::HashMap<String, String>, String> {
-    state.get_all_office_managers().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn set_office_manager(state: tauri::State<db::DbState>, office_id: String, manager_session_id: String) -> Result<(), String> {
-    state.set_office_manager(&office_id, &manager_session_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_offices(state: tauri::State<db::DbState>) -> Result<Vec<db::Office>, String> {
-    state.get_offices().map_err(|e| e.to_string())
-}
 
 #[tauri::command]
 fn create_space(
@@ -877,79 +850,6 @@ async fn list_sessions(
     Ok(buf)
 }
 
-#[tauri::command]
-async fn delete_session(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, db::DbState>,
-    session_id: String,
-    target: Option<ConnectionTarget>,
-) -> Result<(), String> {
-    let is_ssh = target.as_ref().map(|t| t.kind == "ssh").unwrap_or(false);
-
-    if is_ssh {
-        let t = target.as_ref().unwrap();
-        let host = t.host.as_ref().ok_or("SSH host required")?;
-
-        let mut args = vec![
-            "-T".to_string(), "-q".to_string(),
-            "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
-            "-o".to_string(), "BatchMode=yes".to_string(),
-        ];
-        if let Some(port) = t.port {
-            args.push("-p".to_string());
-            args.push(port.to_string());
-        }
-        if let Some(key) = t.key_path.as_ref() {
-            if !key.is_empty() {
-                args.push("-i".to_string());
-                args.push(key.clone());
-            }
-        }
-        if let Some(user) = t.user.as_ref() {
-            if !user.is_empty() {
-                args.push(format!("{}@{}", user, host));
-            } else {
-                args.push(host.clone());
-            }
-        } else {
-            args.push(host.clone());
-        }
-
-        let script = format!("rm -f ~/.divmora/localharness/conversations/{}.pb && rm -rf ~/.divmora/localharness/brain/{}", session_id, session_id);
-        args.push(script);
-
-        use tauri_plugin_shell::ShellExt;
-        let output = app
-            .shell()
-            .command("ssh")
-            .args(args)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to spawn ssh: {}", e))?;
-
-        if !output.status.success() {
-            return Err(format!("SSH rm failed: {}", String::from_utf8_lossy(&output.stderr)));
-        }
-    } else {
-        // Kill the process if it's running locally
-        if let Ok(Some(active)) = state.get_active_session(&session_id) {
-            let _ = std::process::Command::new("kill")
-                .arg("-9")
-                .arg(active.pid.to_string())
-                .status();
-        }
-        let _ = state.delete_active_session(&session_id);
-
-        let home = dirs::home_dir().ok_or("Could not find home dir")?;
-        let conv_file = home.join(format!(".divmora/localharness/conversations/{}.pb", session_id));
-        let brain_dir = home.join(format!(".divmora/localharness/brain/{}", session_id));
-
-        let _ = std::fs::remove_file(conv_file);
-        let _ = std::fs::remove_dir_all(brain_dir);
-    }
-
-    Ok(())
-}
 
 #[derive(serde::Deserialize, Clone)]
 pub struct ConnectionTarget {
@@ -1470,11 +1370,14 @@ pub fn run() {
             read_target_file,
             write_target_file,
             list_target_files,
-            create_office,
-            get_offices,
-            get_office_manager,
-            get_all_office_managers,
-            set_office_manager,
+            office::create_office,
+            office::update_office,
+            office::delete_office,
+            office::get_offices,
+            office::spawn_or_focus_office,
+            office::get_office_manager,
+            office::get_all_office_managers,
+            office::set_office_manager,
             get_office_agents,
             add_office_agent,
             update_agent_tasks,
@@ -1491,7 +1394,7 @@ pub fn run() {
             get_recent_projects,
             get_wallet_balance,
             add_wallet_balance,
-            delete_session,
+            session::delete_session,
             get_archived_sessions,
             archive_session,
             unarchive_session,

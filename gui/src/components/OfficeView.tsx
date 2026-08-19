@@ -39,6 +39,7 @@ interface OfficeViewProps {
   activeOfficeId: string;
   managerSessionId?: string;
   onManagerCreated?: (sessionId: string) => void;
+  workspacePath?: string | null;
 }
 
 
@@ -182,13 +183,14 @@ const ProceduralAvatar = ({ session, agent, homePosition, targetPosition, onClic
   );
 };
 
-export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession, activeOfficeId, managerSessionId, onManagerCreated }: OfficeViewProps) => {
+export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onSelectSession, activeOfficeId, managerSessionId, onManagerCreated, workspacePath }: OfficeViewProps) => {
+  const [officeAgents, setOfficeAgents] = useState<OfficeAgent[]>([]);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [isChatOpen, setIsChatOpen] = useState(true);
-  const [officeAgents, setOfficeAgents] = useState<OfficeAgent[]>([]);
 
-  const { connected, steps, sendPrompt, interrupt } = useHarness(managerSessionId || null, null, 0, true, onManagerCreated, activeOfficeId);
+  // Use useHarness to power the manager chat and task assignment
+  const { connected, steps, sendPrompt, interrupt } = useHarness(managerSessionId || null, workspacePath, 0, true, onManagerCreated, activeOfficeId);
 
   useEffect(() => {
     async function loadData() {
@@ -313,6 +315,7 @@ export const OfficeView = ({ sessions = [], spaces = [], sessionSpaces = {}, onS
             connected={connected}
             onSend={(p: string) => sendPrompt(p)}
             onInterrupt={interrupt}
+            workspacePath={workspacePath}
           />
         </div>
       </div>

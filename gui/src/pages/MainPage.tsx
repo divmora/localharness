@@ -128,6 +128,7 @@ export function MainPage({
                     onSend={onSendPrompt}
                     onSubmitQuestionResponse={onSubmitQuestionResponse}
                     onSubmitPermissionResponse={onSubmitPermissionResponse}
+                    workspacePath={workspace}
                   />
                 )}
               </Panel>

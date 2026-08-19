@@ -18,6 +18,7 @@ pub fn init_db() -> Result<DbState> {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             country TEXT,
+            workspace_path TEXT,
             created_at INTEGER NOT NULL
         )",
         [],
@@ -25,6 +26,7 @@ pub fn init_db() -> Result<DbState> {
 
     // Migration for existing offices
     let _ = conn.execute("ALTER TABLE offices ADD COLUMN country TEXT", []);
+    let _ = conn.execute("ALTER TABLE offices ADD COLUMN workspace_path TEXT", []);
 
     // Ensure a Default Office exists
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
@@ -134,6 +136,7 @@ pub struct Office {
     pub id: String,
     pub name: String,
     pub country: Option<String>,
+    pub workspace_path: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -181,15 +184,24 @@ pub struct OfficeAgent {
 }
 
 impl DbState {
-    pub fn create_office(&self, id: &str, name: &str, country: &str) -> Result<()> {
+    pub fn create_office(&self, id: &str, name: &str, country: &str, workspace_path: Option<&str>) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         conn.execute(
-            "INSERT INTO offices (id, name, country, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![id, name, country, now],
+            "INSERT INTO offices (id, name, country, workspace_path, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, country, workspace_path, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_office(&self, id: &str, name: &str, country: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE offices SET name = ?1, country = ?2 WHERE id = ?3",
+            params![name, country, id],
         )?;
         Ok(())
     }
@@ -322,7 +334,7 @@ impl DbState {
 
     pub fn get_offices(&self) -> Result<Vec<Office>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, name, country FROM offices ORDER BY created_at ASC")?;
+        let mut stmt = conn.prepare("SELECT id, name, country, workspace_path FROM offices ORDER BY created_at ASC")?;
 
         let mut offices = Vec::new();
         let mut rows = stmt.query([])?;
@@ -331,10 +343,72 @@ impl DbState {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 country: row.get(2)?,
+                workspace_path: row.get(3)?,
             });
         }
 
         Ok(offices)
+    }
+
+    pub fn delete_office(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        
+        // Delete all office_agents associated with this office
+        conn.execute("DELETE FROM office_agents WHERE office_id = ?1", params![id])?;
+        // Delete all space mappings for spaces in this office
+        conn.execute("DELETE FROM session_spaces WHERE space_id IN (SELECT id FROM spaces WHERE office_id = ?1)", params![id])?;
+        // Delete all spaces associated with this office
+        conn.execute("DELETE FROM spaces WHERE office_id = ?1", params![id])?;
+        // Delete the office manager
+        conn.execute("DELETE FROM office_managers WHERE office_id = ?1", params![id])?;
+        // Delete the office itself
+        conn.execute("DELETE FROM offices WHERE id = ?1", params![id])?;
+        
+        Ok(())
+    }
+
+    pub fn get_office_sessions(&self, office_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut session_ids = std::collections::HashSet::new();
+
+        // Get manager session
+        let mut stmt = conn.prepare("SELECT manager_session_id FROM office_managers WHERE office_id = ?1")?;
+        let mut rows = stmt.query([office_id])?;
+        if let Some(row) = rows.next()? {
+            session_ids.insert(row.get::<_, String>(0)?);
+        }
+
+        // Get agent sessions
+        let mut stmt = conn.prepare("SELECT session_id FROM office_agents WHERE office_id = ?1")?;
+        let mut rows = stmt.query([office_id])?;
+        while let Some(row) = rows.next()? {
+            session_ids.insert(row.get::<_, String>(0)?);
+        }
+
+        // Get space sessions
+        let mut stmt = conn.prepare("SELECT session_id FROM session_spaces WHERE space_id IN (SELECT id FROM spaces WHERE office_id = ?1)")?;
+        let mut rows = stmt.query([office_id])?;
+        while let Some(row) = rows.next()? {
+            session_ids.insert(row.get::<_, String>(0)?);
+        }
+
+        Ok(session_ids.into_iter().collect())
+    }
+
+    pub fn get_office(&self, id: &str) -> Result<Option<Office>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, name, country, workspace_path FROM offices WHERE id = ?1")?;
+        let mut rows = stmt.query([id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Office {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                country: row.get(2)?,
+                workspace_path: row.get(3)?,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn create_space(&self, id: &str, name: &str, installation_id: &str, office_id: &str) -> Result<()> {

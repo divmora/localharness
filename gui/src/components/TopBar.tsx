@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { type as osType } from '@tauri-apps/plugin-os';
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink, PanelBottom, PanelLeft } from 'lucide-react';
+import { Search, SplitSquareHorizontal, ArrowLeft, ArrowRight, Minus, Square, X, ExternalLink, PanelBottom, PanelLeft, Settings } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { Office } from '../App';
 
 interface TopBarProps {
-  currentView?: string;
-  onViewChange?: (view: 'main' | 'office' | 'customizations' | 'sessions') => void;
   offices?: Office[];
   activeOfficeId?: string;
   onSelectOffice?: (id: string) => void;
@@ -21,8 +20,6 @@ interface TopBarProps {
 }
 
 export function TopBar({
-  currentView = 'main',
-  onViewChange,
   offices = [],
   activeOfficeId = 'default',
   onSelectOffice,
@@ -36,6 +33,8 @@ export function TopBar({
 }: TopBarProps) {
   const [platform, setPlatform] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const window = getCurrentWebviewWindow();
@@ -78,25 +77,19 @@ export function TopBar({
     >
       {/* Left Area (Mac traffic lights space + controls) */}
       <div className="flex items-center flex-1 h-full" data-tauri-drag-region>
-        {isMac && !isFullscreen && <div className="w-[75px] shrink-0" data-tauri-drag-region />}
         <div className="flex items-center gap-2 pl-2">
-          {/* Segmented Control */}
-          <div className="flex items-center bg-bg-primary rounded-md p-0.5 border border-border-primary">
+          {/* Logo and Main Nav */}
+          <div className="flex items-center gap-1 bg-bg-secondary p-0.5 rounded-md border border-border-primary shadow-sm mr-2">
             <button
-              onClick={() => onViewChange?.('main')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${currentView === 'main'
-                  ? 'bg-bg-tertiary text-text-primary'
-                  : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-secondary'
+              onClick={() => navigate('/')}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${location.pathname === '/' ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-tertiary'
                 }`}
             >
-              Agent
+              Chat
             </button>
             <button
-              data-testid="office-tab"
-              onClick={() => onViewChange?.('office')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${currentView === 'office'
-                  ? 'bg-bg-tertiary text-text-primary'
-                  : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-secondary'
+              onClick={() => navigate(`/office/${activeOfficeId || 'default'}`)}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${location.pathname.startsWith('/office') && !location.pathname.includes('/settings') ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-tertiary'
                 }`}
             >
               Office
@@ -132,8 +125,8 @@ export function TopBar({
             <button
               onClick={onToggleSidebar}
               className={`p-1.5 rounded-md pointer-events-auto transition-colors ${showSidebar
-                  ? 'text-text-primary bg-bg-tertiary'
-                  : 'text-text-tertiary hover:text-text-primary hover:bg-bg-secondary'
+                ? 'text-text-primary bg-bg-tertiary'
+                : 'text-text-tertiary hover:text-text-primary hover:bg-bg-secondary'
                 }`}
               title="Toggle Sidebar"
             >
@@ -153,17 +146,21 @@ export function TopBar({
         <div className="flex items-center gap-3 pr-2">
 
           {/* Office Switcher */}
-          {currentView === 'office' && (
+          {location.pathname.startsWith('/office') && (
             <div className="flex items-center gap-1">
               <div className="relative group">
                 <select
                   className="appearance-none bg-bg-secondary border border-border-primary hover:border-blue-500/50 text-text-primary text-xs font-medium rounded-md pl-3 pr-8 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500/50 transition-colors cursor-pointer max-w-[150px] text-ellipsis overflow-hidden whitespace-nowrap"
                   value={activeOfficeId}
                   onChange={(e) => {
-                    if (e.target.value === '__CREATE__') {
+                    const val = e.target.value;
+                    // Revert the visual selection immediately since we might open a new window instead of navigating
+                    e.target.value = activeOfficeId || 'default';
+
+                    if (val === '__CREATE__') {
                       onCreateOffice?.();
                     } else {
-                      onSelectOffice?.(e.target.value);
+                      onSelectOffice?.(val);
                     }
                   }}
                 >
@@ -181,24 +178,6 @@ export function TopBar({
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                 </div>
               </div>
-              <button
-                className="p-1.5 text-text-tertiary hover:text-text-primary rounded hover:bg-bg-tertiary transition-colors"
-                title="Open office in new window"
-                onClick={() => {
-                  const office = offices.find(o => o.id === activeOfficeId);
-                  const title = office ? `Office: ${office.name}` : 'Local Harness';
-                  new WebviewWindow(`window-${Date.now()}`, {
-                    url: `/?office_id=${activeOfficeId}`,
-                    title,
-                    width: 1000,
-                    height: 700,
-                    decorations: true,
-                    transparent: true,
-                  });
-                }}
-              >
-                <ExternalLink size={14} />
-              </button>
             </div>
           )}
 
@@ -231,7 +210,18 @@ export function TopBar({
           </div>
 
           <div className="w-[1px] h-4 bg-border-primary mx-1" />
-          <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ring-bg-primary overflow-hidden">
+
+          {location.pathname.startsWith('/office') && activeOfficeId !== 'default' && (
+            <button
+              onClick={() => navigate(`/office/${activeOfficeId}/settings`)}
+              className="p-1 text-text-tertiary hover:text-text-primary hover:bg-bg-tertiary rounded transition-colors"
+              title="Office Settings"
+            >
+              <Settings size={14} />
+            </button>
+          )}
+
+          <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white shadow-sm ring-2 ring-bg-primary overflow-hidden ml-1">
             NG
           </div>
         </div>

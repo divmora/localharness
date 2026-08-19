@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { create, toBinary, fromBinary } from '@bufbuild/protobuf';
-import { homeDir } from '@tauri-apps/api/path';
+import { homeDir, join } from '@tauri-apps/api/path';
 import { 
     ClientMessageSchema,
     ServerMessageSchema,
@@ -364,7 +364,10 @@ export function useHarness(activeSessionId: string | null, workspacePath?: strin
                                     const childInitReq = create(InitRequestSchema, {
                                         config: create(HarnessConfigSchema, {
                                             conversationId: childSessionId,
-                                            workspaces: [{ directory: workspacePath || "", name: "Project", corpusName: "" }],
+                                            workspaces: [
+                                                { directory: workspacePath || await homeDir(), name: "Project", corpusName: "" },
+                                                { directory: await join(await homeDir(), `.divmora/localharness/offices/${activeOfficeId}/agents/${childSessionId}`), name: "Private Scratch", corpusName: "" }
+                                            ],
                                             initialBudget: initialBudget || 0,
                                             systemInstructions: `You are a specialized agent: ${args.agent_name} (${args.role_description}).\n\nYour demographic profile is a ${args.experience_level} ${args.gender} on a ${args.employment_type} contract.\nYour personality traits are: ${args.personality_traits || 'Neutral'}.\n\nYou have been hired by a Manager agent to complete a specific task or act as a peer. Do not communicate with the user, but instead complete the task to the best of your ability. When you need to talk to the Manager or other peers, use the 'message_agent' tool. If you are idle and have no tasks, you may periodically use the 'message_agent' tool to chit-chat with other agents in the office.`,
                                             builtinTools: {
