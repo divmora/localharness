@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 func TestClientCommunication(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
+	var mu sync.Mutex
 	var receivedClientMsgs []*pb.ClientMessage
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -43,7 +45,9 @@ func TestClientCommunication(t *testing.T) {
 			}
 			var clientMsg pb.ClientMessage
 			if err := proto.Unmarshal(msgData, &clientMsg); err == nil {
+				mu.Lock()
 				receivedClientMsgs = append(receivedClientMsgs, &clientMsg)
+				mu.Unlock()
 			}
 		}
 	}))
@@ -94,9 +98,18 @@ func TestClientCommunication(t *testing.T) {
 	}
 
 	// Allow server to process messages
-	time.Sleep(100 * time.Millisecond)
+	var count int
+	for i := 0; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
+		count = len(receivedClientMsgs)
+		mu.Unlock()
+		if count >= 7 {
+			break
+		}
+	}
 
-	if len(receivedClientMsgs) < 7 {
-		t.Errorf("expected 7 client messages received, got %d", len(receivedClientMsgs))
+	if count < 7 {
+		t.Errorf("expected 7 client messages received, got %d", count)
 	}
 }
