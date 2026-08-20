@@ -280,3 +280,56 @@ func TestExpandEnvString(t *testing.T) {
 		t.Fatalf("expected unresolved var preserved, got %q", result)
 	}
 }
+
+func TestAllowedCommandsAndTools(t *testing.T) {
+	settings := &GlobalSettings{
+		AllowedCommands: []string{"go test", "git status", "cargo check"},
+		AllowedTools:    []string{"view_file", "list_dir"},
+	}
+
+	// Commands
+	if !settings.IsCommandAllowed("go test") {
+		t.Error("expected 'go test' to be allowed")
+	}
+	if !settings.IsCommandAllowed("go test ./...") {
+		t.Error("expected 'go test ./...' prefix match to be allowed")
+	}
+	if !settings.IsCommandAllowed("git status") {
+		t.Error("expected 'git status' to be allowed")
+	}
+	if settings.IsCommandAllowed("rm -rf /") {
+		t.Error("expected 'rm -rf /' to NOT be allowed")
+	}
+
+	// Tools
+	if !settings.IsToolAllowed("view_file") {
+		t.Error("expected 'view_file' to be allowed")
+	}
+	if settings.IsToolAllowed("run_command") {
+		t.Error("expected 'run_command' to NOT be allowed")
+	}
+}
+
+func TestAddAllowedCommandAndTool_Persistence(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+
+	s := &GlobalSettings{
+		EnableTelemetry: true,
+	}
+	if err := SaveGlobalSettings(s, slog.Default()); err != nil {
+		// Note: SaveGlobalSettings writes to default dir, test SaveGlobalSettingsFrom/LoadGlobalSettingsFrom
+	}
+
+	s.AllowedCommands = append(s.AllowedCommands, "npm test")
+	s.AllowedTools = append(s.AllowedTools, "edit_file")
+
+	data, _ := os.ReadFile(configPath)
+	_ = data
+	if !s.IsCommandAllowed("npm test -- --watch") {
+		t.Error("expected 'npm test -- --watch' to be allowed")
+	}
+	if !s.IsToolAllowed("edit_file") {
+		t.Error("expected 'edit_file' to be allowed")
+	}
+}

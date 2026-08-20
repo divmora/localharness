@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/divmora/localharness/cmd/lhctl/client"
 	"github.com/divmora/localharness/cmd/lhctl/tui"
@@ -16,18 +17,36 @@ import (
 )
 
 type runFlags struct {
-	model      string
-	workspaces []string
-	yolo       bool
-	detach     bool
-	prompt     string
-	sessionID  string
-	ephemeral  bool
+	model              string
+	workspaces         []string
+	explicitWorkspaces []string
+	yolo               bool
+	detach             bool
+	prompt             string
+	sessionID          string
+	ephemeral          bool
+}
+
+// formatResumeCommand builds the CLI command to resume the given conversation session.
+func formatResumeCommand(sessionID string, flags runFlags) string {
+	var parts []string
+	parts = append(parts, "lhctl", "-c", sessionID)
+	if flags.model != "" {
+		parts = append(parts, fmt.Sprintf("--model=%s", flags.model))
+	}
+	for _, ws := range flags.explicitWorkspaces {
+		parts = append(parts, fmt.Sprintf("--workspace=%s", ws))
+	}
+	if flags.yolo {
+		parts = append(parts, "--yolo")
+	}
+	return strings.Join(parts, " ")
 }
 
 func parseRunFlags(args []string) runFlags {
 	f := runFlags{}
-	for _, a := range args {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch {
 		case a == "--yolo" || a == "--dangerously-skip-permissions":
 			f.yolo = true
@@ -37,10 +56,37 @@ func parseRunFlags(args []string) runFlags {
 			f.ephemeral = true
 		case strings.HasPrefix(a, "--model="):
 			f.model = strings.TrimPrefix(a, "--model=")
+		case a == "-m" && i+1 < len(args):
+			i++
+			f.model = args[i]
 		case strings.HasPrefix(a, "--workspace="):
-			f.workspaces = append(f.workspaces, strings.TrimPrefix(a, "--workspace="))
+			ws := strings.TrimPrefix(a, "--workspace=")
+			f.workspaces = append(f.workspaces, ws)
+			f.explicitWorkspaces = append(f.explicitWorkspaces, ws)
+		case a == "-w" && i+1 < len(args):
+			i++
+			f.workspaces = append(f.workspaces, args[i])
+			f.explicitWorkspaces = append(f.explicitWorkspaces, args[i])
 		case strings.HasPrefix(a, "--prompt="):
 			f.prompt = strings.TrimPrefix(a, "--prompt=")
+		case a == "-p" && i+1 < len(args):
+			i++
+			f.prompt = args[i]
+		case a == "-c" || a == "--continue" || a == "--resume":
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				f.sessionID = args[i]
+			} else {
+				f.sessionID = "latest"
+			}
+		case strings.HasPrefix(a, "-c="):
+			f.sessionID = strings.TrimPrefix(a, "-c=")
+		case strings.HasPrefix(a, "--conversation="):
+			f.sessionID = strings.TrimPrefix(a, "--conversation=")
+		case strings.HasPrefix(a, "--continue="):
+			f.sessionID = strings.TrimPrefix(a, "--continue=")
+		case strings.HasPrefix(a, "--resume="):
+			f.sessionID = strings.TrimPrefix(a, "--resume=")
 		case strings.HasPrefix(a, "--session-id="):
 			f.sessionID = strings.TrimPrefix(a, "--session-id=")
 		}
@@ -65,6 +111,27 @@ func runInteractive(args []string) {
 }
 
 func runInteractiveWithOptions(flags runFlags) error {
+	dataDir := getDataDir()
+
+	// If resuming existing session requested via -c / --conversation / --continue / --resume
+	var initialState *pb.ConversationState
+	if flags.sessionID != "" {
+		fullID, err := resolveConversationID(dataDir, flags.sessionID)
+		if err != nil {
+			return fmt.Errorf("cannot resume conversation: %w", err)
+		}
+		flags.sessionID = fullID
+
+		// Attempt to load existing state for TUI history
+		pbPath := filepath.Join(dataDir, "conversations", fullID+".pb")
+		if data, err := os.ReadFile(pbPath); err == nil {
+			var state pb.ConversationState
+			if err := proto.Unmarshal(data, &state); err == nil {
+				initialState = &state
+			}
+		}
+	}
+
 	if len(flags.workspaces) == 0 {
 		cwd, err := os.Getwd()
 		if err == nil {
@@ -98,7 +165,7 @@ func runInteractiveWithOptions(flags runFlags) error {
 		}
 	}
 
-	cl, err := client.ConnectOrStartDaemon(logger)
+	cl, err := client.ConnectOrStartDaemonWithSession(logger, flags.sessionID)
 	if err != nil {
 		return fmt.Errorf("connecting to daemon: %w", err)
 	}
@@ -153,11 +220,12 @@ func runInteractiveWithOptions(flags runFlags) error {
 	if flags.detach {
 		fmt.Printf("Task running in background daemon (Session ID: %s)\n", cl.SessionID())
 		fmt.Printf("Attach anytime with: lhctl attach %s\n", cl.SessionID())
+		fmt.Printf("To resume this conversation, run:\n  %s\n", formatResumeCommand(cl.SessionID(), flags))
 		return nil
 	}
 
 	p := tea.NewProgram(
-		tui.InitialModel(cl, flags.workspaces, flags.yolo),
+		tui.InitialModelWithHistory(cl, flags.workspaces, flags.yolo, initialState),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
@@ -165,6 +233,16 @@ func runInteractiveWithOptions(flags runFlags) error {
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("running TUI: %w", err)
 	}
+
+	sessionID := cl.SessionID()
+	if sessionID == "" {
+		sessionID = flags.sessionID
+	}
+	if sessionID != "" {
+		resumeCmd := formatResumeCommand(sessionID, flags)
+		fmt.Printf("\nTo resume this conversation, run:\n  %s\n\n", resumeCmd)
+	}
+
 	return nil
 }
 
@@ -175,17 +253,26 @@ func runAttach(dataDir string, sessionID string, args []string) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	cl, err := client.ConnectOrStartDaemon(logger)
+	cl, err := client.ConnectOrStartDaemonWithSession(logger, fullID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error connecting to daemon: %v\n", err)
 		os.Exit(1)
+	}
+
+	var initialState *pb.ConversationState
+	pbPath := filepath.Join(dataDir, "conversations", fullID+".pb")
+	if data, err := os.ReadFile(pbPath); err == nil {
+		var state pb.ConversationState
+		if err := proto.Unmarshal(data, &state); err == nil {
+			initialState = &state
+		}
 	}
 
 	cwd, _ := os.Getwd()
 	workspaces := []string{cwd}
 
 	p := tea.NewProgram(
-		tui.InitialModel(cl, workspaces, false),
+		tui.InitialModelWithHistory(cl, workspaces, false, initialState),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
@@ -194,5 +281,13 @@ func runAttach(dataDir string, sessionID string, args []string) {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
 	}
-	_ = fullID
+
+	sessID := cl.SessionID()
+	if sessID == "" {
+		sessID = fullID
+	}
+	if sessID != "" {
+		resumeCmd := formatResumeCommand(sessID, runFlags{sessionID: sessID})
+		fmt.Printf("\nTo resume this conversation, run:\n  %s\n\n", resumeCmd)
+	}
 }

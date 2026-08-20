@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -40,6 +41,7 @@ type StatusBarState struct {
 	TotalTokens      int
 	RunningSubagents int
 	TotalSubagents   int
+	RunningTasks     int
 	YoloMode         bool
 	WorkspaceCount   int
 }
@@ -86,6 +88,12 @@ func RenderStatusBar(state StatusBarState, width int) string {
 		leftParts = append(leftParts, BadgeSubagent.Render(subBadge))
 	}
 
+	// Background tasks badge
+	if state.RunningTasks > 0 {
+		taskBadge := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(ColorSecondary).Padding(0, 1).Render(fmt.Sprintf("⚙️ Tasks: %d", state.RunningTasks))
+		leftParts = append(leftParts, taskBadge)
+	}
+
 	// Token usage
 	if state.TotalTokens > 0 {
 		tokStr := fmt.Sprintf("Tokens: %s", formatTokens(state.TotalTokens))
@@ -98,19 +106,70 @@ func RenderStatusBar(state StatusBarState, width int) string {
 		leftParts = append(leftParts, lipgloss.NewStyle().Foreground(ColorMuted).Render(wsStr))
 	}
 
-	left := strings.Join(leftParts, "  ")
+	leftFormatted := strings.Join(leftParts, "  ")
 
-	// Right side hints
-	right := lipgloss.NewStyle().Foreground(ColorMuted).Render("Shift+Tab Mode │ ^D Detach │ ^C Stop │ /help")
+	// Right shortcuts
+	rightText := "Shift+Tab Mode │ ^D Detach │ ^C Stop │ /help"
+	rightFormatted := lipgloss.NewStyle().Foreground(ColorMuted).Render(rightText)
 
-	// Calculate spacing
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 2
-	if gap < 1 {
-		gap = 1
+	leftLen := lipgloss.Width(leftFormatted)
+	rightLen := lipgloss.Width(rightFormatted)
+	spacerWidth := max(0, width-leftLen-rightLen)
+	spacer := strings.Repeat(" ", spacerWidth)
+
+	return StatusBarStyle.Width(width).Render(leftFormatted + spacer + rightFormatted)
+}
+
+// RenderActiveBackgroundStrip renders a compact inline strip below text input showing active tasks and subagents.
+func RenderActiveBackgroundStrip(tasks *TasksViewManager, subagents *SubagentViewManager, width int) string {
+	var parts []string
+
+	// Running tasks
+	if tasks != nil && tasks.RunningCount() > 0 {
+		for _, taskID := range tasks.order {
+			t := tasks.tasks[taskID]
+			if t != nil && t.Status == "RUNNING" {
+				dur := ""
+				if !t.StartedAt.IsZero() {
+					dur = " (" + time.Since(t.StartedAt).Round(time.Second).String() + ")"
+				}
+				cmd := t.Command
+				if len(cmd) > 30 {
+					cmd = cmd[:27] + "..."
+				}
+				part := fmt.Sprintf("⚙️ %s %s%s", lipgloss.NewStyle().Bold(true).Foreground(ColorSecondary).Render(t.TaskID+":"), cmd, dur)
+				parts = append(parts, part)
+			}
+		}
 	}
 
-	content := left + strings.Repeat(" ", gap) + right
-	return StatusBarStyle.Width(width).Render(content)
+	// Running subagents
+	if subagents != nil && subagents.RunningCount() > 0 {
+		for _, convID := range subagents.order {
+			s := subagents.subagents[convID]
+			if s != nil && (s.State == "RUNNING" || s.State == "TRAJ_RUNNING") {
+				role := s.Role
+				if role == "" {
+					role = s.TypeName
+				}
+				if len(role) > 24 {
+					role = role[:21] + "..."
+				}
+				part := fmt.Sprintf("👥 %s %s", lipgloss.NewStyle().Bold(true).Foreground(ColorPrimary).Render(role+":"), "running")
+				parts = append(parts, part)
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	joined := strings.Join(parts, lipgloss.NewStyle().Foreground(ColorSubtle).Render("  │  "))
+	return lipgloss.NewStyle().
+		Foreground(ColorMuted).
+		Padding(0, 1).
+		Render(joined)
 }
 
 func formatTokens(n int) string {

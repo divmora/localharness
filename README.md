@@ -88,8 +88,11 @@ Build and run the interactive multi-agent chat interface:
 ```bash
 make build-lhctl
 
-# Launch interactive TUI in current directory
+# Launch a fresh interactive session (default)
 ./bin/lhctl
+
+# Resume the most recent conversation (or specify full/partial ID with -c <id>)
+./bin/lhctl -c
 
 # Or run with explicit model and YOLO mode
 ./bin/lhctl run --model=gpt-4o --yolo
@@ -101,7 +104,7 @@ make build-lhctl
 ./bin/lhctl attach <session-id>
 ```
 
-> In `lhctl`, press **`Shift+Tab`** to cycle between **`DEFAULT`** (Safe Mode), **`ACCEPT-EDITS`** (Auto-Accept Edits), and **`PLAN`** (Plan-Before-Act) modes. Type `/` for instant command autocomplete or `@` for workspace file mentions. See [docs/lhctl.md](docs/lhctl.md) for full documentation.
+> In `lhctl`, sessions always start fresh by default. Use `-c` to resume the most recent conversation or `-c <id>` to resume by ID. On exit, `lhctl` displays the exact command to resume your session. Press **`Shift+Tab`** to cycle between **`DEFAULT`** (Safe Mode), **`ACCEPT-EDITS`** (Auto-Accept Edits), and **`PLAN`** (Plan-Before-Act) modes. Type `/` for instant command autocomplete or `@` for workspace file mentions. See [docs/lhctl.md](docs/lhctl.md) for full documentation.
 
 ### 2. Build Engine from Source
 

@@ -302,6 +302,59 @@ func (TrajectoryState_TrajState) EnumDescriptor() ([]byte, []int) {
 	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{17, 0}
 }
 
+// Scope of permission approval
+type PermissionResponse_PermissionScope int32
+
+const (
+	PermissionResponse_SCOPE_UNSPECIFIED  PermissionResponse_PermissionScope = 0
+	PermissionResponse_SCOPE_ONCE         PermissionResponse_PermissionScope = 1 // Single execution only (default)
+	PermissionResponse_SCOPE_CONVERSATION PermissionResponse_PermissionScope = 2 // Allow for remainder of this conversation
+	PermissionResponse_SCOPE_GLOBAL       PermissionResponse_PermissionScope = 3 // Permanently allow across all conversations (saved to settings.json)
+)
+
+// Enum value maps for PermissionResponse_PermissionScope.
+var (
+	PermissionResponse_PermissionScope_name = map[int32]string{
+		0: "SCOPE_UNSPECIFIED",
+		1: "SCOPE_ONCE",
+		2: "SCOPE_CONVERSATION",
+		3: "SCOPE_GLOBAL",
+	}
+	PermissionResponse_PermissionScope_value = map[string]int32{
+		"SCOPE_UNSPECIFIED":  0,
+		"SCOPE_ONCE":         1,
+		"SCOPE_CONVERSATION": 2,
+		"SCOPE_GLOBAL":       3,
+	}
+)
+
+func (x PermissionResponse_PermissionScope) Enum() *PermissionResponse_PermissionScope {
+	p := new(PermissionResponse_PermissionScope)
+	*p = x
+	return p
+}
+
+func (x PermissionResponse_PermissionScope) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PermissionResponse_PermissionScope) Descriptor() protoreflect.EnumDescriptor {
+	return file_localharness_v1_localharness_proto_enumTypes[5].Descriptor()
+}
+
+func (PermissionResponse_PermissionScope) Type() protoreflect.EnumType {
+	return &file_localharness_v1_localharness_proto_enumTypes[5]
+}
+
+func (x PermissionResponse_PermissionScope) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PermissionResponse_PermissionScope.Descriptor instead.
+func (PermissionResponse_PermissionScope) EnumDescriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{50, 0}
+}
+
 type ConversationState_ConversationStatus int32
 
 const (
@@ -338,11 +391,11 @@ func (x ConversationState_ConversationStatus) String() string {
 }
 
 func (ConversationState_ConversationStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_localharness_v1_localharness_proto_enumTypes[5].Descriptor()
+	return file_localharness_v1_localharness_proto_enumTypes[6].Descriptor()
 }
 
 func (ConversationState_ConversationStatus) Type() protoreflect.EnumType {
-	return &file_localharness_v1_localharness_proto_enumTypes[5]
+	return &file_localharness_v1_localharness_proto_enumTypes[6]
 }
 
 func (x ConversationState_ConversationStatus) Number() protoreflect.EnumNumber {
@@ -501,6 +554,8 @@ type ClientMessage struct {
 	//	*ClientMessage_QuestionResponse
 	//	*ClientMessage_Interrupt
 	//	*ClientMessage_Resume
+	//	*ClientMessage_WorkspaceRequest
+	//	*ClientMessage_SetYoloMode
 	Payload       isClientMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1147,6 +1202,8 @@ type ServerMessage struct {
 	//	*ServerMessage_TrajectoryState
 	//	*ServerMessage_Error
 	//	*ServerMessage_TraceEvent
+	//	*ServerMessage_WorkspaceResponse
+	//	*ServerMessage_ReplayComplete
 	Payload       isServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4529,7 +4586,7 @@ type ActionPermissionRequest struct {
 	ArgsJson      string                 `protobuf:"bytes,3,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`          // Full args for policy predicate evaluation
 	ArgsSummary   string                 `protobuf:"bytes,4,opt,name=args_summary,json=argsSummary,proto3" json:"args_summary,omitempty"` // Human-readable summary for UIs
 	CallId        string                 `protobuf:"bytes,5,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`                // LLM-assigned tool call ID
-	DiffPreview   string                 `protobuf:"bytes,6,opt,name=diff_preview,json=diffPreview,proto3" json:"diff_preview,omitempty"` // Unified diff preview
+	DiffPreview   string                 `protobuf:"bytes,6,opt,name=diff_preview,json=diffPreview,proto3" json:"diff_preview,omitempty"` // Unified diff preview for mutating operations
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4609,12 +4666,15 @@ func (x *ActionPermissionRequest) GetDiffPreview() string {
 // PermissionResponse is sent by the SDK after evaluating its policies.
 // Must be correlated with ActionPermissionRequest.request_id.
 type PermissionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // Must match ActionPermissionRequest.request_id
-	Approved      bool                   `protobuf:"varint,2,opt,name=approved,proto3" json:"approved,omitempty"`
-	DenialReason  string                 `protobuf:"bytes,3,opt,name=denial_reason,json=denialReason,proto3" json:"denial_reason,omitempty"` // Human-readable reason (fed back to LLM)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState             `protogen:"open.v1"`
+	RequestId           string                             `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // Must match ActionPermissionRequest.request_id
+	Approved            bool                               `protobuf:"varint,2,opt,name=approved,proto3" json:"approved,omitempty"`
+	DenialReason        string                             `protobuf:"bytes,3,opt,name=denial_reason,json=denialReason,proto3" json:"denial_reason,omitempty"`                        // Human-readable reason (fed back to LLM)
+	Scope               PermissionResponse_PermissionScope `protobuf:"varint,4,opt,name=scope,proto3,enum=localharness.v1.PermissionResponse_PermissionScope" json:"scope,omitempty"` // Permission grant scope
+	ApprovedSubcommands []string                           `protobuf:"bytes,5,rep,name=approved_subcommands,json=approvedSubcommands,proto3" json:"approved_subcommands,omitempty"`   // List of approved sub-commands (for granular/partial approvals)
+	DeniedSubcommands   []string                           `protobuf:"bytes,6,rep,name=denied_subcommands,json=deniedSubcommands,proto3" json:"denied_subcommands,omitempty"`         // List of denied sub-commands
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PermissionResponse) Reset() {
@@ -4666,6 +4726,27 @@ func (x *PermissionResponse) GetDenialReason() string {
 		return x.DenialReason
 	}
 	return ""
+}
+
+func (x *PermissionResponse) GetScope() PermissionResponse_PermissionScope {
+	if x != nil {
+		return x.Scope
+	}
+	return PermissionResponse_SCOPE_UNSPECIFIED
+}
+
+func (x *PermissionResponse) GetApprovedSubcommands() []string {
+	if x != nil {
+		return x.ApprovedSubcommands
+	}
+	return nil
+}
+
+func (x *PermissionResponse) GetDeniedSubcommands() []string {
+	if x != nil {
+		return x.DeniedSubcommands
+	}
+	return nil
 }
 
 // HarnessConfig is the complete configuration sent in InitRequest.
@@ -4722,9 +4803,11 @@ type HarnessConfig struct {
 	// SDK-injected user rules. Each entry carries a label and inline content.
 	// These are merged with auto-discovered AGENTS.md files from workspace roots
 	// and rendered in the <user_rules> section of every user message.
-	UserRules     []*UserRuleConfig `protobuf:"bytes,26,rep,name=user_rules,json=userRules,proto3" json:"user_rules,omitempty"`
-	YoloMode      bool              `protobuf:"varint,28,opt,name=yolo_mode,json=yoloMode,proto3" json:"yolo_mode,omitempty"`
-	Trusted       bool              `protobuf:"varint,29,opt,name=trusted,proto3" json:"trusted,omitempty"`
+	UserRules []*UserRuleConfig `protobuf:"bytes,26,rep,name=user_rules,json=userRules,proto3" json:"user_rules,omitempty"`
+	// YOLO mode bypasses all user confirmation/permission prompts
+	YoloMode bool `protobuf:"varint,28,opt,name=yolo_mode,json=yoloMode,proto3" json:"yolo_mode,omitempty"`
+	// Workspace trust status. If false, restricted mode is applied.
+	Trusted       bool `protobuf:"varint,29,opt,name=trusted,proto3" json:"trusted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7713,16 +7796,19 @@ func (x *ActionSchedule) GetSuccess() bool {
 // WorkspaceRequest requests dynamic modification or listing of workspaces.
 type WorkspaceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
-	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	CorpusName    string                 `protobuf:"bytes,4,opt,name=corpus_name,json=corpusName,proto3" json:"corpus_name,omitempty"`
+	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`                           // "add", "remove", "list"
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`                               // Directory path for add/remove
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`                               // Optional human-readable name
+	CorpusName    string                 `protobuf:"bytes,4,opt,name=corpus_name,json=corpusName,proto3" json:"corpus_name,omitempty"` // Optional semantic search corpus identifier
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkspaceRequest) Reset() {
 	*x = WorkspaceRequest{}
+	mi := &file_localharness_v1_localharness_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *WorkspaceRequest) String() string {
@@ -7732,7 +7818,20 @@ func (x *WorkspaceRequest) String() string {
 func (*WorkspaceRequest) ProtoMessage() {}
 
 func (x *WorkspaceRequest) ProtoReflect() protoreflect.Message {
-	return nil
+	mi := &file_localharness_v1_localharness_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceRequest.ProtoReflect.Descriptor instead.
+func (*WorkspaceRequest) Descriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *WorkspaceRequest) GetAction() string {
@@ -7775,6 +7874,9 @@ type WorkspaceResponse struct {
 
 func (x *WorkspaceResponse) Reset() {
 	*x = WorkspaceResponse{}
+	mi := &file_localharness_v1_localharness_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *WorkspaceResponse) String() string {
@@ -7784,7 +7886,20 @@ func (x *WorkspaceResponse) String() string {
 func (*WorkspaceResponse) ProtoMessage() {}
 
 func (x *WorkspaceResponse) ProtoReflect() protoreflect.Message {
-	return nil
+	mi := &file_localharness_v1_localharness_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceResponse.ProtoReflect.Descriptor instead.
+func (*WorkspaceResponse) Descriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{91}
 }
 
 func (x *WorkspaceResponse) GetSuccess() bool {
@@ -7818,6 +7933,9 @@ type SetYoloModeRequest struct {
 
 func (x *SetYoloModeRequest) Reset() {
 	*x = SetYoloModeRequest{}
+	mi := &file_localharness_v1_localharness_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *SetYoloModeRequest) String() string {
@@ -7827,7 +7945,20 @@ func (x *SetYoloModeRequest) String() string {
 func (*SetYoloModeRequest) ProtoMessage() {}
 
 func (x *SetYoloModeRequest) ProtoReflect() protoreflect.Message {
-	return nil
+	mi := &file_localharness_v1_localharness_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetYoloModeRequest.ProtoReflect.Descriptor instead.
+func (*SetYoloModeRequest) Descriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *SetYoloModeRequest) GetEnabled() bool {
@@ -7847,6 +7978,9 @@ type ReplayComplete struct {
 
 func (x *ReplayComplete) Reset() {
 	*x = ReplayComplete{}
+	mi := &file_localharness_v1_localharness_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
 }
 
 func (x *ReplayComplete) String() string {
@@ -7856,7 +7990,20 @@ func (x *ReplayComplete) String() string {
 func (*ReplayComplete) ProtoMessage() {}
 
 func (x *ReplayComplete) ProtoReflect() protoreflect.Message {
-	return nil
+	mi := &file_localharness_v1_localharness_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayComplete.ProtoReflect.Descriptor instead.
+func (*ReplayComplete) Descriptor() ([]byte, []int) {
+	return file_localharness_v1_localharness_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *ReplayComplete) GetEventCount() int32 {
@@ -7881,7 +8028,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\x12'\n" +
 	"\x0fharness_version\x18\x03 \x01(\tR\x0eharnessVersion\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\"\xbb\x04\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"\xd8\x05\n" +
 	"\rClientMessage\x122\n" +
 	"\x04init\x18\x01 \x01(\v2\x1c.localharness.v1.InitRequestH\x00R\x04init\x12A\n" +
 	"\fuser_message\x18\x02 \x01(\v2\x1c.localharness.v1.UserMessageH\x00R\vuserMessage\x12G\n" +
@@ -7890,7 +8037,10 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x13permission_response\x18\x05 \x01(\v2#.localharness.v1.PermissionResponseH\x00R\x12permissionResponse\x12P\n" +
 	"\x11question_response\x18\x06 \x01(\v2!.localharness.v1.QuestionResponseH\x00R\x10questionResponse\x12A\n" +
 	"\tinterrupt\x18\a \x01(\v2!.localharness.v1.InterruptRequestH\x00R\tinterrupt\x128\n" +
-	"\x06resume\x18\b \x01(\v2\x1e.localharness.v1.ResumeRequestH\x00R\x06resumeB\t\n" +
+	"\x06resume\x18\b \x01(\v2\x1e.localharness.v1.ResumeRequestH\x00R\x06resume\x12P\n" +
+	"\x11workspace_request\x18\t \x01(\v2!.localharness.v1.WorkspaceRequestH\x00R\x10workspaceRequest\x12I\n" +
+	"\rset_yolo_mode\x18\n" +
+	" \x01(\v2#.localharness.v1.SetYoloModeRequestH\x00R\vsetYoloModeB\t\n" +
 	"\apayload\"E\n" +
 	"\vInitRequest\x126\n" +
 	"\x06config\x18\x01 \x01(\v2\x1e.localharness.v1.HarnessConfigR\x06config\"\x83\x02\n" +
@@ -7925,7 +8075,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\rCancelRequest\"\x12\n" +
 	"\x10InterruptRequest\")\n" +
 	"\rResumeRequest\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessage\"\xe4\x02\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"\x85\x04\n" +
 	"\rServerMessage\x12D\n" +
 	"\rinit_response\x18\x01 \x01(\v2\x1d.localharness.v1.InitResponseH\x00R\finitResponse\x12>\n" +
 	"\vstep_update\x18\x02 \x01(\v2\x1b.localharness.v1.StepUpdateH\x00R\n" +
@@ -7933,7 +8083,9 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x10trajectory_state\x18\x03 \x01(\v2 .localharness.v1.TrajectoryStateH\x00R\x0ftrajectoryState\x123\n" +
 	"\x05error\x18\x04 \x01(\v2\x1b.localharness.v1.ErrorEventH\x00R\x05error\x12>\n" +
 	"\vtrace_event\x18\x05 \x01(\v2\x1b.localharness.v1.TraceEventH\x00R\n" +
-	"traceEventB\t\n" +
+	"traceEvent\x12S\n" +
+	"\x12workspace_response\x18\x06 \x01(\v2\".localharness.v1.WorkspaceResponseH\x00R\x11workspaceResponse\x12J\n" +
+	"\x0freplay_complete\x18\a \x01(\v2\x1f.localharness.v1.ReplayCompleteH\x00R\x0ereplayCompleteB\t\n" +
 	"\apayload\"\xcb\x01\n" +
 	"\vSessionInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -8049,7 +8201,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x10ArtifactMetadata\x12#\n" +
 	"\rartifact_type\x18\x01 \x01(\tR\fartifactType\x12\x18\n" +
 	"\asummary\x18\x02 \x01(\tR\asummary\x12)\n" +
-	"\x10request_feedback\x18\x03 \x01(\bR\x0frequestFeedback\"\xea\x01\n" +
+	"\x10request_feedback\x18\x03 \x01(\bR\x0frequestFeedback\"\x89\x02\n" +
 	"\x11ActionWriteToFile\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x1c\n" +
@@ -8058,7 +8210,9 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"isArtifact\x12N\n" +
 	"\x11artifact_metadata\x18\x05 \x01(\v2!.localharness.v1.ArtifactMetadataR\x10artifactMetadata\x12\x18\n" +
 	"\acreated\x18\n" +
-	" \x01(\bR\acreated\"\xeb\x01\n" +
+	" \x01(\bR\acreated\x12\x1d\n" +
+	"\n" +
+	"diff_block\x18\v \x01(\tR\tdiffBlock\"\xeb\x01\n" +
 	"\x18ActionReplaceFileContent\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x122\n" +
 	"\x06chunks\x18\x02 \x03(\v2\x1a.localharness.v1.EditChunkR\x06chunks\x12N\n" +
@@ -8254,19 +8408,29 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x18\n" +
 	"\acontent\x18\n" +
 	" \x01(\tR\acontent\x12!\n" +
-	"\fcontent_type\x18\v \x01(\tR\vcontentType\"\xae\x01\n" +
+	"\fcontent_type\x18\v \x01(\tR\vcontentType\"\xd1\x01\n" +
 	"\x17ActionPermissionRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1b\n" +
 	"\ttool_name\x18\x02 \x01(\tR\btoolName\x12\x1b\n" +
 	"\targs_json\x18\x03 \x01(\tR\bargsJson\x12!\n" +
 	"\fargs_summary\x18\x04 \x01(\tR\vargsSummary\x12\x17\n" +
-	"\acall_id\x18\x05 \x01(\tR\x06callId\"t\n" +
+	"\acall_id\x18\x05 \x01(\tR\x06callId\x12!\n" +
+	"\fdiff_preview\x18\x06 \x01(\tR\vdiffPreview\"\x85\x03\n" +
 	"\x12PermissionResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1a\n" +
 	"\bapproved\x18\x02 \x01(\bR\bapproved\x12#\n" +
-	"\rdenial_reason\x18\x03 \x01(\tR\fdenialReason\"\xdb\v\n" +
+	"\rdenial_reason\x18\x03 \x01(\tR\fdenialReason\x12I\n" +
+	"\x05scope\x18\x04 \x01(\x0e23.localharness.v1.PermissionResponse.PermissionScopeR\x05scope\x121\n" +
+	"\x14approved_subcommands\x18\x05 \x03(\tR\x13approvedSubcommands\x12-\n" +
+	"\x12denied_subcommands\x18\x06 \x03(\tR\x11deniedSubcommands\"b\n" +
+	"\x0fPermissionScope\x12\x15\n" +
+	"\x11SCOPE_UNSPECIFIED\x10\x00\x12\x0e\n" +
+	"\n" +
+	"SCOPE_ONCE\x10\x01\x12\x16\n" +
+	"\x12SCOPE_CONVERSATION\x10\x02\x12\x10\n" +
+	"\fSCOPE_GLOBAL\x10\x03\"\x92\f\n" +
 	"\rHarnessConfig\x12)\n" +
 	"\x10litellm_endpoint\x18\x01 \x01(\tR\x0flitellmEndpoint\x12&\n" +
 	"\x0flitellm_api_key\x18\x02 \x01(\tR\rlitellmApiKey\x12(\n" +
@@ -8298,7 +8462,9 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x19exclude_builtin_subagents\x18\x18 \x03(\tR\x17excludeBuiltinSubagents\x12A\n" +
 	"\x1ddisable_all_builtin_subagents\x18\x19 \x01(\bR\x1adisableAllBuiltinSubagents\x12>\n" +
 	"\n" +
-	"user_rules\x18\x1a \x03(\v2\x1f.localharness.v1.UserRuleConfigR\tuserRules\"@\n" +
+	"user_rules\x18\x1a \x03(\v2\x1f.localharness.v1.UserRuleConfigR\tuserRules\x12\x1b\n" +
+	"\tyolo_mode\x18\x1c \x01(\bR\byoloMode\x12\x18\n" +
+	"\atrusted\x18\x1d \x01(\bR\atrusted\"@\n" +
 	"\x0eUserRuleConfig\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\"\xd8\x01\n" +
@@ -8548,7 +8714,24 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x06prompt\x18\x04 \x01(\tR\x06prompt\x12\x17\n" +
 	"\atask_id\x18\n" +
 	" \x01(\tR\x06taskId\x12\x18\n" +
-	"\asuccess\x18\v \x01(\bR\asuccess*\x9b\x01\n" +
+	"\asuccess\x18\v \x01(\bR\asuccess\"s\n" +
+	"\x10WorkspaceRequest\x12\x16\n" +
+	"\x06action\x18\x01 \x01(\tR\x06action\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1f\n" +
+	"\vcorpus_name\x18\x04 \x01(\tR\n" +
+	"corpusName\"\x83\x01\n" +
+	"\x11WorkspaceResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12:\n" +
+	"\n" +
+	"workspaces\x18\x03 \x03(\v2\x1a.localharness.v1.WorkspaceR\n" +
+	"workspaces\".\n" +
+	"\x12SetYoloModeRequest\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\"1\n" +
+	"\x0eReplayComplete\x12\x1f\n" +
+	"\vevent_count\x18\x01 \x01(\x05R\n" +
+	"eventCount*\x9b\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16SESSION_STATUS_RUNNING\x10\x01\x12\x1a\n" +
@@ -8569,222 +8752,233 @@ func file_localharness_v1_localharness_proto_rawDescGZIP() []byte {
 	return file_localharness_v1_localharness_proto_rawDescData
 }
 
-var file_localharness_v1_localharness_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_localharness_v1_localharness_proto_msgTypes = make([]protoimpl.MessageInfo, 96)
+var file_localharness_v1_localharness_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
+var file_localharness_v1_localharness_proto_msgTypes = make([]protoimpl.MessageInfo, 100)
 var file_localharness_v1_localharness_proto_goTypes = []any{
 	(SessionStatus)(0),                        // 0: localharness.v1.SessionStatus
 	(StepUpdate_Source)(0),                    // 1: localharness.v1.StepUpdate.Source
 	(StepUpdate_State)(0),                     // 2: localharness.v1.StepUpdate.State
 	(StepUpdate_Target)(0),                    // 3: localharness.v1.StepUpdate.Target
 	(TrajectoryState_TrajState)(0),            // 4: localharness.v1.TrajectoryState.TrajState
-	(ConversationState_ConversationStatus)(0), // 5: localharness.v1.ConversationState.ConversationStatus
-	(*InputConfig)(nil),                       // 6: localharness.v1.InputConfig
-	(*OutputConfig)(nil),                      // 7: localharness.v1.OutputConfig
-	(*ClientMessage)(nil),                     // 8: localharness.v1.ClientMessage
-	(*InitRequest)(nil),                       // 9: localharness.v1.InitRequest
-	(*UserMessage)(nil),                       // 10: localharness.v1.UserMessage
-	(*FileInfo)(nil),                          // 11: localharness.v1.FileInfo
-	(*UserContext)(nil),                       // 12: localharness.v1.UserContext
-	(*ToolResult)(nil),                        // 13: localharness.v1.ToolResult
-	(*CancelRequest)(nil),                     // 14: localharness.v1.CancelRequest
-	(*InterruptRequest)(nil),                  // 15: localharness.v1.InterruptRequest
-	(*ResumeRequest)(nil),                     // 16: localharness.v1.ResumeRequest
-	(*ServerMessage)(nil),                     // 17: localharness.v1.ServerMessage
-	(*SessionInfo)(nil),                       // 18: localharness.v1.SessionInfo
-	(*SessionList)(nil),                       // 19: localharness.v1.SessionList
-	(*InitResponse)(nil),                      // 20: localharness.v1.InitResponse
-	(*ErrorEvent)(nil),                        // 21: localharness.v1.ErrorEvent
-	(*StepUpdate)(nil),                        // 22: localharness.v1.StepUpdate
-	(*TrajectoryState)(nil),                   // 23: localharness.v1.TrajectoryState
-	(*ActionViewFile)(nil),                    // 24: localharness.v1.ActionViewFile
-	(*ArtifactMetadata)(nil),                  // 25: localharness.v1.ArtifactMetadata
-	(*ActionWriteToFile)(nil),                 // 26: localharness.v1.ActionWriteToFile
-	(*ActionReplaceFileContent)(nil),          // 27: localharness.v1.ActionReplaceFileContent
-	(*EditChunk)(nil),                         // 28: localharness.v1.EditChunk
-	(*ActionListDir)(nil),                     // 29: localharness.v1.ActionListDir
-	(*DirEntry)(nil),                          // 30: localharness.v1.DirEntry
-	(*ActionGrepSearch)(nil),                  // 31: localharness.v1.ActionGrepSearch
-	(*SearchMatch)(nil),                       // 32: localharness.v1.SearchMatch
-	(*ActionFindFile)(nil),                    // 33: localharness.v1.ActionFindFile
-	(*ActionRunCommand)(nil),                  // 34: localharness.v1.ActionRunCommand
-	(*ActionFinish)(nil),                      // 35: localharness.v1.ActionFinish
-	(*ActionHostToolCall)(nil),                // 36: localharness.v1.ActionHostToolCall
-	(*ActionCompaction)(nil),                  // 37: localharness.v1.ActionCompaction
-	(*ActionUserQuestion)(nil),                // 38: localharness.v1.ActionUserQuestion
-	(*UserQuestion)(nil),                      // 39: localharness.v1.UserQuestion
-	(*QuestionAnswer)(nil),                    // 40: localharness.v1.QuestionAnswer
-	(*QuestionResponse)(nil),                  // 41: localharness.v1.QuestionResponse
-	(*ActionManageTask)(nil),                  // 42: localharness.v1.ActionManageTask
-	(*TaskInfo)(nil),                          // 43: localharness.v1.TaskInfo
-	(*ActionInvokeSubagent)(nil),              // 44: localharness.v1.ActionInvokeSubagent
-	(*SubagentInvocation)(nil),                // 45: localharness.v1.SubagentInvocation
-	(*SubagentLaunchResult)(nil),              // 46: localharness.v1.SubagentLaunchResult
-	(*ActionBrowserSubagent)(nil),             // 47: localharness.v1.ActionBrowserSubagent
-	(*ActionDefineSubagent)(nil),              // 48: localharness.v1.ActionDefineSubagent
-	(*ActionManageSubagents)(nil),             // 49: localharness.v1.ActionManageSubagents
-	(*SubagentInfo)(nil),                      // 50: localharness.v1.SubagentInfo
-	(*ActionSendMessage)(nil),                 // 51: localharness.v1.ActionSendMessage
-	(*ActionSearchWeb)(nil),                   // 52: localharness.v1.ActionSearchWeb
-	(*WebSearchResult)(nil),                   // 53: localharness.v1.WebSearchResult
-	(*ActionReadUrlContent)(nil),              // 54: localharness.v1.ActionReadUrlContent
-	(*ActionPermissionRequest)(nil),           // 55: localharness.v1.ActionPermissionRequest
-	(*PermissionResponse)(nil),                // 56: localharness.v1.PermissionResponse
-	(*HarnessConfig)(nil),                     // 57: localharness.v1.HarnessConfig
-	(*UserRuleConfig)(nil),                    // 58: localharness.v1.UserRuleConfig
-	(*PromptModules)(nil),                     // 59: localharness.v1.PromptModules
-	(*SlashCommandDef)(nil),                   // 60: localharness.v1.SlashCommandDef
-	(*SkillDef)(nil),                          // 61: localharness.v1.SkillDef
-	(*PluginDef)(nil),                         // 62: localharness.v1.PluginDef
-	(*SubagentTypeConfig)(nil),                // 63: localharness.v1.SubagentTypeConfig
-	(*StructuredSystemInstructions)(nil),      // 64: localharness.v1.StructuredSystemInstructions
-	(*SystemSection)(nil),                     // 65: localharness.v1.SystemSection
-	(*ToolDef)(nil),                           // 66: localharness.v1.ToolDef
-	(*BuiltinToolsConfig)(nil),                // 67: localharness.v1.BuiltinToolsConfig
-	(*ToolConfigs)(nil),                       // 68: localharness.v1.ToolConfigs
-	(*ViewFileToolConfig)(nil),                // 69: localharness.v1.ViewFileToolConfig
-	(*RunCommandToolConfig)(nil),              // 70: localharness.v1.RunCommandToolConfig
-	(*FileEditToolConfig)(nil),                // 71: localharness.v1.FileEditToolConfig
-	(*FindToolConfig)(nil),                    // 72: localharness.v1.FindToolConfig
-	(*GrepSearchToolConfig)(nil),              // 73: localharness.v1.GrepSearchToolConfig
-	(*ListDirToolConfig)(nil),                 // 74: localharness.v1.ListDirToolConfig
-	(*WriteToFileToolConfig)(nil),             // 75: localharness.v1.WriteToFileToolConfig
-	(*WebSearchToolConfig)(nil),               // 76: localharness.v1.WebSearchToolConfig
-	(*WebFetchToolConfig)(nil),                // 77: localharness.v1.WebFetchToolConfig
-	(*Workspace)(nil),                         // 78: localharness.v1.Workspace
-	(*McpServerConfig)(nil),                   // 79: localharness.v1.McpServerConfig
-	(*McpStdioTransport)(nil),                 // 80: localharness.v1.McpStdioTransport
-	(*McpHttpTransport)(nil),                  // 81: localharness.v1.McpHttpTransport
-	(*ActionMcpTool)(nil),                     // 82: localharness.v1.ActionMcpTool
-	(*SettingsChange)(nil),                    // 83: localharness.v1.SettingsChange
-	(*ErrorInfo)(nil),                         // 84: localharness.v1.ErrorInfo
-	(*UsageMetadata)(nil),                     // 85: localharness.v1.UsageMetadata
-	(*TraceEvent)(nil),                        // 86: localharness.v1.TraceEvent
-	(*ModelCallTrace)(nil),                    // 87: localharness.v1.ModelCallTrace
-	(*ModelResponseTrace)(nil),                // 88: localharness.v1.ModelResponseTrace
-	(*ConversationState)(nil),                 // 89: localharness.v1.ConversationState
-	(*ConversationMessage)(nil),               // 90: localharness.v1.ConversationMessage
-	(*ToolCallRecord)(nil),                    // 91: localharness.v1.ToolCallRecord
-	(*ToolResultRecord)(nil),                  // 92: localharness.v1.ToolResultRecord
-	(*TranscriptLog)(nil),                     // 93: localharness.v1.TranscriptLog
-	(*TranscriptEntry)(nil),                   // 94: localharness.v1.TranscriptEntry
-	(*ActionSchedule)(nil),                    // 95: localharness.v1.ActionSchedule
-	nil,                                       // 96: localharness.v1.UserContext.ExtraEntry
-	nil,                                       // 97: localharness.v1.ErrorEvent.MetadataEntry
-	nil,                                       // 98: localharness.v1.ActionRunCommand.EnvEntry
-	nil,                                       // 99: localharness.v1.McpServerConfig.EnvEntry
-	nil,                                       // 100: localharness.v1.McpHttpTransport.HeadersEntry
-	nil,                                       // 101: localharness.v1.ErrorInfo.MetadataEntry
+	(PermissionResponse_PermissionScope)(0),   // 5: localharness.v1.PermissionResponse.PermissionScope
+	(ConversationState_ConversationStatus)(0), // 6: localharness.v1.ConversationState.ConversationStatus
+	(*InputConfig)(nil),                       // 7: localharness.v1.InputConfig
+	(*OutputConfig)(nil),                      // 8: localharness.v1.OutputConfig
+	(*ClientMessage)(nil),                     // 9: localharness.v1.ClientMessage
+	(*InitRequest)(nil),                       // 10: localharness.v1.InitRequest
+	(*UserMessage)(nil),                       // 11: localharness.v1.UserMessage
+	(*FileInfo)(nil),                          // 12: localharness.v1.FileInfo
+	(*UserContext)(nil),                       // 13: localharness.v1.UserContext
+	(*ToolResult)(nil),                        // 14: localharness.v1.ToolResult
+	(*CancelRequest)(nil),                     // 15: localharness.v1.CancelRequest
+	(*InterruptRequest)(nil),                  // 16: localharness.v1.InterruptRequest
+	(*ResumeRequest)(nil),                     // 17: localharness.v1.ResumeRequest
+	(*ServerMessage)(nil),                     // 18: localharness.v1.ServerMessage
+	(*SessionInfo)(nil),                       // 19: localharness.v1.SessionInfo
+	(*SessionList)(nil),                       // 20: localharness.v1.SessionList
+	(*InitResponse)(nil),                      // 21: localharness.v1.InitResponse
+	(*ErrorEvent)(nil),                        // 22: localharness.v1.ErrorEvent
+	(*StepUpdate)(nil),                        // 23: localharness.v1.StepUpdate
+	(*TrajectoryState)(nil),                   // 24: localharness.v1.TrajectoryState
+	(*ActionViewFile)(nil),                    // 25: localharness.v1.ActionViewFile
+	(*ArtifactMetadata)(nil),                  // 26: localharness.v1.ArtifactMetadata
+	(*ActionWriteToFile)(nil),                 // 27: localharness.v1.ActionWriteToFile
+	(*ActionReplaceFileContent)(nil),          // 28: localharness.v1.ActionReplaceFileContent
+	(*EditChunk)(nil),                         // 29: localharness.v1.EditChunk
+	(*ActionListDir)(nil),                     // 30: localharness.v1.ActionListDir
+	(*DirEntry)(nil),                          // 31: localharness.v1.DirEntry
+	(*ActionGrepSearch)(nil),                  // 32: localharness.v1.ActionGrepSearch
+	(*SearchMatch)(nil),                       // 33: localharness.v1.SearchMatch
+	(*ActionFindFile)(nil),                    // 34: localharness.v1.ActionFindFile
+	(*ActionRunCommand)(nil),                  // 35: localharness.v1.ActionRunCommand
+	(*ActionFinish)(nil),                      // 36: localharness.v1.ActionFinish
+	(*ActionHostToolCall)(nil),                // 37: localharness.v1.ActionHostToolCall
+	(*ActionCompaction)(nil),                  // 38: localharness.v1.ActionCompaction
+	(*ActionUserQuestion)(nil),                // 39: localharness.v1.ActionUserQuestion
+	(*UserQuestion)(nil),                      // 40: localharness.v1.UserQuestion
+	(*QuestionAnswer)(nil),                    // 41: localharness.v1.QuestionAnswer
+	(*QuestionResponse)(nil),                  // 42: localharness.v1.QuestionResponse
+	(*ActionManageTask)(nil),                  // 43: localharness.v1.ActionManageTask
+	(*TaskInfo)(nil),                          // 44: localharness.v1.TaskInfo
+	(*ActionInvokeSubagent)(nil),              // 45: localharness.v1.ActionInvokeSubagent
+	(*SubagentInvocation)(nil),                // 46: localharness.v1.SubagentInvocation
+	(*SubagentLaunchResult)(nil),              // 47: localharness.v1.SubagentLaunchResult
+	(*ActionBrowserSubagent)(nil),             // 48: localharness.v1.ActionBrowserSubagent
+	(*ActionDefineSubagent)(nil),              // 49: localharness.v1.ActionDefineSubagent
+	(*ActionManageSubagents)(nil),             // 50: localharness.v1.ActionManageSubagents
+	(*SubagentInfo)(nil),                      // 51: localharness.v1.SubagentInfo
+	(*ActionSendMessage)(nil),                 // 52: localharness.v1.ActionSendMessage
+	(*ActionSearchWeb)(nil),                   // 53: localharness.v1.ActionSearchWeb
+	(*WebSearchResult)(nil),                   // 54: localharness.v1.WebSearchResult
+	(*ActionReadUrlContent)(nil),              // 55: localharness.v1.ActionReadUrlContent
+	(*ActionPermissionRequest)(nil),           // 56: localharness.v1.ActionPermissionRequest
+	(*PermissionResponse)(nil),                // 57: localharness.v1.PermissionResponse
+	(*HarnessConfig)(nil),                     // 58: localharness.v1.HarnessConfig
+	(*UserRuleConfig)(nil),                    // 59: localharness.v1.UserRuleConfig
+	(*PromptModules)(nil),                     // 60: localharness.v1.PromptModules
+	(*SlashCommandDef)(nil),                   // 61: localharness.v1.SlashCommandDef
+	(*SkillDef)(nil),                          // 62: localharness.v1.SkillDef
+	(*PluginDef)(nil),                         // 63: localharness.v1.PluginDef
+	(*SubagentTypeConfig)(nil),                // 64: localharness.v1.SubagentTypeConfig
+	(*StructuredSystemInstructions)(nil),      // 65: localharness.v1.StructuredSystemInstructions
+	(*SystemSection)(nil),                     // 66: localharness.v1.SystemSection
+	(*ToolDef)(nil),                           // 67: localharness.v1.ToolDef
+	(*BuiltinToolsConfig)(nil),                // 68: localharness.v1.BuiltinToolsConfig
+	(*ToolConfigs)(nil),                       // 69: localharness.v1.ToolConfigs
+	(*ViewFileToolConfig)(nil),                // 70: localharness.v1.ViewFileToolConfig
+	(*RunCommandToolConfig)(nil),              // 71: localharness.v1.RunCommandToolConfig
+	(*FileEditToolConfig)(nil),                // 72: localharness.v1.FileEditToolConfig
+	(*FindToolConfig)(nil),                    // 73: localharness.v1.FindToolConfig
+	(*GrepSearchToolConfig)(nil),              // 74: localharness.v1.GrepSearchToolConfig
+	(*ListDirToolConfig)(nil),                 // 75: localharness.v1.ListDirToolConfig
+	(*WriteToFileToolConfig)(nil),             // 76: localharness.v1.WriteToFileToolConfig
+	(*WebSearchToolConfig)(nil),               // 77: localharness.v1.WebSearchToolConfig
+	(*WebFetchToolConfig)(nil),                // 78: localharness.v1.WebFetchToolConfig
+	(*Workspace)(nil),                         // 79: localharness.v1.Workspace
+	(*McpServerConfig)(nil),                   // 80: localharness.v1.McpServerConfig
+	(*McpStdioTransport)(nil),                 // 81: localharness.v1.McpStdioTransport
+	(*McpHttpTransport)(nil),                  // 82: localharness.v1.McpHttpTransport
+	(*ActionMcpTool)(nil),                     // 83: localharness.v1.ActionMcpTool
+	(*SettingsChange)(nil),                    // 84: localharness.v1.SettingsChange
+	(*ErrorInfo)(nil),                         // 85: localharness.v1.ErrorInfo
+	(*UsageMetadata)(nil),                     // 86: localharness.v1.UsageMetadata
+	(*TraceEvent)(nil),                        // 87: localharness.v1.TraceEvent
+	(*ModelCallTrace)(nil),                    // 88: localharness.v1.ModelCallTrace
+	(*ModelResponseTrace)(nil),                // 89: localharness.v1.ModelResponseTrace
+	(*ConversationState)(nil),                 // 90: localharness.v1.ConversationState
+	(*ConversationMessage)(nil),               // 91: localharness.v1.ConversationMessage
+	(*ToolCallRecord)(nil),                    // 92: localharness.v1.ToolCallRecord
+	(*ToolResultRecord)(nil),                  // 93: localharness.v1.ToolResultRecord
+	(*TranscriptLog)(nil),                     // 94: localharness.v1.TranscriptLog
+	(*TranscriptEntry)(nil),                   // 95: localharness.v1.TranscriptEntry
+	(*ActionSchedule)(nil),                    // 96: localharness.v1.ActionSchedule
+	(*WorkspaceRequest)(nil),                  // 97: localharness.v1.WorkspaceRequest
+	(*WorkspaceResponse)(nil),                 // 98: localharness.v1.WorkspaceResponse
+	(*SetYoloModeRequest)(nil),                // 99: localharness.v1.SetYoloModeRequest
+	(*ReplayComplete)(nil),                    // 100: localharness.v1.ReplayComplete
+	nil,                                       // 101: localharness.v1.UserContext.ExtraEntry
+	nil,                                       // 102: localharness.v1.ErrorEvent.MetadataEntry
+	nil,                                       // 103: localharness.v1.ActionRunCommand.EnvEntry
+	nil,                                       // 104: localharness.v1.McpServerConfig.EnvEntry
+	nil,                                       // 105: localharness.v1.McpHttpTransport.HeadersEntry
+	nil,                                       // 106: localharness.v1.ErrorInfo.MetadataEntry
 }
 var file_localharness_v1_localharness_proto_depIdxs = []int32{
-	9,   // 0: localharness.v1.ClientMessage.init:type_name -> localharness.v1.InitRequest
-	10,  // 1: localharness.v1.ClientMessage.user_message:type_name -> localharness.v1.UserMessage
-	13,  // 2: localharness.v1.ClientMessage.host_tool_result:type_name -> localharness.v1.ToolResult
-	14,  // 3: localharness.v1.ClientMessage.cancel:type_name -> localharness.v1.CancelRequest
-	56,  // 4: localharness.v1.ClientMessage.permission_response:type_name -> localharness.v1.PermissionResponse
-	41,  // 5: localharness.v1.ClientMessage.question_response:type_name -> localharness.v1.QuestionResponse
-	15,  // 6: localharness.v1.ClientMessage.interrupt:type_name -> localharness.v1.InterruptRequest
-	16,  // 7: localharness.v1.ClientMessage.resume:type_name -> localharness.v1.ResumeRequest
-	57,  // 8: localharness.v1.InitRequest.config:type_name -> localharness.v1.HarnessConfig
-	12,  // 9: localharness.v1.UserMessage.context:type_name -> localharness.v1.UserContext
-	83,  // 10: localharness.v1.UserMessage.settings_changes:type_name -> localharness.v1.SettingsChange
-	11,  // 11: localharness.v1.UserContext.active_file:type_name -> localharness.v1.FileInfo
-	11,  // 12: localharness.v1.UserContext.open_files:type_name -> localharness.v1.FileInfo
-	96,  // 13: localharness.v1.UserContext.extra:type_name -> localharness.v1.UserContext.ExtraEntry
-	20,  // 14: localharness.v1.ServerMessage.init_response:type_name -> localharness.v1.InitResponse
-	22,  // 15: localharness.v1.ServerMessage.step_update:type_name -> localharness.v1.StepUpdate
-	23,  // 16: localharness.v1.ServerMessage.trajectory_state:type_name -> localharness.v1.TrajectoryState
-	21,  // 17: localharness.v1.ServerMessage.error:type_name -> localharness.v1.ErrorEvent
-	86,  // 18: localharness.v1.ServerMessage.trace_event:type_name -> localharness.v1.TraceEvent
-	0,   // 19: localharness.v1.SessionInfo.status:type_name -> localharness.v1.SessionStatus
-	18,  // 20: localharness.v1.SessionList.sessions:type_name -> localharness.v1.SessionInfo
-	97,  // 21: localharness.v1.ErrorEvent.metadata:type_name -> localharness.v1.ErrorEvent.MetadataEntry
-	1,   // 22: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
-	2,   // 23: localharness.v1.StepUpdate.state:type_name -> localharness.v1.StepUpdate.State
-	3,   // 24: localharness.v1.StepUpdate.target:type_name -> localharness.v1.StepUpdate.Target
-	24,  // 25: localharness.v1.StepUpdate.view_file:type_name -> localharness.v1.ActionViewFile
-	26,  // 26: localharness.v1.StepUpdate.write_to_file:type_name -> localharness.v1.ActionWriteToFile
-	27,  // 27: localharness.v1.StepUpdate.replace_file_content:type_name -> localharness.v1.ActionReplaceFileContent
-	29,  // 28: localharness.v1.StepUpdate.list_dir:type_name -> localharness.v1.ActionListDir
-	31,  // 29: localharness.v1.StepUpdate.grep_search:type_name -> localharness.v1.ActionGrepSearch
-	33,  // 30: localharness.v1.StepUpdate.find_file:type_name -> localharness.v1.ActionFindFile
-	34,  // 31: localharness.v1.StepUpdate.run_command:type_name -> localharness.v1.ActionRunCommand
-	35,  // 32: localharness.v1.StepUpdate.finish:type_name -> localharness.v1.ActionFinish
-	36,  // 33: localharness.v1.StepUpdate.host_tool_call:type_name -> localharness.v1.ActionHostToolCall
-	37,  // 34: localharness.v1.StepUpdate.compaction:type_name -> localharness.v1.ActionCompaction
-	38,  // 35: localharness.v1.StepUpdate.user_question:type_name -> localharness.v1.ActionUserQuestion
-	42,  // 36: localharness.v1.StepUpdate.manage_task:type_name -> localharness.v1.ActionManageTask
-	55,  // 37: localharness.v1.StepUpdate.permission_request:type_name -> localharness.v1.ActionPermissionRequest
-	44,  // 38: localharness.v1.StepUpdate.invoke_subagent:type_name -> localharness.v1.ActionInvokeSubagent
-	52,  // 39: localharness.v1.StepUpdate.search_web:type_name -> localharness.v1.ActionSearchWeb
-	54,  // 40: localharness.v1.StepUpdate.read_url_content:type_name -> localharness.v1.ActionReadUrlContent
-	82,  // 41: localharness.v1.StepUpdate.mcp_tool:type_name -> localharness.v1.ActionMcpTool
-	95,  // 42: localharness.v1.StepUpdate.schedule:type_name -> localharness.v1.ActionSchedule
-	48,  // 43: localharness.v1.StepUpdate.define_subagent:type_name -> localharness.v1.ActionDefineSubagent
-	49,  // 44: localharness.v1.StepUpdate.manage_subagents:type_name -> localharness.v1.ActionManageSubagents
-	51,  // 45: localharness.v1.StepUpdate.send_message_action:type_name -> localharness.v1.ActionSendMessage
-	47,  // 46: localharness.v1.StepUpdate.browser_subagent:type_name -> localharness.v1.ActionBrowserSubagent
-	84,  // 47: localharness.v1.StepUpdate.error_info:type_name -> localharness.v1.ErrorInfo
-	85,  // 48: localharness.v1.StepUpdate.usage:type_name -> localharness.v1.UsageMetadata
-	4,   // 49: localharness.v1.TrajectoryState.state:type_name -> localharness.v1.TrajectoryState.TrajState
-	25,  // 50: localharness.v1.ActionWriteToFile.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
-	28,  // 51: localharness.v1.ActionReplaceFileContent.chunks:type_name -> localharness.v1.EditChunk
-	25,  // 52: localharness.v1.ActionReplaceFileContent.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
-	30,  // 53: localharness.v1.ActionListDir.entries:type_name -> localharness.v1.DirEntry
-	32,  // 54: localharness.v1.ActionGrepSearch.matches:type_name -> localharness.v1.SearchMatch
-	98,  // 55: localharness.v1.ActionRunCommand.env:type_name -> localharness.v1.ActionRunCommand.EnvEntry
-	39,  // 56: localharness.v1.ActionUserQuestion.questions:type_name -> localharness.v1.UserQuestion
-	40,  // 57: localharness.v1.ActionUserQuestion.answers:type_name -> localharness.v1.QuestionAnswer
-	40,  // 58: localharness.v1.QuestionResponse.answers:type_name -> localharness.v1.QuestionAnswer
-	43,  // 59: localharness.v1.ActionManageTask.tasks:type_name -> localharness.v1.TaskInfo
-	45,  // 60: localharness.v1.ActionInvokeSubagent.subagents:type_name -> localharness.v1.SubagentInvocation
-	46,  // 61: localharness.v1.ActionInvokeSubagent.launch_results:type_name -> localharness.v1.SubagentLaunchResult
-	85,  // 62: localharness.v1.ActionInvokeSubagent.child_usage:type_name -> localharness.v1.UsageMetadata
-	50,  // 63: localharness.v1.ActionManageSubagents.active_subagents:type_name -> localharness.v1.SubagentInfo
-	53,  // 64: localharness.v1.ActionSearchWeb.results:type_name -> localharness.v1.WebSearchResult
-	66,  // 65: localharness.v1.HarnessConfig.host_tools:type_name -> localharness.v1.ToolDef
-	67,  // 66: localharness.v1.HarnessConfig.builtin_tools:type_name -> localharness.v1.BuiltinToolsConfig
-	78,  // 67: localharness.v1.HarnessConfig.workspaces:type_name -> localharness.v1.Workspace
-	68,  // 68: localharness.v1.HarnessConfig.tool_configs:type_name -> localharness.v1.ToolConfigs
-	79,  // 69: localharness.v1.HarnessConfig.mcp_servers:type_name -> localharness.v1.McpServerConfig
-	64,  // 70: localharness.v1.HarnessConfig.structured_instructions:type_name -> localharness.v1.StructuredSystemInstructions
-	59,  // 71: localharness.v1.HarnessConfig.prompt_modules:type_name -> localharness.v1.PromptModules
-	60,  // 72: localharness.v1.HarnessConfig.slash_commands:type_name -> localharness.v1.SlashCommandDef
-	61,  // 73: localharness.v1.HarnessConfig.skills:type_name -> localharness.v1.SkillDef
-	62,  // 74: localharness.v1.HarnessConfig.plugins:type_name -> localharness.v1.PluginDef
-	63,  // 75: localharness.v1.HarnessConfig.subagent_types:type_name -> localharness.v1.SubagentTypeConfig
-	58,  // 76: localharness.v1.HarnessConfig.user_rules:type_name -> localharness.v1.UserRuleConfig
-	61,  // 77: localharness.v1.PluginDef.skills:type_name -> localharness.v1.SkillDef
-	65,  // 78: localharness.v1.StructuredSystemInstructions.sections:type_name -> localharness.v1.SystemSection
-	69,  // 79: localharness.v1.ToolConfigs.view_file:type_name -> localharness.v1.ViewFileToolConfig
-	70,  // 80: localharness.v1.ToolConfigs.run_command:type_name -> localharness.v1.RunCommandToolConfig
-	71,  // 81: localharness.v1.ToolConfigs.edit_file:type_name -> localharness.v1.FileEditToolConfig
-	72,  // 82: localharness.v1.ToolConfigs.find_file:type_name -> localharness.v1.FindToolConfig
-	73,  // 83: localharness.v1.ToolConfigs.grep_search:type_name -> localharness.v1.GrepSearchToolConfig
-	74,  // 84: localharness.v1.ToolConfigs.list_dir:type_name -> localharness.v1.ListDirToolConfig
-	75,  // 85: localharness.v1.ToolConfigs.write_file:type_name -> localharness.v1.WriteToFileToolConfig
-	76,  // 86: localharness.v1.ToolConfigs.web_search:type_name -> localharness.v1.WebSearchToolConfig
-	77,  // 87: localharness.v1.ToolConfigs.web_fetch:type_name -> localharness.v1.WebFetchToolConfig
-	80,  // 88: localharness.v1.McpServerConfig.stdio:type_name -> localharness.v1.McpStdioTransport
-	81,  // 89: localharness.v1.McpServerConfig.http:type_name -> localharness.v1.McpHttpTransport
-	99,  // 90: localharness.v1.McpServerConfig.env:type_name -> localharness.v1.McpServerConfig.EnvEntry
-	100, // 91: localharness.v1.McpHttpTransport.headers:type_name -> localharness.v1.McpHttpTransport.HeadersEntry
-	101, // 92: localharness.v1.ErrorInfo.metadata:type_name -> localharness.v1.ErrorInfo.MetadataEntry
-	87,  // 93: localharness.v1.TraceEvent.model_call:type_name -> localharness.v1.ModelCallTrace
-	88,  // 94: localharness.v1.TraceEvent.model_response:type_name -> localharness.v1.ModelResponseTrace
-	57,  // 95: localharness.v1.ConversationState.config:type_name -> localharness.v1.HarnessConfig
-	90,  // 96: localharness.v1.ConversationState.messages:type_name -> localharness.v1.ConversationMessage
-	85,  // 97: localharness.v1.ConversationState.total_usage:type_name -> localharness.v1.UsageMetadata
-	5,   // 98: localharness.v1.ConversationState.status:type_name -> localharness.v1.ConversationState.ConversationStatus
-	91,  // 99: localharness.v1.ConversationMessage.tool_calls:type_name -> localharness.v1.ToolCallRecord
-	92,  // 100: localharness.v1.ConversationMessage.tool_result:type_name -> localharness.v1.ToolResultRecord
-	94,  // 101: localharness.v1.TranscriptLog.entries:type_name -> localharness.v1.TranscriptEntry
-	22,  // 102: localharness.v1.TranscriptEntry.step_update:type_name -> localharness.v1.StepUpdate
-	23,  // 103: localharness.v1.TranscriptEntry.trajectory_state:type_name -> localharness.v1.TrajectoryState
-	104, // [104:104] is the sub-list for method output_type
-	104, // [104:104] is the sub-list for method input_type
-	104, // [104:104] is the sub-list for extension type_name
-	104, // [104:104] is the sub-list for extension extendee
-	0,   // [0:104] is the sub-list for field type_name
+	10,  // 0: localharness.v1.ClientMessage.init:type_name -> localharness.v1.InitRequest
+	11,  // 1: localharness.v1.ClientMessage.user_message:type_name -> localharness.v1.UserMessage
+	14,  // 2: localharness.v1.ClientMessage.host_tool_result:type_name -> localharness.v1.ToolResult
+	15,  // 3: localharness.v1.ClientMessage.cancel:type_name -> localharness.v1.CancelRequest
+	57,  // 4: localharness.v1.ClientMessage.permission_response:type_name -> localharness.v1.PermissionResponse
+	42,  // 5: localharness.v1.ClientMessage.question_response:type_name -> localharness.v1.QuestionResponse
+	16,  // 6: localharness.v1.ClientMessage.interrupt:type_name -> localharness.v1.InterruptRequest
+	17,  // 7: localharness.v1.ClientMessage.resume:type_name -> localharness.v1.ResumeRequest
+	97,  // 8: localharness.v1.ClientMessage.workspace_request:type_name -> localharness.v1.WorkspaceRequest
+	99,  // 9: localharness.v1.ClientMessage.set_yolo_mode:type_name -> localharness.v1.SetYoloModeRequest
+	58,  // 10: localharness.v1.InitRequest.config:type_name -> localharness.v1.HarnessConfig
+	13,  // 11: localharness.v1.UserMessage.context:type_name -> localharness.v1.UserContext
+	84,  // 12: localharness.v1.UserMessage.settings_changes:type_name -> localharness.v1.SettingsChange
+	12,  // 13: localharness.v1.UserContext.active_file:type_name -> localharness.v1.FileInfo
+	12,  // 14: localharness.v1.UserContext.open_files:type_name -> localharness.v1.FileInfo
+	101, // 15: localharness.v1.UserContext.extra:type_name -> localharness.v1.UserContext.ExtraEntry
+	21,  // 16: localharness.v1.ServerMessage.init_response:type_name -> localharness.v1.InitResponse
+	23,  // 17: localharness.v1.ServerMessage.step_update:type_name -> localharness.v1.StepUpdate
+	24,  // 18: localharness.v1.ServerMessage.trajectory_state:type_name -> localharness.v1.TrajectoryState
+	22,  // 19: localharness.v1.ServerMessage.error:type_name -> localharness.v1.ErrorEvent
+	87,  // 20: localharness.v1.ServerMessage.trace_event:type_name -> localharness.v1.TraceEvent
+	98,  // 21: localharness.v1.ServerMessage.workspace_response:type_name -> localharness.v1.WorkspaceResponse
+	100, // 22: localharness.v1.ServerMessage.replay_complete:type_name -> localharness.v1.ReplayComplete
+	0,   // 23: localharness.v1.SessionInfo.status:type_name -> localharness.v1.SessionStatus
+	19,  // 24: localharness.v1.SessionList.sessions:type_name -> localharness.v1.SessionInfo
+	102, // 25: localharness.v1.ErrorEvent.metadata:type_name -> localharness.v1.ErrorEvent.MetadataEntry
+	1,   // 26: localharness.v1.StepUpdate.source:type_name -> localharness.v1.StepUpdate.Source
+	2,   // 27: localharness.v1.StepUpdate.state:type_name -> localharness.v1.StepUpdate.State
+	3,   // 28: localharness.v1.StepUpdate.target:type_name -> localharness.v1.StepUpdate.Target
+	25,  // 29: localharness.v1.StepUpdate.view_file:type_name -> localharness.v1.ActionViewFile
+	27,  // 30: localharness.v1.StepUpdate.write_to_file:type_name -> localharness.v1.ActionWriteToFile
+	28,  // 31: localharness.v1.StepUpdate.replace_file_content:type_name -> localharness.v1.ActionReplaceFileContent
+	30,  // 32: localharness.v1.StepUpdate.list_dir:type_name -> localharness.v1.ActionListDir
+	32,  // 33: localharness.v1.StepUpdate.grep_search:type_name -> localharness.v1.ActionGrepSearch
+	34,  // 34: localharness.v1.StepUpdate.find_file:type_name -> localharness.v1.ActionFindFile
+	35,  // 35: localharness.v1.StepUpdate.run_command:type_name -> localharness.v1.ActionRunCommand
+	36,  // 36: localharness.v1.StepUpdate.finish:type_name -> localharness.v1.ActionFinish
+	37,  // 37: localharness.v1.StepUpdate.host_tool_call:type_name -> localharness.v1.ActionHostToolCall
+	38,  // 38: localharness.v1.StepUpdate.compaction:type_name -> localharness.v1.ActionCompaction
+	39,  // 39: localharness.v1.StepUpdate.user_question:type_name -> localharness.v1.ActionUserQuestion
+	43,  // 40: localharness.v1.StepUpdate.manage_task:type_name -> localharness.v1.ActionManageTask
+	56,  // 41: localharness.v1.StepUpdate.permission_request:type_name -> localharness.v1.ActionPermissionRequest
+	45,  // 42: localharness.v1.StepUpdate.invoke_subagent:type_name -> localharness.v1.ActionInvokeSubagent
+	53,  // 43: localharness.v1.StepUpdate.search_web:type_name -> localharness.v1.ActionSearchWeb
+	55,  // 44: localharness.v1.StepUpdate.read_url_content:type_name -> localharness.v1.ActionReadUrlContent
+	83,  // 45: localharness.v1.StepUpdate.mcp_tool:type_name -> localharness.v1.ActionMcpTool
+	96,  // 46: localharness.v1.StepUpdate.schedule:type_name -> localharness.v1.ActionSchedule
+	49,  // 47: localharness.v1.StepUpdate.define_subagent:type_name -> localharness.v1.ActionDefineSubagent
+	50,  // 48: localharness.v1.StepUpdate.manage_subagents:type_name -> localharness.v1.ActionManageSubagents
+	52,  // 49: localharness.v1.StepUpdate.send_message_action:type_name -> localharness.v1.ActionSendMessage
+	48,  // 50: localharness.v1.StepUpdate.browser_subagent:type_name -> localharness.v1.ActionBrowserSubagent
+	85,  // 51: localharness.v1.StepUpdate.error_info:type_name -> localharness.v1.ErrorInfo
+	86,  // 52: localharness.v1.StepUpdate.usage:type_name -> localharness.v1.UsageMetadata
+	4,   // 53: localharness.v1.TrajectoryState.state:type_name -> localharness.v1.TrajectoryState.TrajState
+	26,  // 54: localharness.v1.ActionWriteToFile.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
+	29,  // 55: localharness.v1.ActionReplaceFileContent.chunks:type_name -> localharness.v1.EditChunk
+	26,  // 56: localharness.v1.ActionReplaceFileContent.artifact_metadata:type_name -> localharness.v1.ArtifactMetadata
+	31,  // 57: localharness.v1.ActionListDir.entries:type_name -> localharness.v1.DirEntry
+	33,  // 58: localharness.v1.ActionGrepSearch.matches:type_name -> localharness.v1.SearchMatch
+	103, // 59: localharness.v1.ActionRunCommand.env:type_name -> localharness.v1.ActionRunCommand.EnvEntry
+	40,  // 60: localharness.v1.ActionUserQuestion.questions:type_name -> localharness.v1.UserQuestion
+	41,  // 61: localharness.v1.ActionUserQuestion.answers:type_name -> localharness.v1.QuestionAnswer
+	41,  // 62: localharness.v1.QuestionResponse.answers:type_name -> localharness.v1.QuestionAnswer
+	44,  // 63: localharness.v1.ActionManageTask.tasks:type_name -> localharness.v1.TaskInfo
+	46,  // 64: localharness.v1.ActionInvokeSubagent.subagents:type_name -> localharness.v1.SubagentInvocation
+	47,  // 65: localharness.v1.ActionInvokeSubagent.launch_results:type_name -> localharness.v1.SubagentLaunchResult
+	86,  // 66: localharness.v1.ActionInvokeSubagent.child_usage:type_name -> localharness.v1.UsageMetadata
+	51,  // 67: localharness.v1.ActionManageSubagents.active_subagents:type_name -> localharness.v1.SubagentInfo
+	54,  // 68: localharness.v1.ActionSearchWeb.results:type_name -> localharness.v1.WebSearchResult
+	5,   // 69: localharness.v1.PermissionResponse.scope:type_name -> localharness.v1.PermissionResponse.PermissionScope
+	67,  // 70: localharness.v1.HarnessConfig.host_tools:type_name -> localharness.v1.ToolDef
+	68,  // 71: localharness.v1.HarnessConfig.builtin_tools:type_name -> localharness.v1.BuiltinToolsConfig
+	79,  // 72: localharness.v1.HarnessConfig.workspaces:type_name -> localharness.v1.Workspace
+	69,  // 73: localharness.v1.HarnessConfig.tool_configs:type_name -> localharness.v1.ToolConfigs
+	80,  // 74: localharness.v1.HarnessConfig.mcp_servers:type_name -> localharness.v1.McpServerConfig
+	65,  // 75: localharness.v1.HarnessConfig.structured_instructions:type_name -> localharness.v1.StructuredSystemInstructions
+	60,  // 76: localharness.v1.HarnessConfig.prompt_modules:type_name -> localharness.v1.PromptModules
+	61,  // 77: localharness.v1.HarnessConfig.slash_commands:type_name -> localharness.v1.SlashCommandDef
+	62,  // 78: localharness.v1.HarnessConfig.skills:type_name -> localharness.v1.SkillDef
+	63,  // 79: localharness.v1.HarnessConfig.plugins:type_name -> localharness.v1.PluginDef
+	64,  // 80: localharness.v1.HarnessConfig.subagent_types:type_name -> localharness.v1.SubagentTypeConfig
+	59,  // 81: localharness.v1.HarnessConfig.user_rules:type_name -> localharness.v1.UserRuleConfig
+	62,  // 82: localharness.v1.PluginDef.skills:type_name -> localharness.v1.SkillDef
+	66,  // 83: localharness.v1.StructuredSystemInstructions.sections:type_name -> localharness.v1.SystemSection
+	70,  // 84: localharness.v1.ToolConfigs.view_file:type_name -> localharness.v1.ViewFileToolConfig
+	71,  // 85: localharness.v1.ToolConfigs.run_command:type_name -> localharness.v1.RunCommandToolConfig
+	72,  // 86: localharness.v1.ToolConfigs.edit_file:type_name -> localharness.v1.FileEditToolConfig
+	73,  // 87: localharness.v1.ToolConfigs.find_file:type_name -> localharness.v1.FindToolConfig
+	74,  // 88: localharness.v1.ToolConfigs.grep_search:type_name -> localharness.v1.GrepSearchToolConfig
+	75,  // 89: localharness.v1.ToolConfigs.list_dir:type_name -> localharness.v1.ListDirToolConfig
+	76,  // 90: localharness.v1.ToolConfigs.write_file:type_name -> localharness.v1.WriteToFileToolConfig
+	77,  // 91: localharness.v1.ToolConfigs.web_search:type_name -> localharness.v1.WebSearchToolConfig
+	78,  // 92: localharness.v1.ToolConfigs.web_fetch:type_name -> localharness.v1.WebFetchToolConfig
+	81,  // 93: localharness.v1.McpServerConfig.stdio:type_name -> localharness.v1.McpStdioTransport
+	82,  // 94: localharness.v1.McpServerConfig.http:type_name -> localharness.v1.McpHttpTransport
+	104, // 95: localharness.v1.McpServerConfig.env:type_name -> localharness.v1.McpServerConfig.EnvEntry
+	105, // 96: localharness.v1.McpHttpTransport.headers:type_name -> localharness.v1.McpHttpTransport.HeadersEntry
+	106, // 97: localharness.v1.ErrorInfo.metadata:type_name -> localharness.v1.ErrorInfo.MetadataEntry
+	88,  // 98: localharness.v1.TraceEvent.model_call:type_name -> localharness.v1.ModelCallTrace
+	89,  // 99: localharness.v1.TraceEvent.model_response:type_name -> localharness.v1.ModelResponseTrace
+	58,  // 100: localharness.v1.ConversationState.config:type_name -> localharness.v1.HarnessConfig
+	91,  // 101: localharness.v1.ConversationState.messages:type_name -> localharness.v1.ConversationMessage
+	86,  // 102: localharness.v1.ConversationState.total_usage:type_name -> localharness.v1.UsageMetadata
+	6,   // 103: localharness.v1.ConversationState.status:type_name -> localharness.v1.ConversationState.ConversationStatus
+	92,  // 104: localharness.v1.ConversationMessage.tool_calls:type_name -> localharness.v1.ToolCallRecord
+	93,  // 105: localharness.v1.ConversationMessage.tool_result:type_name -> localharness.v1.ToolResultRecord
+	95,  // 106: localharness.v1.TranscriptLog.entries:type_name -> localharness.v1.TranscriptEntry
+	23,  // 107: localharness.v1.TranscriptEntry.step_update:type_name -> localharness.v1.StepUpdate
+	24,  // 108: localharness.v1.TranscriptEntry.trajectory_state:type_name -> localharness.v1.TrajectoryState
+	79,  // 109: localharness.v1.WorkspaceResponse.workspaces:type_name -> localharness.v1.Workspace
+	110, // [110:110] is the sub-list for method output_type
+	110, // [110:110] is the sub-list for method input_type
+	110, // [110:110] is the sub-list for extension type_name
+	110, // [110:110] is the sub-list for extension extendee
+	0,   // [0:110] is the sub-list for field type_name
 }
 
 func init() { file_localharness_v1_localharness_proto_init() }
@@ -8801,6 +8995,8 @@ func file_localharness_v1_localharness_proto_init() {
 		(*ClientMessage_QuestionResponse)(nil),
 		(*ClientMessage_Interrupt)(nil),
 		(*ClientMessage_Resume)(nil),
+		(*ClientMessage_WorkspaceRequest)(nil),
+		(*ClientMessage_SetYoloMode)(nil),
 	}
 	file_localharness_v1_localharness_proto_msgTypes[11].OneofWrappers = []any{
 		(*ServerMessage_InitResponse)(nil),
@@ -8808,6 +9004,8 @@ func file_localharness_v1_localharness_proto_init() {
 		(*ServerMessage_TrajectoryState)(nil),
 		(*ServerMessage_Error)(nil),
 		(*ServerMessage_TraceEvent)(nil),
+		(*ServerMessage_WorkspaceResponse)(nil),
+		(*ServerMessage_ReplayComplete)(nil),
 	}
 	file_localharness_v1_localharness_proto_msgTypes[16].OneofWrappers = []any{
 		(*StepUpdate_ViewFile)(nil),
@@ -8846,8 +9044,8 @@ func file_localharness_v1_localharness_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_localharness_v1_localharness_proto_rawDesc), len(file_localharness_v1_localharness_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   96,
+			NumEnums:      7,
+			NumMessages:   100,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

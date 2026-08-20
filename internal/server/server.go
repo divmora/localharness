@@ -21,10 +21,13 @@ type Server struct {
 	agentCard *AgentCard
 	// SessionHandler is called for each new WebSocket connection.
 	SessionHandler func(conn *websocket.Conn)
+	// SessionHandlerWithReq is called for each new WebSocket connection with HTTP request metadata.
+	SessionHandlerWithReq func(conn *websocket.Conn, r *http.Request)
 
 	activeSession *Session
 	sessionMu     sync.RWMutex
 }
+
 
 // NewServer creates a new WebSocket server.
 // The apiKey is used to authenticate incoming WebSocket connections
@@ -88,13 +91,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("new WebSocket connection", "remote", r.RemoteAddr)
 
-	if s.SessionHandler != nil {
+	if s.SessionHandlerWithReq != nil {
+		go s.SessionHandlerWithReq(conn, r)
+	} else if s.SessionHandler != nil {
 		// Handle session in a goroutine
 		go s.SessionHandler(conn)
 	} else {
 		conn.Close()
 	}
 }
+
 
 // handleHealth returns a simple health check response.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

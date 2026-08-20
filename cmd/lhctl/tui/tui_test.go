@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/bubbles/spinner"
+
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
 
 
@@ -24,6 +26,8 @@ func TestParseCommand(t *testing.T) {
 		{"/detach", true, "detach", []string{}},
 		{"/exit", true, "exit", []string{}},
 		{"/quit", true, "quit", []string{}},
+		{"/teamwork Build auth service", true, "teamwork", []string{"Build", "auth", "service"}},
+		{"/team", true, "team", []string{}},
 		{"hello world", false, "", nil},
 		{"@file.txt", false, "", nil},
 	}
@@ -120,8 +124,47 @@ func TestApprovalModalRender(t *testing.T) {
 	if !strings.Contains(rendered, "old line") || !strings.Contains(rendered, "new line") {
 		t.Errorf("expected diff content in rendered modal: %s", rendered)
 	}
-	if !strings.Contains(rendered, "[y] Approve") {
-		t.Errorf("expected approval buttons in rendered modal: %s", rendered)
+	if !strings.Contains(rendered, "[y] Allow selected") || !strings.Contains(rendered, "[c] Allow in conversation") || !strings.Contains(rendered, "[g] Always allow") || !strings.Contains(rendered, "[n] Deny") {
+		t.Errorf("expected scoped approval buttons in rendered inline card: %s", rendered)
+	}
+}
+
+func TestApprovalModalRender_ChainedCommand(t *testing.T) {
+	app := &ActiveApproval{
+		RequestID:   "req-2",
+		ToolName:    "run_command",
+		Description: "Run build pipeline",
+		ArgsJSON:    `{"command": "go test ./... && go run main.go"}`,
+	}
+	app.InitSubcommands()
+
+	if len(app.SubCommands) != 2 {
+		t.Fatalf("expected 2 sub-commands, got %d", len(app.SubCommands))
+	}
+	if len(app.ApprovedSubcommands()) != 2 {
+		t.Fatalf("expected all 2 approved initially, got %d", len(app.ApprovedSubcommands()))
+	}
+
+	rendered := RenderApprovalInline(app, 90)
+	if !strings.Contains(rendered, "Chained Sub-commands") {
+		t.Errorf("expected chained sub-commands section: %s", rendered)
+	}
+	if !strings.Contains(rendered, "1. ") || !strings.Contains(rendered, "go test ./...") || !strings.Contains(rendered, "2. ") || !strings.Contains(rendered, "go run main.go") {
+		t.Errorf("expected numbered sub-commands: %s", rendered)
+	}
+
+	// Toggle second command (go run) to denied
+	app.ToggleSubcommand(1)
+	if len(app.ApprovedSubcommands()) != 1 || app.ApprovedSubcommands()[0] != "go test ./..." {
+		t.Errorf("expected only 'go test ./...' approved, got %v", app.ApprovedSubcommands())
+	}
+	if len(app.DeniedSubcommands()) != 1 || app.DeniedSubcommands()[0] != "go run main.go" {
+		t.Errorf("expected 'go run main.go' denied, got %v", app.DeniedSubcommands())
+	}
+
+	renderedToggled := RenderApprovalInline(app, 90)
+	if !strings.Contains(renderedToggled, "[✓]") || !strings.Contains(renderedToggled, "[✗]") {
+		t.Errorf("expected toggle checkmarks [✓] and [✗]: %s", renderedToggled)
 	}
 }
 
@@ -133,6 +176,7 @@ func TestStatusBarRender(t *testing.T) {
 		CompletionTokens: 500,
 		TotalTokens:      2000,
 		RunningSubagents: 2,
+		RunningTasks:     3,
 		YoloMode:         true,
 		WorkspaceCount:   1,
 	}
@@ -149,6 +193,9 @@ func TestStatusBarRender(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "Subagents: 2 running") {
 		t.Errorf("expected subagents badge in status bar: %s", rendered)
+	}
+	if !strings.Contains(rendered, "Tasks: 3") {
+		t.Errorf("expected tasks badge in status bar: %s", rendered)
 	}
 }
 
@@ -226,4 +273,70 @@ func TestAgentModeCycle(t *testing.T) {
 		t.Errorf("expected ModePlan.Next() == ModeDefault, got %v", mode.Next())
 	}
 }
+
+func TestChatHistory_LoadFromState(t *testing.T) {
+	state := &pb.ConversationState{
+		ConversationId: "conv-test-123",
+		Messages: []*pb.ConversationMessage{
+			{
+				Role:    "user",
+				Content: "Refactor the database queries",
+			},
+			{
+				Role:    "model",
+				Content: "I will check the db files first.",
+				ToolCalls: []*pb.ToolCallRecord{
+					{
+						CallId:   "call_1",
+						Name:     "view_file",
+						ArgsJson: `{"path": "db/query.go"}`,
+					},
+				},
+			},
+			{
+				Role: "tool",
+				ToolResult: &pb.ToolResultRecord{
+					CallId:  "call_1",
+					Name:    "view_file",
+					Content: "package db\nfunc Query() {}",
+					IsError: false,
+				},
+			},
+			{
+				Role:    "system",
+				Content: "System info message",
+			},
+		},
+	}
+
+	h := NewChatHistory()
+	h.LoadFromState(state)
+
+	if len(h.items) != 5 {
+		t.Fatalf("expected 5 items in chat history, got %d", len(h.items))
+	}
+
+	if h.items[0].Type != ChatItemUser || h.items[0].Content != "Refactor the database queries" {
+		t.Errorf("unexpected item 0: %+v", h.items[0])
+	}
+	if h.items[1].Type != ChatItemAssistant || h.items[1].Content != "I will check the db files first." {
+		t.Errorf("unexpected item 1: %+v", h.items[1])
+	}
+	if h.items[2].Type != ChatItemToolCall || h.items[2].ToolName != "view_file" {
+		t.Errorf("unexpected item 2: %+v", h.items[2])
+	}
+	if h.items[3].Type != ChatItemToolResult || h.items[3].ToolName != "view_file" {
+		t.Errorf("unexpected item 3: %+v", h.items[3])
+	}
+	if h.items[4].Type != ChatItemSystem || h.items[4].Content != "System info message" {
+		t.Errorf("unexpected item 4: %+v", h.items[4])
+	}
+
+	s := spinner.New()
+	rendered := h.RenderView(s, 80)
+	if !strings.Contains(rendered, "Refactor the database queries") {
+		t.Errorf("expected rendered view to contain user message: %s", rendered)
+	}
+}
+
 

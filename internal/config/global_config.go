@@ -12,6 +12,7 @@ import (
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/errors"
+	"github.com/divmora/localharness/internal/util"
 )
 
 // DefaultDivmoraConfigDir is the shared config directory for all Divmora products.
@@ -24,6 +25,12 @@ type GlobalSettings struct {
 
 	// TrustedWorkspaces is a list of directory paths the user has explicitly trusted.
 	TrustedWorkspaces []string `json:"trustedWorkspaces"`
+
+	// AllowedCommands is a list of shell commands or command prefixes permanently allowed without confirmation.
+	AllowedCommands []string `json:"allowedCommands,omitempty"`
+
+	// AllowedTools is a list of tool names permanently allowed without confirmation.
+	AllowedTools []string `json:"allowedTools,omitempty"`
 }
 
 // DivmoraConfigDir returns the resolved path to ~/.divmora/config/.
@@ -242,6 +249,63 @@ func (s *GlobalSettings) IsWorkspaceTrusted(dir string) bool {
 		}
 	}
 	return false
+}
+
+// IsCommandAllowed checks if a shell command matches allowed patterns,
+// correctly verifying all sub-commands in chains (&&, ||, ;, |, &).
+func (s *GlobalSettings) IsCommandAllowed(cmd string) bool {
+	return util.IsCommandAllowedAgainstRules(cmd, s.AllowedCommands)
+}
+
+// IsToolAllowed checks if a tool is in the globally allowed tools list.
+func (s *GlobalSettings) IsToolAllowed(toolName string) bool {
+	trimmed := strings.TrimSpace(toolName)
+	if trimmed == "" {
+		return false
+	}
+	for _, allowed := range s.AllowedTools {
+		a := strings.TrimSpace(allowed)
+		if a == "*" || a == trimmed {
+			return true
+		}
+	}
+	return false
+}
+
+// AddAllowedCommand adds a command or prefix pattern to the globally allowed list and saves.
+func AddAllowedCommand(cmd string, logger *slog.Logger) error {
+	trimmed := strings.TrimSpace(cmd)
+	if trimmed == "" {
+		return nil
+	}
+
+	settings := LoadGlobalSettings(logger)
+	for _, a := range settings.AllowedCommands {
+		if a == trimmed {
+			return nil
+		}
+	}
+
+	settings.AllowedCommands = append(settings.AllowedCommands, trimmed)
+	return SaveGlobalSettings(settings, logger)
+}
+
+// AddAllowedTool adds a tool name to the globally allowed list and saves.
+func AddAllowedTool(toolName string, logger *slog.Logger) error {
+	trimmed := strings.TrimSpace(toolName)
+	if trimmed == "" {
+		return nil
+	}
+
+	settings := LoadGlobalSettings(logger)
+	for _, a := range settings.AllowedTools {
+		if a == trimmed {
+			return nil
+		}
+	}
+
+	settings.AllowedTools = append(settings.AllowedTools, trimmed)
+	return SaveGlobalSettings(settings, logger)
 }
 
 // AddTrustedWorkspace adds a directory to the trusted list and saves to settings.json.

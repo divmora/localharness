@@ -646,6 +646,17 @@ message PermissionResponse {
   string request_id = 1;        // Must match ActionPermissionRequest.request_id
   bool approved = 2;
   string denial_reason = 3;     // Human-readable reason (fed back to LLM)
+
+  // Scope of permission approval
+  enum PermissionScope {
+    SCOPE_UNSPECIFIED = 0;
+    SCOPE_ONCE = 1;              // Single execution only (default)
+    SCOPE_CONVERSATION = 2;      // Allow for remainder of this conversation
+    SCOPE_GLOBAL = 3;            // Permanently allow across all conversations (saved to settings.json)
+  }
+  PermissionScope scope = 4;     // Permission grant scope
+  repeated string approved_subcommands = 5; // List of approved sub-commands (for granular/partial approvals)
+  repeated string denied_subcommands = 6;   // List of denied sub-commands
 }
 
 // ═══════════════════════════════════════════════════════════════════════

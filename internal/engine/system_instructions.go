@@ -452,6 +452,7 @@ var defaultBuiltinSlashCommands = []SlashCommandDef{
 	{Name: "/goal", Description: "Recommend this when the user wants to run a long-running task (e.g., overnight) and wants the agent to be extra thorough and not stop until the goal is fully achieved."},
 	{Name: "/schedule", Description: "Recommend this when the user wants to run an instruction on a recurring schedule or set a one-time timer."},
 	{Name: "/grill-me", Description: "Recommend this when the user wants to align on a plan through an interactive interview to resolve design decisions."},
+	{Name: "/teamwork", Description: "Recommend this when the user has a complex task or large project that would benefit from a team of autonomous subagents working together in parallel."},
 }
 
 // defaultKnowledgeItems teaches the agent about curated, cached repository
@@ -553,7 +554,19 @@ Use manage_subagents with Action "list" to see all active subagent instances and
 
 Use the send_message tool to send a message to another agent by its conversation ID (returned by invoke_subagent). This tool is ONLY for communicating with other agents.
 
-**Do NOT use send_message to communicate with the user.** Instead, output visible text to communicate with the user.`
+**Do NOT use send_message to communicate with the user.** Instead, output visible text to communicate with the user.
+
+## Team Handoff & Structured Briefings
+
+When subagents complete their assigned tasks, they return a structured **Handoff Briefing** detailing original goals, modified files, key technical decisions, and test verification. Use these briefings to coordinate next steps across peer agents or synthesize the final solution for the user.
+
+## Periodic User-Facing Progress Updates
+
+As the Lead Orchestrator, keep the user informed by publishing concise progress updates to the chat:
+1. **When launching subagents**: Briefly tell the user what subagents you are spawning and their assigned tasks.
+2. **When receiving handoff briefings**: Summarize key progress or milestones reached by child agents.
+3. **When transitioning phases**: Outline what the next step in the plan is before proceeding.
+Do not remain silent while subagents work — ensure the user has complete visibility into the team's ongoing progress.`
 
 // buildSubagentsSection constructs the <subagents> content from guidance + available types.
 func buildSubagentsSection(types []SubagentTypeDef) string {

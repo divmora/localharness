@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -996,3 +998,97 @@ func TestSubagentE2E_DefineInvokeManageSend(t *testing.T) {
 		t.Errorf("expected at least 5 LLM calls, got %d", callCount)
 	}
 }
+
+func TestSubagentWorkspaceAndPermissionInheritance(t *testing.T) {
+	wsDir := t.TempDir()
+	filePath := filepath.Join(wsDir, "config.go")
+	if err := os.WriteFile(filePath, []byte("package config\nvar Key = \"secret\"\n"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	var permissionCallCount atomic.Int32
+	permHandler := func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+		permissionCallCount.Add(1)
+		return true, "", nil
+	}
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			// Parent Turn 1: Spawns research subagent
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call_sub",
+						Name: "invoke_subagent",
+						Args: map[string]interface{}{
+							"Subagents": []interface{}{
+								map[string]interface{}{
+									"TypeName": "research",
+									"Role":     "File Reader",
+									"Prompt":   "Read config.go",
+								},
+							},
+						},
+					},
+				},
+			},
+			// Parent Turn 2: Finish
+			{
+				Content:      "Subagent launched successfully",
+				FinishReason: "stop",
+			},
+			// Child Turn 1: Reads config.go inside workspace
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call_view",
+						Name: "view_file",
+						Args: map[string]interface{}{
+							"path": filePath,
+						},
+					},
+				},
+			},
+			// Child Turn 2: Done
+			{
+				Content:      "Found key variable in config.go",
+				FinishReason: "stop",
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(nil, logger)
+	tools.RegisterBuiltinTools(reg, nil)
+
+	eng := NewEngine(Config{
+		Provider:          provider,
+		ToolRegistry:      reg,
+		SystemPrompt:      "test parent",
+		ConversationID:    "test-conv-perm",
+		TrajectoryID:      "traj_perm",
+		BrainDir:          t.TempDir(),
+		Logger:            logger,
+		SubagentsEnabled:  true,
+		MaxDepth:          3,
+		Workspaces:        []string{wsDir},
+		PermissionHandler: permHandler,
+	})
+
+	err := eng.Run(context.Background(), "Delegate file reading to subagent")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	// Wait for child goroutine to finish
+	time.Sleep(200 * time.Millisecond)
+
+	// Because config.go is inside workspace, subagent's view_file is auto-approved
+	// without invoking PermissionHandler (same as normal agent).
+	if count := permissionCallCount.Load(); count != 0 {
+		t.Errorf("expected 0 permission prompts for subagent reading inside workspace, got %d", count)
+	}
+}
+

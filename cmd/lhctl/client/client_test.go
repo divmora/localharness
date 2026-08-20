@@ -74,7 +74,7 @@ func TestClientCommunication(t *testing.T) {
 	if err := c.SendUserMessage("Hello", nil, nil); err != nil {
 		t.Errorf("SendUserMessage failed: %v", err)
 	}
-	if err := c.SendPermissionResponse("req-1", true, ""); err != nil {
+	if err := c.SendPermissionResponse("req-1", true, "", pb.PermissionResponse_SCOPE_ONCE); err != nil {
 		t.Errorf("SendPermissionResponse failed: %v", err)
 	}
 	if err := c.SendSetYoloMode(true); err != nil {

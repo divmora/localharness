@@ -22,6 +22,7 @@ import (
 	mcpbridge "github.com/divmora/localharness/internal/mcp"
 	"github.com/divmora/localharness/internal/discovery"
 	"github.com/divmora/localharness/internal/tools"
+	"github.com/divmora/localharness/internal/util"
 	"github.com/divmora/localharness/internal/workspace"
 )
 
@@ -852,12 +853,83 @@ func (s *Session) permissionHandler(ctx context.Context, req *pb.ActionPermissio
 	// Wait for client response (or timeout/cancel)
 	select {
 	case resp := <-ch:
+		if resp.Scope == pb.PermissionResponse_SCOPE_CONVERSATION || resp.Scope == pb.PermissionResponse_SCOPE_GLOBAL {
+			var toGrant []string
+			if len(resp.ApprovedSubcommands) > 0 {
+				toGrant = append(toGrant, resp.ApprovedSubcommands...)
+				if resp.Approved {
+					target := extractTargetFromPermissionReq(req)
+					if target != "" {
+						toGrant = append(toGrant, target)
+					}
+				}
+			} else if resp.Approved {
+				target := extractTargetFromPermissionReq(req)
+				if target != "" {
+					toGrant = append(toGrant, target)
+					if req.ToolName == "run_command" {
+						subCmds, _ := util.SplitShellCommands(target)
+						toGrant = append(toGrant, subCmds...)
+					}
+				} else if req.ToolName != "" {
+					toGrant = append(toGrant, "*")
+				}
+			}
+
+			if len(toGrant) > 0 {
+				if s.engine != nil {
+					for _, item := range toGrant {
+						s.engine.AddPermissionGrant(engine.PermissionGrant{
+							Action: req.ToolName,
+							Target: item,
+							Reason: "Approved by user in session",
+							Scope:  resp.Scope.String(),
+						})
+					}
+				}
+				if resp.Scope == pb.PermissionResponse_SCOPE_GLOBAL {
+					for _, item := range toGrant {
+						if req.ToolName == "run_command" && item != "*" {
+							_ = config.AddAllowedCommand(item, s.logger)
+						} else {
+							_ = config.AddAllowedTool(req.ToolName, s.logger)
+						}
+					}
+					if s.engine != nil {
+						s.engine.ReloadGlobalSettings()
+					}
+				}
+			}
+		}
 		return resp.Approved, resp.DenialReason, nil
 	case <-ctx.Done():
 		return false, "cancelled", ctx.Err()
 	case <-time.After(5 * time.Minute):
 		return false, "timed out waiting for permission response (5m)", nil
 	}
+}
+
+func extractTargetFromPermissionReq(req *pb.ActionPermissionRequest) string {
+	if req.ToolName == "run_command" {
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(req.ArgsJson), &args); err == nil {
+			if cmd, ok := args["command"].(string); ok && cmd != "" {
+				return cmd
+			}
+			if cmd, ok := args["CommandLine"].(string); ok && cmd != "" {
+				return cmd
+			}
+		}
+	}
+	var args map[string]interface{}
+	if err := json.Unmarshal([]byte(req.ArgsJson), &args); err == nil {
+		for _, key := range []string{"path", "AbsolutePath", "DirectoryPath", "SearchPath", "TargetFile", "file_path", "target_file"} {
+			if p, ok := args[key].(string); ok && p != "" {
+				return p
+			}
+		}
+	}
+	return ""
 }
 
 // handlePermissionResponse routes an incoming PermissionResponse from the SDK client

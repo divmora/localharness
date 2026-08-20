@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
+
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -155,30 +157,52 @@ func runDaemonServer(logger *slog.Logger) {
 
 	logger.Info("LocalHarness daemon running", "pid", info.PID, "port", port, "socket", info.Socket, "version", config.HarnessVersion)
 
-	// Global session holder for daemon connections
-	cfg := config.DefaultServerConfig()
-	cfg.SessionID = util.NewUUID()
-	cfg.IsNewSession = true
-
-	var activeSession *server.Session
+	// Multi-session registry for daemon connections
 	var sessionMu sync.Mutex
+	sessions := make(map[string]*server.Session)
 
-	srv.SessionHandler = func(conn *websocket.Conn) {
-		sessionMu.Lock()
-		if activeSession != nil {
-			sessionMu.Unlock()
-			logger.Info("attaching new client to existing daemon session")
-			activeSession.Attach(conn)
-			return
+	srv.SessionHandlerWithReq = func(conn *websocket.Conn, r *http.Request) {
+		reqSessionID := r.Header.Get("x-localharness-session-id")
+		if reqSessionID == "" {
+			reqSessionID = r.URL.Query().Get("session_id")
 		}
-		session := server.NewSession(conn, cfg, logger)
+
+		sessionMu.Lock()
+		if reqSessionID != "" {
+			// Explicit attach/resume request by session ID
+			if existingSess, ok := sessions[reqSessionID]; ok {
+				sessionMu.Unlock()
+				logger.Info("attaching client to existing daemon session", "session_id", reqSessionID)
+				existingSess.Attach(conn)
+				return
+			}
+		}
+
+		// New session for this client/workspace connection
+		sessCfg := config.DefaultServerConfig()
+		if reqSessionID != "" {
+			sessCfg.SessionID = reqSessionID
+			sessCfg.IsNewSession = false
+		} else {
+			sessCfg.SessionID = util.NewUUID()
+			sessCfg.IsNewSession = true
+		}
+
+		session := server.NewSession(conn, sessCfg, logger)
 		session.SetDaemon(true)
-		activeSession = session
+		sessions[sessCfg.SessionID] = session
 		srv.SetActiveSession(session)
 		sessionMu.Unlock()
 
+		defer func() {
+			sessionMu.Lock()
+			delete(sessions, sessCfg.SessionID)
+			sessionMu.Unlock()
+		}()
+
 		session.Run()
 	}
+
 
 	if err := srv.StartWithListener(context.Background(), ln); err != nil {
 		logger.Error("daemon server error", "error", err)

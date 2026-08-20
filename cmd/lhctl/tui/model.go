@@ -23,11 +23,15 @@ type Model struct {
 	spinner           spinner.Model
 	history           *ChatHistory
 	subagents         *SubagentViewManager
+	tasks             *TasksViewManager
 	completer         *FileCompleter
+	customCommands    *CustomCommandManager
 	autocompleteState AutocompleteState
 	approval          *ActiveApproval
+	question          *ActiveQuestion
 	showHelp          bool
 	showSubagents     bool
+	showTasks         bool
 	yoloMode          bool
 	modelName         string
 	workspaces        []string
@@ -46,6 +50,11 @@ type Model struct {
 
 // InitialModel creates the TUI model.
 func InitialModel(c *client.Client, workspaces []string, yolo bool) Model {
+	return InitialModelWithHistory(c, workspaces, yolo, nil)
+}
+
+// InitialModelWithHistory creates the TUI model with optional preloaded history.
+func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, initialState *pb.ConversationState) Model {
 	ta := textinput.New()
 	ta.Placeholder = "Ask a question, issue a command, @file, or /help..."
 	ta.Focus()
@@ -60,17 +69,27 @@ func InitialModel(c *client.Client, workspaces []string, yolo bool) Model {
 		workspaces = []string{"."}
 	}
 
+	hist := NewChatHistory()
+	if initialState != nil {
+		hist.LoadFromState(initialState)
+		if len(initialState.Messages) > 0 {
+			hist.AddSystemMessage(fmt.Sprintf("Resumed conversation %s (%d messages)", initialState.ConversationId, len(initialState.Messages)))
+		}
+	}
+
 	return Model{
-		client:     c,
-		textInput:  ta,
-		spinner:    s,
-		history:    NewChatHistory(),
-		subagents:  NewSubagentViewManager(),
-		completer:  NewFileCompleter(workspaces),
-		workspaces: workspaces,
-		yoloMode:   yolo,
-		mode:       ModeDefault,
-		status:     "IDLE",
+		client:         c,
+		textInput:      ta,
+		spinner:        s,
+		history:        hist,
+		subagents:      NewSubagentViewManager(),
+		tasks:          NewTasksViewManager(),
+		completer:      NewFileCompleter(workspaces),
+		customCommands: NewCustomCommandManager(workspaces),
+		workspaces:     workspaces,
+		yoloMode:       yolo,
+		mode:           ModeDefault,
+		status:         "IDLE",
 	}
 }
 
@@ -149,26 +168,198 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		// Modal Key Handling
+		// Inline Approval Handling
 		if m.approval != nil {
+			targetLabel := m.approval.DisplayTarget()
+
+			// Check if pressing 1-9 to toggle a sub-command
+			if len(m.approval.SubCommands) > 1 && len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
+				idx := int(msg.String()[0] - '1')
+				if idx < len(m.approval.SubCommands) {
+					m.approval.ToggleSubcommand(idx)
+					return m, nil
+				}
+			}
+
+			hasCompound := len(m.approval.SubCommands) > 1
+			approvedSubs := m.approval.ApprovedSubcommands()
+			deniedSubs := m.approval.DeniedSubcommands()
+
 			switch msg.String() {
 			case "y", "Y", "enter":
-				_ = m.client.SendPermissionResponse(m.approval.RequestID, true, "")
+				if hasCompound && len(approvedSubs) < len(m.approval.SubCommands) {
+					// Partial approval
+					if len(approvedSubs) == 0 {
+						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "all sub-commands denied by user in TUI", pb.PermissionResponse_SCOPE_ONCE, nil, deniedSubs)
+						m.history.AddSystemMessage(fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel))
+					} else {
+						reason := fmt.Sprintf("User approved sub-commands: [%s], but denied: [%s]. Approved sub-commands have been granted permission; please execute approved commands individually if needed.", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
+						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, reason, pb.PermissionResponse_SCOPE_ONCE, approvedSubs, deniedSubs)
+						m.history.AddSystemMessage(fmt.Sprintf("✓ Partial approval: Allowed once [%s] | Denied [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", ")))
+					}
+				} else {
+					_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_ONCE, approvedSubs, nil)
+					m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed once: %s", targetLabel))
+				}
 				m.approval = nil
 				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
 				return m, nil
+
+			case "c", "C", "a", "A":
+				if hasCompound && len(approvedSubs) < len(m.approval.SubCommands) {
+					// Partial approval for conversation
+					if len(approvedSubs) == 0 {
+						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "all sub-commands denied by user in TUI", pb.PermissionResponse_SCOPE_CONVERSATION, nil, deniedSubs)
+						m.history.AddSystemMessage(fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel))
+					} else {
+						reason := fmt.Sprintf("User approved sub-commands for conversation: [%s], but denied: [%s]. Approved sub-commands have been granted conversation permission; please execute approved commands individually if needed.", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
+						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, reason, pb.PermissionResponse_SCOPE_CONVERSATION, approvedSubs, deniedSubs)
+						m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed for conversation: [%s] | Denied: [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", ")))
+					}
+				} else {
+					_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_CONVERSATION, approvedSubs, nil)
+					m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed for this conversation: %s", targetLabel))
+				}
+				m.approval = nil
+				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
+				return m, nil
+
+			case "g", "G":
+				if hasCompound && len(approvedSubs) < len(m.approval.SubCommands) {
+					// Partial approval globally
+					if len(approvedSubs) == 0 {
+						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "all sub-commands denied by user in TUI", pb.PermissionResponse_SCOPE_GLOBAL, nil, deniedSubs)
+						m.history.AddSystemMessage(fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel))
+					} else {
+						reason := fmt.Sprintf("User approved sub-commands globally: [%s], but denied: [%s]. Approved sub-commands have been permanently allowed; please execute approved commands individually if needed.", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
+						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, reason, pb.PermissionResponse_SCOPE_GLOBAL, approvedSubs, deniedSubs)
+						m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed globally: [%s] | Denied: [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", ")))
+					}
+				} else {
+					_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_GLOBAL, approvedSubs, nil)
+					m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed globally in ~/.divmora/config/settings.json: %s", targetLabel))
+				}
+				m.approval = nil
+				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
+				return m, nil
+
 			case "n", "N", "esc":
-				_ = m.client.SendPermissionResponse(m.approval.RequestID, false, "denied by user in TUI")
+				_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "denied by user in TUI", pb.PermissionResponse_SCOPE_ONCE, nil, m.approval.SubCommands)
+				m.history.AddSystemMessage(fmt.Sprintf("✗ Denied: %s", targetLabel))
 				m.approval = nil
 				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
 				return m, nil
+
 			case "yolo":
 				m.yoloMode = true
 				_ = m.client.SendSetYoloMode(true)
-				_ = m.client.SendPermissionResponse(m.approval.RequestID, true, "")
+				_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_ONCE, approvedSubs, nil)
+				m.history.AddSystemMessage("YOLO Mode ENABLED: All tool actions will auto-execute without prompts.")
 				m.approval = nil
 				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
 				return m, nil
+			}
+			return m, nil
+		}
+
+		// Interactive Question Card Handling (Sequential Step-by-Step with Write-In)
+		if m.question != nil {
+			if m.question.IsWritingText {
+				switch msg.String() {
+				case "enter":
+					m.question.ConfirmWriteIn()
+					return m, nil
+				case "esc":
+					m.question.CancelWriteIn()
+					return m, nil
+				default:
+					var cmd tea.Cmd
+					m.question.TextInput, cmd = m.question.TextInput.Update(msg)
+					return m, cmd
+				}
+			}
+
+			switch msg.String() {
+			case "o", "O":
+				m.question.StartWriteIn()
+				return m, nil
+			case "up", "k":
+				m.question.MoveCursorUp()
+				return m, nil
+			case "down", "j":
+				m.question.MoveCursorDown()
+				return m, nil
+			case " ":
+				if m.question.IsOtherFocused() {
+					m.question.StartWriteIn()
+				} else {
+					m.question.ToggleFocused()
+				}
+				return m, nil
+			case "b", "B", "p", "P":
+				if m.question.HasPrev() {
+					m.question.PrevQuestion()
+					return m, nil
+				}
+			case "enter":
+				if m.question.IsOtherFocused() && m.question.CustomText[m.question.CurrentQuestion] == "" {
+					m.question.StartWriteIn()
+					return m, nil
+				}
+
+				curSummary := m.question.CurrentAnswerSummary()
+				if m.question.HasNext() {
+					// Advance to next question and log current answer in chat history
+					if len(m.question.Questions) > 1 {
+						m.history.AddSystemMessage(fmt.Sprintf("✓ [%d/%d] %s", m.question.CurrentQuestion+1, len(m.question.Questions), curSummary))
+					}
+					m.question.NextQuestion()
+					m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+					m.viewport.GotoBottom()
+					return m, nil
+				}
+
+				// Final question answered - submit all answers
+				if len(m.question.Questions) > 1 {
+					m.history.AddSystemMessage(fmt.Sprintf("✓ [%d/%d] %s", m.question.CurrentQuestion+1, len(m.question.Questions), curSummary))
+				} else {
+					m.history.AddSystemMessage(fmt.Sprintf("✓ Answered: %s", curSummary))
+				}
+
+				answers := m.question.BuildAnswers()
+				_ = m.client.SendQuestionResponse(m.question.RequestID, answers, false)
+				m.question = nil
+				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
+				return m, nil
+
+			case "s", "S", "esc":
+				_ = m.client.SendQuestionResponse(m.question.RequestID, nil, true)
+				m.history.AddSystemMessage("↷ Skipped question")
+				m.question = nil
+				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
+				return m, nil
+
+			default:
+				// Number key 1-9 to select/toggle option directly for active question
+				if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
+					optIdx := int(msg.String()[0] - '1')
+					m.question.ToggleOption(optIdx)
+					return m, nil
+				}
 			}
 			return m, nil
 		}
@@ -191,6 +382,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.showSubagents = false
 				}
+			}
+			return m, nil
+		}
+
+		if m.showTasks {
+			switch msg.String() {
+			case "up":
+				m.tasks.NavigateUp()
+			case "down":
+				m.tasks.NavigateDown()
+			case "k", "K":
+				if sel := m.tasks.SelectedTask(); sel != nil && sel.Status == "RUNNING" {
+					_ = m.client.SendUserMessage(fmt.Sprintf("manage_task kill %s", sel.TaskID), nil, nil)
+					sel.Status = "KILLED"
+					m.history.AddSystemMessage(fmt.Sprintf("Sent kill request for task %s", sel.TaskID))
+				}
+			case "esc", "q", "enter":
+				m.showTasks = false
 			}
 			return m, nil
 		}
@@ -343,7 +552,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	slashQ, isSlash := DetectSlashCommandQuery(m.textInput.Value(), m.textInput.Position())
 	if isSlash {
-		matches := MatchSlashCommands(slashQ)
+		matches := MatchAllSlashCommands(slashQ, m.customCommands)
 		if len(matches) > 0 {
 			selIndex := 0
 			if m.autocompleteState.Active && m.autocompleteState.Type == AutocompleteSlashCommand && m.autocompleteState.Query == slashQ {
@@ -412,6 +621,17 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		m.showHelp = true
 		return nil
 
+	case "new", "reset":
+		m.history.Clear()
+		m.subagents = NewSubagentViewManager()
+		m.promptTokens = 0
+		m.completionTokens = 0
+		m.totalTokens = 0
+		m.status = "IDLE"
+		m.history.AddSystemMessage(fmt.Sprintf("✨ Started a new session in workspace: %s", strings.Join(m.workspaces, ", ")))
+		return nil
+
+
 	case "mode":
 		if len(cmd.Args) > 0 {
 			switch strings.ToLower(cmd.Args[0]) {
@@ -453,6 +673,20 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		_ = m.client.SendUserMessage(prompt, nil, nil)
 		return nil
 
+	case "teamwork", "team", "teamwork-preview":
+		goal := strings.Join(cmd.Args, " ")
+		var prompt string
+		if goal != "" {
+			prompt = fmt.Sprintf("Please coordinate a team of autonomous specialized subagents to accomplish: %s.\n\nDefine any specialized subagent types needed (using define_subagent), launch parallel subagents (using invoke_subagent) with clear focused prompts, and coordinate their structured Handoff Briefings (original goal, files touched, decisions, and tests) until the goal is fully achieved.", goal)
+			m.history.AddUserMessage("/teamwork " + goal)
+		} else {
+			prompt = "Please analyze the current task and coordinate a team of autonomous specialized subagents to work on it. Define any specialized subagent types needed (using define_subagent), launch parallel subagents (using invoke_subagent) with clear focused prompts, and coordinate their structured Handoff Briefings until completion."
+			m.history.AddUserMessage("/teamwork")
+		}
+		m.status = "RUNNING"
+		_ = m.client.SendUserMessage(prompt, nil, nil)
+		return nil
+
 	case "pause", "interrupt":
 		if m.status == "RUNNING" || m.status == "STREAMING" {
 			_ = m.client.SendInterrupt()
@@ -478,6 +712,19 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 
 	case "subagents":
 		m.showSubagents = true
+		return nil
+
+	case "tasks", "ps":
+		if len(cmd.Args) > 0 && cmd.Args[0] == "list" {
+			m.history.AddSystemMessage(fmt.Sprintf("⚙️ Background Tasks: %d total (%d running). Use /tasks to open interactive dashboard.", m.tasks.TotalCount(), m.tasks.RunningCount()))
+			return nil
+		}
+		if len(cmd.Args) >= 2 && cmd.Args[0] == "kill" {
+			_ = m.client.SendUserMessage(fmt.Sprintf("manage_task kill %s", cmd.Args[1]), nil, nil)
+			m.history.AddSystemMessage(fmt.Sprintf("Sent kill request for task %s", cmd.Args[1]))
+			return nil
+		}
+		m.showTasks = true
 		return nil
 
 	case "yolo":
@@ -533,6 +780,23 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 	case "exit", "quit":
 		_ = m.client.Close()
 		return tea.Quit
+
+	default:
+		// Check for user-defined custom slash command (.agents/commands/ or ~/.divmora/commands/)
+		if m.customCommands != nil {
+			if customCmd, ok := m.customCommands.Find(cmd.Name); ok {
+				prompt := customCmd.Expand(cmd.Args)
+				userDisplay := "/" + cmd.Name
+				if len(cmd.Args) > 0 {
+					userDisplay += " " + strings.Join(cmd.Args, " ")
+				}
+				m.history.AddUserMessage(userDisplay)
+				m.status = "RUNNING"
+				_ = m.client.SendUserMessage(prompt, nil, nil)
+				return nil
+			}
+		}
+		m.history.AddSystemMessage(fmt.Sprintf("Unknown command '/%s'. Type /help for available commands.", cmd.Name))
 	}
 	return nil
 }
@@ -572,11 +836,11 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 		if step.State == pb.StepUpdate_STATE_WAITING && step.GetPermissionRequest() != nil {
 			pr := step.GetPermissionRequest()
 			if m.yoloMode {
-				_ = m.client.SendPermissionResponse(pr.RequestId, true, "")
+				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
 				return
 			}
 			if m.mode == ModeAcceptEdits && (pr.ToolName == "write_to_file" || pr.ToolName == "replace_file_content") {
-				_ = m.client.SendPermissionResponse(pr.RequestId, true, "")
+				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
 				return
 			}
 			m.status = "WAITING"
@@ -585,7 +849,16 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 				ToolName:    pr.ToolName,
 				Description: pr.ArgsSummary,
 				DiffPreview: pr.DiffPreview,
+				ArgsJSON:    pr.ArgsJson,
 			}
+			m.approval.InitSubcommands()
+			return
+		}
+
+		// Handle User Question (WAITING)
+		if step.State == pb.StepUpdate_STATE_WAITING && step.GetUserQuestion() != nil {
+			m.status = "WAITING"
+			m.question = NewActiveQuestion(step.GetUserQuestion())
 			return
 		}
 
@@ -596,6 +869,26 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 			m.status = "RUNNING"
 			name, args := extractActionDetails(step)
 			m.history.StartToolCall(name, args)
+
+			// Track background tasks
+			if rc := step.GetRunCommand(); rc != nil && rc.TaskId != "" {
+				m.tasks.AddOrUpdate(&TaskItemState{
+					TaskID:    rc.TaskId,
+					Command:   rc.Command,
+					Cwd:       rc.Cwd,
+					Status:    "RUNNING",
+					StartedAt: time.Now(),
+				})
+			}
+			if sch := step.GetSchedule(); sch != nil && sch.TaskId != "" {
+				m.tasks.AddOrUpdate(&TaskItemState{
+					TaskID:     sch.TaskId,
+					Command:    sch.Prompt,
+					Status:     "RUNNING",
+					StartedAt:  time.Now(),
+					IsSchedule: true,
+				})
+			}
 			return
 		}
 
@@ -604,6 +897,24 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 			isErr := step.State == pb.StepUpdate_STATE_ERROR
 			name, diff, res := extractActionResult(step)
 			m.history.FinishToolCall(name, res, isErr, diff)
+
+			// Update task state upon completion
+			if rc := step.GetRunCommand(); rc != nil && rc.TaskId != "" {
+				if t := m.tasks.tasks[rc.TaskId]; t != nil {
+					if isErr {
+						t.Status = "FAILED"
+						t.RecentOutput = rc.Stderr
+					} else {
+						t.Status = "COMPLETED"
+						t.RecentOutput = rc.Stdout
+					}
+					t.ExitCode = int(rc.ExitCode)
+					t.CompletedAt = time.Now()
+				}
+			}
+			if mt := step.GetManageTask(); mt != nil && len(mt.Tasks) > 0 {
+				m.tasks.UpdateFromProto(mt.Tasks)
+			}
 			return
 		}
 	}
@@ -667,7 +978,20 @@ func extractActionDetails(step *pb.StepUpdate) (string, string) {
 	case *pb.StepUpdate_FindFile:
 		return "find_file", a.FindFile.Pattern
 	case *pb.StepUpdate_InvokeSubagent:
+		var roles []string
+		for _, sub := range a.InvokeSubagent.Subagents {
+			roles = append(roles, fmt.Sprintf("%s (%s)", sub.Role, sub.TypeName))
+		}
+		if len(roles) > 0 {
+			return "invoke_subagent", strings.Join(roles, ", ")
+		}
 		return "invoke_subagent", fmt.Sprintf("%d subagents", len(a.InvokeSubagent.Subagents))
+	case *pb.StepUpdate_DefineSubagent:
+		return "define_subagent", fmt.Sprintf("%s: %s", a.DefineSubagent.Name, a.DefineSubagent.Description)
+	case *pb.StepUpdate_ManageSubagents:
+		return "manage_subagents", fmt.Sprintf("action=%s", a.ManageSubagents.Action)
+	case *pb.StepUpdate_SendMessageAction:
+		return "send_message", fmt.Sprintf("to %s", a.SendMessageAction.Recipient)
 	case *pb.StepUpdate_SearchWeb:
 		return "search_web", a.SearchWeb.Query
 	case *pb.StepUpdate_ReadUrlContent:
@@ -705,7 +1029,18 @@ func extractActionResult(step *pb.StepUpdate) (string, string, string) {
 	case *pb.StepUpdate_FindFile:
 		return "find_file", "", fmt.Sprintf("%d files matched", len(a.FindFile.Matches))
 	case *pb.StepUpdate_InvokeSubagent:
+		var summaries []string
+		for _, res := range a.InvokeSubagent.LaunchResults {
+			summaries = append(summaries, fmt.Sprintf("%s (%s)", res.Role, res.ConversationId))
+		}
+		if len(summaries) > 0 {
+			return "invoke_subagent", "", fmt.Sprintf("Spawned: %s", strings.Join(summaries, ", "))
+		}
 		return "invoke_subagent", "", fmt.Sprintf("Launched %d subagents", len(a.InvokeSubagent.LaunchResults))
+	case *pb.StepUpdate_DefineSubagent:
+		return "define_subagent", "", fmt.Sprintf("Registered persona '%s'", a.DefineSubagent.Name)
+	case *pb.StepUpdate_SendMessageAction:
+		return "send_message", "", fmt.Sprintf("Message delivered to %s", a.SendMessageAction.Recipient)
 	default:
 		return "tool", "", ""
 	}
@@ -722,12 +1057,12 @@ func (m Model) View() string {
 
 
 	var overlay string
-	if m.approval != nil {
-		overlay = RenderApprovalModal(m.approval, m.width)
-	} else if m.showSubagents {
+	if m.showSubagents {
 		overlay = m.subagents.Render(m.width, m.height)
+	} else if m.showTasks {
+		overlay = m.tasks.Render(m.width, m.height)
 	} else if m.showHelp {
-		overlay = RenderHelpView(m.width)
+		overlay = RenderHelpViewWithCustom(m.width, m.customCommands)
 	}
 
 	statusBar := RenderStatusBar(StatusBarState{
@@ -739,29 +1074,41 @@ func (m Model) View() string {
 		TotalTokens:      m.totalTokens,
 		RunningSubagents: m.subagents.RunningCount(),
 		TotalSubagents:   m.subagents.TotalCount(),
+		RunningTasks:     m.tasks.RunningCount(),
 		YoloMode:         m.yoloMode,
 		WorkspaceCount:   len(m.workspaces),
 	}, m.width)
 
+	var bottomInteraction string
+	if m.approval != nil {
+		bottomInteraction = RenderApprovalInline(m.approval, m.width)
+	} else if m.question != nil {
+		bottomInteraction = RenderQuestionInline(m.question, m.width)
+	} else {
+		autocompleteView := ""
+		if m.autocompleteState.Active {
+			autocompleteView = RenderAutocomplete(&m.autocompleteState, m.width) + "\n"
+		}
 
-	autocompleteView := ""
-	if m.autocompleteState.Active {
-		autocompleteView = RenderAutocomplete(&m.autocompleteState, m.width) + "\n"
+		inputLine := lipgloss.NewStyle().Padding(0, 1).Render(
+			lipgloss.NewStyle().Foreground(ColorHighlight).Bold(true).Render("❯ ") + m.textInput.View(),
+		)
+		activityStrip := RenderActiveBackgroundStrip(m.tasks, m.subagents, m.width)
+		if activityStrip != "" {
+			inputLine = inputLine + "\n" + activityStrip
+		}
+		bottomInteraction = autocompleteView + inputLine
 	}
-
-	inputLine := lipgloss.NewStyle().Padding(0, 1).Render(
-		lipgloss.NewStyle().Foreground(ColorHighlight).Bold(true).Render("❯ ") + m.textInput.View(),
-	)
 
 	mainView := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.viewport.View(),
-		autocompleteView+inputLine,
+		bottomInteraction,
 		statusBar,
 	)
 
 	if overlay != "" {
-		// Place overlay in the center
+		// Place modal overlay in the center for /help and /subagents
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 	}
 

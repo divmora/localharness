@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
+
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
 
 // ChatItemType defines the kind of chat entry.
@@ -47,6 +49,65 @@ type ChatHistory struct {
 // NewChatHistory creates a new chat history tracker.
 func NewChatHistory() *ChatHistory {
 	return &ChatHistory{}
+}
+
+// LoadFromState populates chat history from a loaded ConversationState protobuf.
+func (h *ChatHistory) LoadFromState(state *pb.ConversationState) {
+	if state == nil {
+		return
+	}
+	for _, msg := range state.Messages {
+		switch msg.Role {
+		case "user":
+			content := msg.Content
+			if content == "" && len(msg.Parts) > 0 {
+				content = strings.Join(msg.Parts, "\n")
+			}
+			h.items = append(h.items, ChatItem{
+				Type:      ChatItemUser,
+				Content:   content,
+				Timestamp: time.Now(),
+			})
+		case "model", "assistant":
+			if msg.Content != "" {
+				h.items = append(h.items, ChatItem{
+					Type:      ChatItemAssistant,
+					Content:   msg.Content,
+					Timestamp: time.Now(),
+				})
+			}
+			for _, tc := range msg.ToolCalls {
+				h.items = append(h.items, ChatItem{
+					Type:      ChatItemToolCall,
+					ToolName:  tc.Name,
+					ToolArgs:  tc.ArgsJson,
+					Timestamp: time.Now(),
+				})
+			}
+		case "tool":
+			if msg.ToolResult != nil {
+				itemType := ChatItemToolResult
+				if msg.ToolResult.IsError {
+					itemType = ChatItemError
+				}
+				h.items = append(h.items, ChatItem{
+					Type:      itemType,
+					ToolName:  msg.ToolResult.Name,
+					Content:   msg.ToolResult.Content,
+					IsError:   msg.ToolResult.IsError,
+					Timestamp: time.Now(),
+				})
+			}
+		case "system":
+			if msg.Content != "" {
+				h.items = append(h.items, ChatItem{
+					Type:      ChatItemSystem,
+					Content:   msg.Content,
+					Timestamp: time.Now(),
+				})
+			}
+		}
+	}
 }
 
 // AddUserMessage appends a user prompt.

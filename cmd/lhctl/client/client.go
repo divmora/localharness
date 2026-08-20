@@ -79,6 +79,9 @@ func New(cfg Config) (*Client, error) {
 	if apiKey != "" {
 		headers.Set("x-localharness-api-key", apiKey)
 	}
+	if cfg.SessionID != "" {
+		headers.Set("x-localharness-session-id", cfg.SessionID)
+	}
 
 	dialer := websocket.DefaultDialer
 	conn, resp, err := dialer.Dial(wsURL, headers)
@@ -97,6 +100,11 @@ func New(cfg Config) (*Client, error) {
 
 // ConnectOrStartDaemon connects to an existing daemon or starts one automatically.
 func ConnectOrStartDaemon(logger *slog.Logger) (*Client, error) {
+	return ConnectOrStartDaemonWithSession(logger, "")
+}
+
+// ConnectOrStartDaemonWithSession connects to an existing daemon with an optional target session ID.
+func ConnectOrStartDaemonWithSession(logger *slog.Logger, sessionID string) (*Client, error) {
 	running, info, _ := daemon.IsDaemonRunning()
 	if !running || info == nil {
 		// Attempt to start daemon
@@ -146,11 +154,13 @@ func ConnectOrStartDaemon(logger *slog.Logger) (*Client, error) {
 	}
 
 	return New(Config{
-		URL:    fmt.Sprintf("ws://127.0.0.1:%d", info.Port),
-		APIKey: info.APIKey,
-		Logger: logger,
+		URL:       fmt.Sprintf("ws://127.0.0.1:%d", info.Port),
+		APIKey:    info.APIKey,
+		SessionID: sessionID,
+		Logger:    logger,
 	})
 }
+
 
 func (c *Client) readLoop() {
 	defer func() {
@@ -253,14 +263,22 @@ func (c *Client) SendUserMessage(content string, context *pb.UserContext, epheme
 	})
 }
 
-// SendPermissionResponse responds to a permission approval prompt.
-func (c *Client) SendPermissionResponse(requestID string, approved bool, reason string) error {
+// SendPermissionResponse responds to a permission approval prompt with optional grant scope.
+func (c *Client) SendPermissionResponse(requestID string, approved bool, reason string, scope pb.PermissionResponse_PermissionScope) error {
+	return c.SendPermissionResponseWithSubcommands(requestID, approved, reason, scope, nil, nil)
+}
+
+// SendPermissionResponseWithSubcommands responds to a permission prompt with granular approved/denied sub-commands.
+func (c *Client) SendPermissionResponseWithSubcommands(requestID string, approved bool, reason string, scope pb.PermissionResponse_PermissionScope, approvedSubs, deniedSubs []string) error {
 	return c.send(&pb.ClientMessage{
 		Payload: &pb.ClientMessage_PermissionResponse{
 			PermissionResponse: &pb.PermissionResponse{
-				RequestId:    requestID,
-				Approved:     approved,
-				DenialReason: reason,
+				RequestId:           requestID,
+				Approved:            approved,
+				DenialReason:        reason,
+				Scope:               scope,
+				ApprovedSubcommands: approvedSubs,
+				DeniedSubcommands:   deniedSubs,
 			},
 		},
 	})

@@ -36,9 +36,22 @@ const (
 	defaultMaxSubagents = 5
 	subagentMaxTurns    = 30
 
-	defaultSubagentSystemPrompt = `You are a focused coding assistant working on a specific subtask.
-You have access to the same tools as the parent agent. Complete the task and provide a clear, concise summary of what you did and found.
-Be thorough but efficient — your response will be fed back to the parent agent as context.`
+	defaultSubagentSystemPrompt = `You are a focused specialized coding subagent working on a specific subtask within a team.
+You have access to tools to research, edit files, run commands, and communicate with peer agents.
+
+## Handoff Briefing Requirements
+When you complete your assigned task or before ending your turn, your final response MUST provide a structured **Handoff Briefing** following this exact format:
+
+### Handoff Briefing
+- **Task & Goal**: Brief summary of the original objective assigned to you.
+- **Status**: [COMPLETED | PARTIALLY_COMPLETED | BLOCKED]
+- **Files Created & Modified**:
+  - List every touched file with full paths and a 1-line explanation of changes.
+- **Key Changes & Decisions**: Architectural choices, new functions/structs/APIs exposed, or data models.
+- **Verification & Tests**: Exact commands executed (e.g. go test ./...) and verification results.
+- **Next Steps**: Specific recommendations for the Lead Orchestrator or peer agents on how to use your work.
+
+Be thorough, precise, and professional — this briefing is delivered directly to the Lead Orchestrator and peer agents for immediate handoff.`
 
 	subagentInboxSize = 32 // Buffered channel capacity for inter-agent messages
 )
@@ -415,36 +428,43 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 
 		// Create child engine with its own flat brain dir and shared bus.
 		childEngine := NewEngine(Config{
-			Provider:             e.provider,
-			ToolRegistry:         e.toolRegistry,
-			SystemPrompt:         sysPrompt,
-			ConversationID:       childConvID,
-			TrajectoryID:         childTrajID,
-			ParentTrajectoryID:   e.trajectoryID,
-			Depth:                e.depth + 1,
-			MaxDepth:             e.maxDepth,
-			MaxSubagents:         e.maxSubagents,
-			OnStep:               e.stepCB,
-			OnTrajectory:         e.trajCB,
-			MaxTurns:             subagentMaxTurns,
-			CompactionThreshold:  e.compactionThreshold,
-			KeepRecentMessages:   e.keepRecentMessages,
-			BrainDir:             childBrainDir,
-			AppDataDir:           e.appDataDir,
-			Logger:               e.logger.With("subagent", inv.TypeName, "role", inv.Role),
-			HostToolHandler:      e.hostToolHandler,
-			HostToolNames:        e.hostToolNames,
-			HostToolDecls:        e.hostToolDecls,
-			PermissionHandler:    e.permissionHandler,
-			SubagentsEnabled:     typeDef.EnableSubagentTools,
-			ExcludeToolGroups:    excludeGroups,
-			ExcludeHostTools:     excludeHostTools,
-			ExcludeMCPTools:      !typeDef.EnableMCPTools,
-			AgentBus:             e.agentBus,
-			ConversationManager:  e.convMgr,
-			ParentConversationID: e.convID,
-			AgentRole:            inv.Role,
-			AgentTypeName:        inv.TypeName,
+			Provider:                 e.provider,
+			ToolRegistry:             e.toolRegistry,
+			SystemPrompt:             sysPrompt,
+			ConversationID:           childConvID,
+			TrajectoryID:             childTrajID,
+			ParentTrajectoryID:       e.trajectoryID,
+			Depth:                    e.depth + 1,
+			MaxDepth:                 e.maxDepth,
+			MaxSubagents:             e.maxSubagents,
+			OnStep:                   e.stepCB,
+			OnTrajectory:             e.trajCB,
+			MaxTurns:                 subagentMaxTurns,
+			CompactionThreshold:      e.compactionThreshold,
+			KeepRecentMessages:       e.keepRecentMessages,
+			BrainDir:                 childBrainDir,
+			AppDataDir:               e.appDataDir,
+			Logger:                   e.logger.With("subagent", inv.TypeName, "role", inv.Role),
+			HostToolHandler:          e.hostToolHandler,
+			HostToolNames:            e.hostToolNames,
+			HostToolDecls:            e.hostToolDecls,
+			PermissionHandler:        e.permissionHandler,
+			SubagentsEnabled:         typeDef.EnableSubagentTools,
+			ExcludeToolGroups:        excludeGroups,
+			ExcludeHostTools:         excludeHostTools,
+			ExcludeMCPTools:          !typeDef.EnableMCPTools,
+			MCPManager:               e.mcpMgr,
+			AgentBus:                 e.agentBus,
+			ConversationManager:      e.convMgr,
+			ParentConversationID:     e.convID,
+			AgentRole:                inv.Role,
+			AgentTypeName:            inv.TypeName,
+			Workspaces:           e.workspaces,
+			WorkspaceInfos:       e.workspaceInfos,
+			UserRules:            e.userRules,
+			YoloMode:             e.yoloMode,
+			Skills:               e.msgCtx.Skills,
+			Plugins:              e.msgCtx.Plugins,
 		})
 		childEngine.conv = childConv
 
@@ -489,13 +509,22 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 				}
 			}
 
-			// Notify parent — include artifact directory for cross-agent reads.
-			notifyContent := fmt.Sprintf("Subagent '%s' (%s) completed.\nConversation ID: %s\nArtifact Directory: %s\n\nResult:\n%s",
-				inst.TypeName, inst.Role, inst.ConversationID, inst.Engine.brainDir, resultText)
-			if childErr != nil {
-				notifyContent = fmt.Sprintf("Subagent '%s' (%s) failed: %v\nConversation ID: %s\nArtifact Directory: %s\n\nPartial result:\n%s",
-					inst.TypeName, inst.Role, childErr, inst.ConversationID, inst.Engine.brainDir, resultText)
+			// Save handoff briefing artifact in child brain directory if available
+			handoffPath := ""
+			if inst.Engine.brainDir != "" {
+				handoffPath = filepath.Join(inst.Engine.brainDir, "handoff_briefing.md")
+				if resultText != "" {
+					_ = os.WriteFile(handoffPath, []byte(resultText), 0644)
+				}
 			}
+
+			// Notify parent — include artifact directory and handoff briefing for cross-agent reads.
+			statusStr := "completed"
+			if childErr != nil {
+				statusStr = fmt.Sprintf("failed: %v", childErr)
+			}
+			notifyContent := fmt.Sprintf("Subagent '%s' (%s) %s.\nConversation ID: %s\nArtifact Directory: %s\nHandoff Briefing: %s\n\n--- HANDOFF BRIEFING ---\n%s",
+				inst.TypeName, inst.Role, statusStr, inst.ConversationID, inst.Engine.brainDir, handoffPath, resultText)
 
 			e.subagentTracker.NotifyParent(tools.SystemMessage{
 				Source:  "subagent_complete",

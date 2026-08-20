@@ -25,12 +25,15 @@ type SlashCommandDef struct {
 // AvailableSlashCommands lists all interactive slash commands.
 var AvailableSlashCommands = []SlashCommandDef{
 	{"/help", "Show help menu & keyboard shortcuts"},
+	{"/new", "Start a fresh new conversation session"},
 	{"/mode", "Switch mode (default, accept-edits, plan) [Shift+Tab]"},
 	{"/plan", "Create implementation plan before modifying code"},
+	{"/teamwork", "Coordinate a team of parallel autonomous subagents"},
 	{"/pause", "Pause the active agent turn"},
 	{"/resume", "Resume execution with optional instructions"},
 	{"/model", "View or switch target LLM model"},
 	{"/subagents", "View subagent hierarchy & live transcript"},
+	{"/tasks", "View background tasks, running commands & timers"},
 	{"/workspace", "Manage workspaces (list, add, remove)"},
 	{"/yolo", "Toggle YOLO Mode (skip all permission prompts)"},
 	{"/status", "Display daemon state, tokens & subagent metrics"},
@@ -40,6 +43,7 @@ var AvailableSlashCommands = []SlashCommandDef{
 	{"/exit", "Exit the TUI session"},
 	{"/quit", "Exit the TUI session"},
 }
+
 
 
 
@@ -214,10 +218,17 @@ func DetectSlashCommandQuery(text string, pos int) (query string, found bool) {
 	return "", false
 }
 
-// MatchSlashCommands returns matching slash commands for a query.
+// MatchSlashCommands returns matching built-in slash commands for a query.
 func MatchSlashCommands(query string) []AutocompleteCandidate {
+	return MatchAllSlashCommands(query, nil)
+}
+
+// MatchAllSlashCommands returns matching built-in and custom slash commands for a query.
+func MatchAllSlashCommands(query string, customMgr *CustomCommandManager) []AutocompleteCandidate {
 	q := strings.ToLower(query)
 	var matches []AutocompleteCandidate
+
+	// 1. Built-in Slash Commands
 	for _, sc := range AvailableSlashCommands {
 		if q == "/" || strings.HasPrefix(strings.ToLower(sc.Command), q) || strings.Contains(strings.ToLower(sc.Command), q) {
 			matches = append(matches, AutocompleteCandidate{
@@ -226,5 +237,27 @@ func MatchSlashCommands(query string) []AutocompleteCandidate {
 			})
 		}
 	}
+
+	// 2. Custom User Slash Commands
+	if customMgr != nil {
+		for _, cc := range customMgr.List() {
+			slashCmd := "/" + cc.Name
+			if q == "/" || strings.HasPrefix(strings.ToLower(slashCmd), q) || strings.Contains(strings.ToLower(slashCmd), q) {
+				tag := "[custom]"
+				if cc.IsWorkspace {
+					tag = "[workspace]"
+				}
+				usage := slashCmd
+				if cc.ArgumentPlaceholder != "" {
+					usage += " " + cc.ArgumentPlaceholder
+				}
+				matches = append(matches, AutocompleteCandidate{
+					Value:       slashCmd,
+					DisplayText: fmt.Sprintf("%-20s %s %s", usage, tag, cc.Description),
+				})
+			}
+		}
+	}
+
 	return matches
 }

@@ -41,11 +41,12 @@ type HostToolHandler func(ctx context.Context, tc llm.ToolCall, step *pb.StepUpd
 type PermissionHandler func(ctx context.Context, req *pb.ActionPermissionRequest) (approved bool, denialReason string, err error)
 
 // PermissionGrant represents a permission that has been granted for this session
-// via the ask_permission tool. Grants persist for the lifetime of the engine.
+// via the ask_permission tool or user approval. Grants persist for the lifetime of the engine.
 type PermissionGrant struct {
-	Action string // "read_file", "write_file", or "command"
-	Target string // Absolute path (for file ops) or command prefix
+	Action string // e.g. "run_command", "write_file", etc.
+	Target string // Absolute path (for file ops) or command prefix/string
 	Reason string // Why it was granted
+	Scope  string // "once", "conversation", "global"
 }
 
 // QuestionHandler is called when the model invokes the ask_question tool.
@@ -121,6 +122,7 @@ type Engine struct {
 	workspaceInfos []WorkspaceInfo
 	userRules      []config.UserRule
 	yoloMode       bool
+	globalSettings *config.GlobalSettings
 }
 
 // Config holds engine configuration.
@@ -341,6 +343,7 @@ func NewEngine(cfg Config) *Engine {
 		workspaceInfos:           cfg.WorkspaceInfos,
 		userRules:                cfg.UserRules,
 		yoloMode:                 cfg.YoloMode,
+		globalSettings:           config.LoadGlobalSettings(cfg.Logger),
 	}
 
 	if eng.toolRegistry != nil {
@@ -355,6 +358,78 @@ func (e *Engine) SetYoloMode(enabled bool) {
 	e.mu.Lock()
 	e.yoloMode = enabled
 	e.mu.Unlock()
+}
+
+// AddPermissionGrant adds a conversation-scoped permission grant.
+func (e *Engine) AddPermissionGrant(grant PermissionGrant) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.permissionGrants = append(e.permissionGrants, grant)
+}
+
+// ReloadGlobalSettings reloads settings from ~/.divmora/config/settings.json.
+func (e *Engine) ReloadGlobalSettings() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.globalSettings = config.LoadGlobalSettings(e.logger)
+}
+
+// isPermissionGranted checks if a tool call is permitted by global settings or conversation grants.
+func (e *Engine) isPermissionGranted(tc llm.ToolCall) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Check Global Settings (~/.divmora/config/settings.json) & Conversation Grants
+	if tc.Name == "run_command" {
+		var cmd string
+		if c, ok := tc.Args["command"].(string); ok {
+			cmd = c
+		} else if c, ok := tc.Args["CommandLine"].(string); ok {
+			cmd = c
+		}
+		if cmd != "" {
+			var allowedCmds []string
+			if e.globalSettings != nil {
+				if e.globalSettings.IsToolAllowed(tc.Name) {
+					return true
+				}
+				allowedCmds = append(allowedCmds, e.globalSettings.AllowedCommands...)
+			}
+			for _, g := range e.permissionGrants {
+				if g.Action == "*" || g.Action == "run_command" {
+					if g.Target != "" {
+						allowedCmds = append(allowedCmds, g.Target)
+					} else {
+						allowedCmds = append(allowedCmds, "*")
+					}
+				}
+			}
+			if len(allowedCmds) > 0 && util.IsCommandAllowedAgainstRules(cmd, allowedCmds) {
+				return true
+			}
+		}
+	} else {
+		if e.globalSettings != nil && e.globalSettings.IsToolAllowed(tc.Name) {
+			return true
+		}
+		for _, g := range e.permissionGrants {
+			if g.Action == "*" || g.Action == tc.Name {
+				if g.Target == "" || g.Target == "*" {
+					return true
+				}
+				targetPath := extractToolPath(tc)
+				if targetPath != "" {
+					absTarget := filepath.Clean(targetPath)
+					absGrant := filepath.Clean(g.Target)
+					if absTarget == absGrant || strings.HasPrefix(absTarget, absGrant+string(filepath.Separator)) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 
@@ -1007,6 +1082,11 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 		} else {
 			requiresPermission = true
 		}
+	}
+
+	// 5. Global settings (~/.divmora/config/settings.json) & Conversation grants
+	if requiresPermission && e.isPermissionGranted(tc) {
+		requiresPermission = false
 	}
 
 	if e.permissionHandler != nil && requiresPermission {

@@ -10,9 +10,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/proto"
+
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
 
 var (
@@ -26,6 +31,7 @@ func newRootCommand() *cobra.Command {
 		yoloFlag       bool
 		detachFlag     bool
 		promptFlag     string
+		convFlag       string
 	)
 
 	rootCmd := &cobra.Command{
@@ -38,12 +44,20 @@ detach and attach to headless sessions, and inspect conversation state and trace
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := convFlag
+			if sessionID == "" && len(args) > 0 {
+				sessionID = args[0]
+			} else if sessionID == "latest" && len(args) > 0 {
+				sessionID = args[0]
+			}
 			flags := runFlags{
-				model:      modelFlag,
-				workspaces: workspacesFlag,
-				yolo:       yoloFlag,
-				detach:     detachFlag,
-				prompt:     promptFlag,
+				model:              modelFlag,
+				workspaces:         workspacesFlag,
+				explicitWorkspaces: workspacesFlag,
+				yolo:               yoloFlag,
+				detach:             detachFlag,
+				prompt:             promptFlag,
+				sessionID:          sessionID,
 			}
 			return runInteractiveWithOptions(flags)
 		},
@@ -53,24 +67,40 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	rootCmd.PersistentFlags().StringVar(&globalDataDir, "data-dir", getDefaultDataDir(), "Override data directory")
 
 	// Run / Interactive flags on root
-	addRunFlags(rootCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag)
+	addRunFlags(rootCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag)
 
 	// Subcommand: run
+	var (
+		runModelFlag      string
+		runWorkspacesFlag []string
+		runYoloFlag       bool
+		runDetachFlag     bool
+		runPromptFlag     string
+		runConvFlag       string
+	)
 	runCmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start an interactive session in TUI or launch a detached task",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := runConvFlag
+			if sessionID == "" && len(args) > 0 {
+				sessionID = args[0]
+			} else if sessionID == "latest" && len(args) > 0 {
+				sessionID = args[0]
+			}
 			flags := runFlags{
-				model:      modelFlag,
-				workspaces: workspacesFlag,
-				yolo:       yoloFlag,
-				detach:     detachFlag,
-				prompt:     promptFlag,
+				model:              runModelFlag,
+				workspaces:         runWorkspacesFlag,
+				explicitWorkspaces: runWorkspacesFlag,
+				yolo:               runYoloFlag,
+				detach:             runDetachFlag,
+				prompt:             runPromptFlag,
+				sessionID:          sessionID,
 			}
 			return runInteractiveWithOptions(flags)
 		},
 	}
-	addRunFlags(runCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag)
+	addRunFlags(runCmd, &runModelFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag)
 	rootCmd.AddCommand(runCmd)
 
 	// Subcommand: attach
@@ -221,12 +251,18 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	return rootCmd
 }
 
-func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *bool, detach *bool, prompt *string) {
+func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string) {
 	cmd.Flags().StringVarP(model, "model", "m", "", "Target LLM model (e.g. gpt-4o, claude-3-5-sonnet)")
 	cmd.Flags().StringArrayVarP(workspaces, "workspace", "w", nil, "Attach workspace directory (repeatable)")
 	cmd.Flags().BoolVarP(yolo, "yolo", "y", false, "Enable YOLO Mode (dangerously skip permission checks)")
 	cmd.Flags().BoolVarP(detach, "detach", "d", false, "Launch prompt in background daemon without blocking")
 	cmd.Flags().StringVarP(prompt, "prompt", "p", "", "Initial prompt to execute immediately")
+	cmd.Flags().StringVarP(conv, "conversation", "c", "", "Resume an existing conversation by ID (or latest if omitted)")
+	cmd.Flags().Lookup("conversation").NoOptDefVal = "latest"
+	cmd.Flags().StringVar(conv, "resume", "", "Alias for --conversation")
+	cmd.Flags().Lookup("resume").NoOptDefVal = "latest"
+	cmd.Flags().StringVar(conv, "continue", "", "Alias for --conversation")
+	cmd.Flags().Lookup("continue").NoOptDefVal = "latest"
 }
 
 func getDefaultDataDir() string {
@@ -252,9 +288,69 @@ func main() {
 	}
 }
 
-// resolveConversationID resolves a partial ID to a full UUID by matching
-// against existing .pb files in the conversations directory.
+// getLatestConversationID finds the most recently updated conversation ID.
+func getLatestConversationID(dataDir string) (string, error) {
+	convDir := filepath.Join(dataDir, "conversations")
+	entries, err := os.ReadDir(convDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot read conversations directory %s: %w", convDir, err)
+	}
+
+	type convEntry struct {
+		id        string
+		updatedAt string
+		modTime   time.Time
+	}
+	var list []convEntry
+
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".pb" {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".pb")
+		pbPath := filepath.Join(convDir, e.Name())
+
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+
+		data, err := os.ReadFile(pbPath)
+		if err != nil {
+			continue
+		}
+		state := &pb.ConversationState{}
+		if err := proto.Unmarshal(data, state); err != nil {
+			continue
+		}
+		list = append(list, convEntry{
+			id:        id,
+			updatedAt: state.UpdatedAt,
+			modTime:   info.ModTime(),
+		})
+	}
+
+	if len(list) == 0 {
+		return "", fmt.Errorf("no existing conversations found to resume")
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].updatedAt != "" && list[j].updatedAt != "" && list[i].updatedAt != list[j].updatedAt {
+			return list[i].updatedAt > list[j].updatedAt
+		}
+		return list[i].modTime.After(list[j].modTime)
+	})
+
+	return list[0].id, nil
+}
+
+// resolveConversationID resolves a partial ID, UUID, or "latest"/"recent"/"last" alias
+// to a full conversation ID.
 func resolveConversationID(dataDir, partialID string) (string, error) {
+	if strings.ToLower(partialID) == "latest" || strings.ToLower(partialID) == "recent" || strings.ToLower(partialID) == "last" {
+		return getLatestConversationID(dataDir)
+	}
+
 	convDir := filepath.Join(dataDir, "conversations")
 	entries, err := os.ReadDir(convDir)
 	if err != nil {
@@ -267,6 +363,9 @@ func resolveConversationID(dataDir, partialID string) (string, error) {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".pb")
+		if name == partialID {
+			return name, nil
+		}
 		if strings.HasPrefix(name, partialID) {
 			matches = append(matches, name)
 		}

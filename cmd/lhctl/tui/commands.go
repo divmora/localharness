@@ -36,19 +36,28 @@ func ParseCommand(input string) (*Command, bool) {
 
 // RenderHelpView renders the interactive help catalog.
 func RenderHelpView(width int) string {
+	return RenderHelpViewWithCustom(width, nil)
+}
+
+// RenderHelpViewWithCustom renders the help catalog including custom user commands.
+func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string {
 	commands := []struct {
 		Cmd  string
 		Desc string
 	}{
 		{"/help", "Show this help menu and shortcuts"},
+		{"/new", "Start a fresh new conversation session"},
 		{"/mode [name]", "Switch mode: default, accept-edits, plan"},
+
 		{"/plan [goal]", "Research and create implementation_plan.md"},
+		{"/teamwork [goal]", "Coordinate a team of parallel autonomous subagents"},
 		{"/pause", "Pause active turn (Ctrl+C)"},
 		{"/resume [msg]", "Resume execution with optional instructions"},
 		{"/model [name]", "View or switch active LLM model"},
 		{"/compact", "Trigger context window compaction"},
 		{"/status", "Display daemon state, tokens & subagent metrics"},
 		{"/subagents", "View subagent hierarchy & drill-down transcript"},
+		{"/tasks", "View background tasks, running commands & timers"},
 		{"/workspace list", "List all currently attached workspaces"},
 		{"/workspace add <dir>", "Attach a directory with trust verification"},
 		{"/workspace remove <dir>", "Detach a workspace directory"},
@@ -80,6 +89,29 @@ func RenderHelpView(width int) string {
 			HelpKeyStyle.Width(24).Render(c.Cmd),
 			HelpDescStyle.Render(c.Desc),
 		))
+	}
+
+	// Custom Commands section if any are discovered
+	if customMgr != nil {
+		customList := customMgr.List()
+		if len(customList) > 0 {
+			sb.WriteString("\n" + TitleStyle.Render("🛠️ CUSTOM COMMANDS (.agents/commands/ & ~/.divmora/commands/)") + "\n\n")
+			for _, cc := range customList {
+				usage := "/" + cc.Name
+				if cc.ArgumentPlaceholder != "" {
+					usage += " " + cc.ArgumentPlaceholder
+				}
+				tag := "[custom]"
+				if cc.IsWorkspace {
+					tag = "[workspace]"
+				}
+				sb.WriteString(fmt.Sprintf("  %s %s %s\n",
+					HelpKeyStyle.Width(24).Render(usage),
+					lipgloss.NewStyle().Foreground(ColorSecondary).Render(tag),
+					HelpDescStyle.Render(cc.Description),
+				))
+			}
+		}
 	}
 
 	sb.WriteString("\n" + TitleStyle.Render("⌨️ KEYBOARD SHORTCUTS") + "\n\n")
