@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.0](https://github.com/divmora/localharness/compare/v1.4.0...v2.0.0) (2026-08-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* drop economy and budget, add manual agent hiring system
+
+### Features
+
+* add daemon, tui, and replay support ([b7154df](https://github.com/divmora/localharness/commit/b7154df8bf3afa4698cfddaa82ed50759290629b))
+* add interactive question cards, custom slash commands, subagent handoff briefings, and background tasks monitoring ([0e676aa](https://github.com/divmora/localharness/commit/0e676aa8992472b6ee1d6d19dd74a329ab2fdad2))
+* drop economy and budget, add manual agent hiring system ([26729c7](https://github.com/divmora/localharness/commit/26729c78460c3ee68ed42a242561eaef3b3decba))
+* improve GUI UX with draggable top bar, React logs, and sorted sessions ([051cbf9](https://github.com/divmora/localharness/commit/051cbf9b30d7ad1506f2543121c3a6b0e9c48135))
+* segregate output logs by process with dropdown selector ([0620763](https://github.com/divmora/localharness/commit/0620763f7bd75f58add2f6558e7ea06f88529da6))
+* use fully dynamic pixel-to-percentage conversion for panels ([5dca5e5](https://github.com/divmora/localharness/commit/5dca5e573b9bd23c8028b3b70f9395c3ef851c78))
+
+
+### Bug Fixes
+
+* change system prompt examples to use native file tools ([3f17354](https://github.com/divmora/localharness/commit/3f17354a47e5af3cee2a0601b1dbaeb16ae955be))
+* dynamically filter office managers against active sessions ([4385511](https://github.com/divmora/localharness/commit/43855114088251f1f23d6e5eb383e93e34c97b6e))
+* **gui:** comprehensive UI improvements, bug fixes, and test updates ([0e8f570](https://github.com/divmora/localharness/commit/0e8f5704bf917291c5233efe741a064f8bb09339))
+* increase hit area for panel resize handles ([20b1d33](https://github.com/divmora/localharness/commit/20b1d33b36a1defd4d9bc93ebb775d17cba84576))
+* prevent infinite recursion in TauriLogger ([a915756](https://github.com/divmora/localharness/commit/a91575671da65c6fb93871b90be407a7acc335a8))
+* refactor tauri commands to prevent macro collision and fix dynamic workspace ([4607deb](https://github.com/divmora/localharness/commit/4607debb85b35487075129baa8c7c8a0ebf80393))
+* resolve workspace selection, session deletion, and chat history order bugs ([66d1d62](https://github.com/divmora/localharness/commit/66d1d62693853a49a2b86fb09c34f884b9b4d7af))
+* terminal panel layout and message send routing ([f50dbb2](https://github.com/divmora/localharness/commit/f50dbb2362cef031c9263b6c9b59f7db7529dc96))
+
 ## [1.4.0](https://github.com/divmora/localharness/compare/v1.3.0...v1.4.0) (2026-08-18)
 
 
