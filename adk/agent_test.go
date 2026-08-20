@@ -64,12 +64,21 @@ func (m *mockConnection) ConversationID() string {
 	return m.conversationID
 }
 
+func (m *mockConnection) Interrupt(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockConnection) Cancel(ctx context.Context) error {
+	return nil
+}
+
 func (m *mockConnection) FetchAgentCard(ctx context.Context) (*connection.AgentCard, error) {
 	return &connection.AgentCard{
 		Name:    "mock-agent",
 		Version: "0.0.0-test",
 	}, nil
 }
+
 
 func TestAgent_ChatBasic(t *testing.T) {
 	cfg := &LocalAgentConfig{

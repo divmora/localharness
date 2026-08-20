@@ -615,6 +615,24 @@ func (x *ClientMessage) GetResume() *ResumeRequest {
 	return nil
 }
 
+func (x *ClientMessage) GetWorkspaceRequest() *WorkspaceRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*ClientMessage_WorkspaceRequest); ok {
+			return x.WorkspaceRequest
+		}
+	}
+	return nil
+}
+
+func (x *ClientMessage) GetSetYoloMode() *SetYoloModeRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*ClientMessage_SetYoloMode); ok {
+			return x.SetYoloMode
+		}
+	}
+	return nil
+}
+
 type isClientMessage_Payload interface {
 	isClientMessage_Payload()
 }
@@ -651,6 +669,14 @@ type ClientMessage_Resume struct {
 	Resume *ResumeRequest `protobuf:"bytes,8,opt,name=resume,proto3,oneof"`
 }
 
+type ClientMessage_WorkspaceRequest struct {
+	WorkspaceRequest *WorkspaceRequest `protobuf:"bytes,9,opt,name=workspace_request,json=workspaceRequest,proto3,oneof"`
+}
+
+type ClientMessage_SetYoloMode struct {
+	SetYoloMode *SetYoloModeRequest `protobuf:"bytes,10,opt,name=set_yolo_mode,json=setYoloMode,proto3,oneof"`
+}
+
 func (*ClientMessage_Init) isClientMessage_Payload() {}
 
 func (*ClientMessage_UserMessage) isClientMessage_Payload() {}
@@ -666,6 +692,10 @@ func (*ClientMessage_QuestionResponse) isClientMessage_Payload() {}
 func (*ClientMessage_Interrupt) isClientMessage_Payload() {}
 
 func (*ClientMessage_Resume) isClientMessage_Payload() {}
+
+func (*ClientMessage_WorkspaceRequest) isClientMessage_Payload() {}
+
+func (*ClientMessage_SetYoloMode) isClientMessage_Payload() {}
 
 // InitRequest is the first message sent after WebSocket connect.
 // It configures the harness for this session.
@@ -1204,6 +1234,24 @@ func (x *ServerMessage) GetTraceEvent() *TraceEvent {
 	return nil
 }
 
+func (x *ServerMessage) GetWorkspaceResponse() *WorkspaceResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*ServerMessage_WorkspaceResponse); ok {
+			return x.WorkspaceResponse
+		}
+	}
+	return nil
+}
+
+func (x *ServerMessage) GetReplayComplete() *ReplayComplete {
+	if x != nil {
+		if x, ok := x.Payload.(*ServerMessage_ReplayComplete); ok {
+			return x.ReplayComplete
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Payload interface {
 	isServerMessage_Payload()
 }
@@ -1228,6 +1276,14 @@ type ServerMessage_TraceEvent struct {
 	TraceEvent *TraceEvent `protobuf:"bytes,5,opt,name=trace_event,json=traceEvent,proto3,oneof"`
 }
 
+type ServerMessage_WorkspaceResponse struct {
+	WorkspaceResponse *WorkspaceResponse `protobuf:"bytes,6,opt,name=workspace_response,json=workspaceResponse,proto3,oneof"`
+}
+
+type ServerMessage_ReplayComplete struct {
+	ReplayComplete *ReplayComplete `protobuf:"bytes,7,opt,name=replay_complete,json=replayComplete,proto3,oneof"`
+}
+
 func (*ServerMessage_InitResponse) isServerMessage_Payload() {}
 
 func (*ServerMessage_StepUpdate) isServerMessage_Payload() {}
@@ -1237,6 +1293,10 @@ func (*ServerMessage_TrajectoryState) isServerMessage_Payload() {}
 func (*ServerMessage_Error) isServerMessage_Payload() {}
 
 func (*ServerMessage_TraceEvent) isServerMessage_Payload() {}
+
+func (*ServerMessage_WorkspaceResponse) isServerMessage_Payload() {}
+
+func (*ServerMessage_ReplayComplete) isServerMessage_Payload() {}
 
 type SessionInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2239,7 +2299,8 @@ type ActionWriteToFile struct {
 	IsArtifact       bool              `protobuf:"varint,4,opt,name=is_artifact,json=isArtifact,proto3" json:"is_artifact,omitempty"`
 	ArtifactMetadata *ArtifactMetadata `protobuf:"bytes,5,opt,name=artifact_metadata,json=artifactMetadata,proto3" json:"artifact_metadata,omitempty"`
 	// Result
-	Created       bool `protobuf:"varint,10,opt,name=created,proto3" json:"created,omitempty"`
+	Created       bool   `protobuf:"varint,10,opt,name=created,proto3" json:"created,omitempty"`
+	DiffBlock     string `protobuf:"bytes,11,opt,name=diff_block,json=diffBlock,proto3" json:"diff_block,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2314,6 +2375,13 @@ func (x *ActionWriteToFile) GetCreated() bool {
 		return x.Created
 	}
 	return false
+}
+
+func (x *ActionWriteToFile) GetDiffBlock() string {
+	if x != nil {
+		return x.DiffBlock
+	}
+	return ""
 }
 
 // ActionReplaceFileContent performs targeted edits on an existing file.
@@ -4461,6 +4529,7 @@ type ActionPermissionRequest struct {
 	ArgsJson      string                 `protobuf:"bytes,3,opt,name=args_json,json=argsJson,proto3" json:"args_json,omitempty"`          // Full args for policy predicate evaluation
 	ArgsSummary   string                 `protobuf:"bytes,4,opt,name=args_summary,json=argsSummary,proto3" json:"args_summary,omitempty"` // Human-readable summary for UIs
 	CallId        string                 `protobuf:"bytes,5,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`                // LLM-assigned tool call ID
+	DiffPreview   string                 `protobuf:"bytes,6,opt,name=diff_preview,json=diffPreview,proto3" json:"diff_preview,omitempty"` // Unified diff preview
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4526,6 +4595,13 @@ func (x *ActionPermissionRequest) GetArgsSummary() string {
 func (x *ActionPermissionRequest) GetCallId() string {
 	if x != nil {
 		return x.CallId
+	}
+	return ""
+}
+
+func (x *ActionPermissionRequest) GetDiffPreview() string {
+	if x != nil {
+		return x.DiffPreview
 	}
 	return ""
 }
@@ -4647,6 +4723,8 @@ type HarnessConfig struct {
 	// These are merged with auto-discovered AGENTS.md files from workspace roots
 	// and rendered in the <user_rules> section of every user message.
 	UserRules     []*UserRuleConfig `protobuf:"bytes,26,rep,name=user_rules,json=userRules,proto3" json:"user_rules,omitempty"`
+	YoloMode      bool              `protobuf:"varint,28,opt,name=yolo_mode,json=yoloMode,proto3" json:"yolo_mode,omitempty"`
+	Trusted       bool              `protobuf:"varint,29,opt,name=trusted,proto3" json:"trusted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4861,6 +4939,20 @@ func (x *HarnessConfig) GetUserRules() []*UserRuleConfig {
 		return x.UserRules
 	}
 	return nil
+}
+
+func (x *HarnessConfig) GetYoloMode() bool {
+	if x != nil {
+		return x.YoloMode
+	}
+	return false
+}
+
+func (x *HarnessConfig) GetTrusted() bool {
+	if x != nil {
+		return x.Trusted
+	}
+	return false
 }
 
 // UserRuleConfig is an SDK-injected user rule with inline content.
@@ -7616,6 +7708,162 @@ func (x *ActionSchedule) GetSuccess() bool {
 		return x.Success
 	}
 	return false
+}
+
+// WorkspaceRequest requests dynamic modification or listing of workspaces.
+type WorkspaceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	CorpusName    string                 `protobuf:"bytes,4,opt,name=corpus_name,json=corpusName,proto3" json:"corpus_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceRequest) Reset() {
+	*x = WorkspaceRequest{}
+}
+
+func (x *WorkspaceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceRequest) ProtoMessage() {}
+
+func (x *WorkspaceRequest) ProtoReflect() protoreflect.Message {
+	return nil
+}
+
+func (x *WorkspaceRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *WorkspaceRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WorkspaceRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *WorkspaceRequest) GetCorpusName() string {
+	if x != nil {
+		return x.CorpusName
+	}
+	return ""
+}
+
+// WorkspaceResponse returns the updated list of workspaces.
+type WorkspaceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Workspaces    []*Workspace           `protobuf:"bytes,3,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceResponse) Reset() {
+	*x = WorkspaceResponse{}
+}
+
+func (x *WorkspaceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceResponse) ProtoMessage() {}
+
+func (x *WorkspaceResponse) ProtoReflect() protoreflect.Message {
+	return nil
+}
+
+func (x *WorkspaceResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *WorkspaceResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *WorkspaceResponse) GetWorkspaces() []*Workspace {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
+}
+
+// SetYoloModeRequest dynamically toggles YOLO mode (bypassing permissions).
+type SetYoloModeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetYoloModeRequest) Reset() {
+	*x = SetYoloModeRequest{}
+}
+
+func (x *SetYoloModeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetYoloModeRequest) ProtoMessage() {}
+
+func (x *SetYoloModeRequest) ProtoReflect() protoreflect.Message {
+	return nil
+}
+
+func (x *SetYoloModeRequest) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+// ReplayComplete signals that all historical buffered events have been replayed.
+type ReplayComplete struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventCount    int32                  `protobuf:"varint,1,opt,name=event_count,json=eventCount,proto3" json:"event_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayComplete) Reset() {
+	*x = ReplayComplete{}
+}
+
+func (x *ReplayComplete) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayComplete) ProtoMessage() {}
+
+func (x *ReplayComplete) ProtoReflect() protoreflect.Message {
+	return nil
+}
+
+func (x *ReplayComplete) GetEventCount() int32 {
+	if x != nil {
+		return x.EventCount
+	}
+	return 0
 }
 
 var File_localharness_v1_localharness_proto protoreflect.FileDescriptor

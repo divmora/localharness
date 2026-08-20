@@ -390,3 +390,49 @@ func TestScopedAllowedPaths_OnlyBrainAndKnowledge(t *testing.T) {
 	}
 }
 
+func TestAddAndRemoveWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+	ws1 := filepath.Join(tmpDir, "ws1")
+	ws2 := filepath.Join(tmpDir, "ws2")
+	os.MkdirAll(ws1, 0755)
+	os.MkdirAll(ws2, 0755)
+
+	mgr, err := NewManager([]string{ws1})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	if len(mgr.Workspaces()) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(mgr.Workspaces()))
+	}
+
+	// Dynamic add ws2
+	if err := mgr.AddWorkspace(ws2); err != nil {
+		t.Fatalf("AddWorkspace failed: %v", err)
+	}
+	if len(mgr.Workspaces()) != 2 {
+		t.Fatalf("expected 2 workspaces, got %d", len(mgr.Workspaces()))
+	}
+
+	// Validate path in ws2
+	f2 := filepath.Join(ws2, "file.txt")
+	if _, err := mgr.ValidatePath(f2); err != nil {
+		t.Errorf("ValidatePath for ws2 failed: %v", err)
+	}
+
+	// Remove ws1
+	if err := mgr.RemoveWorkspace(ws1); err != nil {
+		t.Fatalf("RemoveWorkspace failed: %v", err)
+	}
+	if len(mgr.Workspaces()) != 1 {
+		t.Fatalf("expected 1 workspace after remove, got %d", len(mgr.Workspaces()))
+	}
+
+	// ws1 should now be rejected
+	f1 := filepath.Join(ws1, "file.txt")
+	if _, err := mgr.ValidatePath(f1); err == nil {
+		t.Error("expected ws1 to be rejected after removal, got nil error")
+	}
+}
+
+

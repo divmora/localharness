@@ -2,11 +2,14 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/errors"
+	"github.com/divmora/localharness/internal/util"
 )
 
 func registerCreateFile(r *Registry) {
@@ -86,6 +89,11 @@ func executeCreateFile(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 			WithComponent("write_to_file")
 	}
 
+	var oldContent string
+	if data, readErr := os.ReadFile(path); readErr == nil {
+		oldContent = string(data)
+	}
+
 	// Write file
 	if err := os.WriteFile(path, []byte(cf.Content), 0644); err != nil {
 		return errors.Wrap(err, errors.ErrCodeToolExecution,
@@ -96,6 +104,19 @@ func executeCreateFile(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	}
 
 	cf.Created = true
+	filename := filepath.Base(path)
+	diff := util.UnifiedDiff("a/"+filename, "b/"+filename, oldContent, cf.Content)
+	if diff == "" && oldContent == "" && cf.Content != "" {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("--- /dev/null\n+++ b/%s\n", filename))
+		lines := strings.Split(cf.Content, "\n")
+		sb.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
+		for _, l := range lines {
+			sb.WriteString("+" + l + "\n")
+		}
+		diff = sb.String()
+	}
+	cf.DiffBlock = diff
 
 	// Save artifact metadata sidecar if this is an artifact
 	if cf.IsArtifact && cf.ArtifactMetadata != nil && r.conversation != nil {

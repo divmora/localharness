@@ -30,6 +30,12 @@ type Connection interface {
 	// SendToolResult sends a host tool result back to the harness.
 	SendToolResult(ctx context.Context, stepID, toolName, resultJSON string, isError bool) error
 
+	// Interrupt requests the engine to pause execution at the next safe boundary.
+	Interrupt(ctx context.Context) error
+
+	// Cancel aborts the current turn immediately.
+	Cancel(ctx context.Context) error
+
 	// Close shuts down the connection and releases resources.
 	Close() error
 
@@ -40,6 +46,7 @@ type Connection interface {
 	// Returns nil if the harness does not support agent cards.
 	FetchAgentCard(ctx context.Context) (*AgentCard, error)
 }
+
 
 // AgentCard is the A2A discovery document served at /.well-known/agent.json.
 type AgentCard struct {

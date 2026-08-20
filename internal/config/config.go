@@ -84,6 +84,19 @@ func ParseFlags() *ServerConfig {
 	return cfg
 }
 
+// DefaultServerConfig returns a default ServerConfig.
+func DefaultServerConfig() *ServerConfig {
+	home, _ := os.UserHomeDir()
+	appDataDir := filepath.Join(home, DefaultAppDataDir)
+	cwd, _ := os.Getwd()
+	return &ServerConfig{
+		Workspace:  cwd,
+		AppDataDir: appDataDir,
+		Debug:      false,
+	}
+}
+
+
 // DefaultBuiltinTools returns the default BuiltinToolsConfig.
 // All tools enabled except run_command (for safety).
 func DefaultBuiltinTools() *pb.BuiltinToolsConfig {

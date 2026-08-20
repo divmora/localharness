@@ -55,6 +55,13 @@ func main() {
 		Level: logLevel,
 	}))
 
+	// Check if this is a daemon subcommand
+	if len(os.Args) > 1 && os.Args[1] == "daemon" {
+		runDaemonCommand(os.Args[2:], logger)
+		return
+	}
+
+
 	// ─── Phase 1: Pipe Handshake ────────────────────────────────────────
 
 	// Read InputConfig from stdin

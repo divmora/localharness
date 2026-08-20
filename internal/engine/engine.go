@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/divmora/localharness/internal/llm"
 	mcpbridge "github.com/divmora/localharness/internal/mcp"
 	"github.com/divmora/localharness/internal/tools"
+	"github.com/divmora/localharness/internal/util"
 )
 
 // StepCallback is called whenever a step update should be sent to the client.
@@ -113,6 +115,12 @@ type Engine struct {
 	agentBus *AgentBus              // Shared pub/sub bus across agent family (nil for standalone)
 	convMgr  *conversation.Manager // For creating child conversations (nil if not passed)
 	conv     *conversation.Conversation // Subagent's own conversation (nil for root — Session manages it)
+
+	mu             sync.RWMutex
+	workspaces     []string
+	workspaceInfos []WorkspaceInfo
+	userRules      []config.UserRule
+	yoloMode       bool
 }
 
 // Config holds engine configuration.
@@ -137,6 +145,8 @@ type Config struct {
 	QuestionHandler     QuestionHandler            // Called for ask_question tool
 	InitialHistory      []llm.Message              // Initial message history to restore context
 	MCPManager          *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
+	YoloMode            bool                       // Bypass all tool permission checks
+
 
 	// Structured system instructions (takes priority over SystemPrompt if set)
 	StructuredInstructions *pb.StructuredSystemInstructions
@@ -326,7 +336,11 @@ func NewEngine(cfg Config) *Engine {
 		globalKnowledgeStore:     globalKnowledgeStore,
 		workspaceKnowledgeStores: workspaceKnowledgeStores,
 		agentBus:                 bus,
-		convMgr:            cfg.ConversationManager,
+		convMgr:                  cfg.ConversationManager,
+		workspaces:               cfg.Workspaces,
+		workspaceInfos:           cfg.WorkspaceInfos,
+		userRules:                cfg.UserRules,
+		yoloMode:                 cfg.YoloMode,
 	}
 
 	if eng.toolRegistry != nil {
@@ -335,6 +349,14 @@ func NewEngine(cfg Config) *Engine {
 
 	return eng
 }
+
+// SetYoloMode enables or disables YOLO mode (bypassing all permission checks).
+func (e *Engine) SetYoloMode(enabled bool) {
+	e.mu.Lock()
+	e.yoloMode = enabled
+	e.mu.Unlock()
+}
+
 
 // Run executes the agentic loop for a user message.
 // It calls the LLM, dispatches tool calls, feeds results back, and repeats
@@ -369,6 +391,72 @@ func (e *Engine) Resume(injectedMsg string) {
 	default:
 		// Not paused or resume already pending
 	}
+}
+
+// AddWorkspace dynamically adds a workspace directory to the engine and reloads AGENTS.md rules.
+func (e *Engine) AddWorkspace(ws string, info WorkspaceInfo) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for _, existing := range e.workspaces {
+		if existing == ws {
+			return
+		}
+	}
+	e.workspaces = append(e.workspaces, ws)
+	e.workspaceInfos = append(e.workspaceInfos, info)
+
+	// Reload user rules with new workspace
+	discoveredRules := config.LoadAgentsRules(e.workspaces, e.logger)
+	var sdkRules []config.UserRule
+	for _, r := range e.userRules {
+		if !strings.HasSuffix(r.Filename, "AGENTS.md") {
+			sdkRules = append(sdkRules, r)
+		}
+	}
+	e.userRules = append(sdkRules, discoveredRules...)
+	e.msgCtx.Workspaces = e.workspaceInfos
+	e.msgCtx.UserRules = e.userRules
+}
+
+// RemoveWorkspace dynamically removes a workspace directory from the engine.
+func (e *Engine) RemoveWorkspace(ws string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var updatedWS []string
+	var updatedInfos []WorkspaceInfo
+	for i, existing := range e.workspaces {
+		if existing != ws {
+			updatedWS = append(updatedWS, existing)
+			if i < len(e.workspaceInfos) {
+				updatedInfos = append(updatedInfos, e.workspaceInfos[i])
+			}
+		}
+	}
+	e.workspaces = updatedWS
+	e.workspaceInfos = updatedInfos
+
+	// Reload rules
+	discoveredRules := config.LoadAgentsRules(e.workspaces, e.logger)
+	var sdkRules []config.UserRule
+	for _, r := range e.userRules {
+		if !strings.HasSuffix(r.Filename, "AGENTS.md") {
+			sdkRules = append(sdkRules, r)
+		}
+	}
+	e.userRules = append(sdkRules, discoveredRules...)
+	e.msgCtx.Workspaces = e.workspaceInfos
+	e.msgCtx.UserRules = e.userRules
+}
+
+// Workspaces returns the list of current workspace directories.
+func (e *Engine) Workspaces() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	out := make([]string, len(e.workspaces))
+	copy(out, e.workspaces)
+	return out
 }
 
 // SetEphemeralMessages sets ADK-injected ephemeral directives for the next turn.
@@ -898,15 +986,33 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 	e.emitStep(step)
 
 	// ── Permission check (if handler registered) ──
-	// Skip permission for interactive/internal tools that don't touch the workspace.
+	// Policy:
+	// 1. YOLO mode: bypass all prompts.
+	// 2. Non-file / interactive / web tools: always allowed without prompts.
+	// 3. Agent internal AppData paths (brain/knowledge artifacts): always allowed without prompts.
+	// 4. Read-only file tools: auto-approved ONLY if target is inside workspace or AppDataDir (~/.divmora).
+	//    If viewing/reading outside workspaces & outside ~/.divmora, prompt user for permission!
+	// 5. Mutating tools (write, edit, command): always prompt unless YOLO mode.
 	requiresPermission := true
-	switch tc.Name {
-	case "ask_question", "ask_permission", "list_permissions", "finish":
+	if e.yoloMode {
 		requiresPermission = false
+	} else if isAlwaysAllowedTool(tc.Name) {
+		requiresPermission = false
+	} else if e.isAppDataDirPath(tc) {
+		requiresPermission = false
+	} else if isReadOnlyFileTool(tc.Name) {
+		targetPath := extractToolPath(tc)
+		if e.isPathInsideWorkspaceOrAppData(targetPath) {
+			requiresPermission = false
+		} else {
+			requiresPermission = true
+		}
 	}
 
-	if e.permissionHandler != nil && requiresPermission && !e.isAppDataDirPath(tc) {
+	if e.permissionHandler != nil && requiresPermission {
 		approved, reason, err := e.requestPermission(ctx, tc, step)
+
+
 		if err != nil {
 			step.State = pb.StepUpdate_STATE_ERROR
 			step.ErrorInfo = &pb.ErrorInfo{
@@ -1409,6 +1515,93 @@ func (e *Engine) executeMCPTool(ctx context.Context, tc llm.ToolCall, step *pb.S
 	return nil
 }
 
+// isReadOnlyFileTool returns true if the tool reads or lists files/directories.
+func isReadOnlyFileTool(toolName string) bool {
+	switch toolName {
+	case "view_file", "list_dir", "grep_search", "find_file", "find_by_name":
+		return true
+	default:
+		return false
+	}
+}
+
+// isAlwaysAllowedTool returns true for non-file, internal, or web tools that
+// do not touch the local workspace filesystem directly.
+func isAlwaysAllowedTool(toolName string) bool {
+	switch toolName {
+	case "read_url_content", "search_web", "finish", "ask_question",
+		"ask_permission", "list_permissions", "invoke_subagent", "send_message",
+		"schedule", "define_subagent", "manage_subagents":
+		return true
+	default:
+		return false
+	}
+}
+
+// extractToolPath extracts the target file or directory path from tool call arguments.
+func extractToolPath(tc llm.ToolCall) string {
+	keys := []string{
+		"AbsolutePath", "DirectoryPath", "SearchPath", "SearchDirectory",
+		"TargetFile", "path", "file_path", "directory_path", "search_path", "target_file",
+	}
+	for _, key := range keys {
+		if p, ok := tc.Args[key].(string); ok && p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// isPathInsideWorkspaceOrAppData checks if a path is located inside any attached workspace
+// or inside the appDataDir (~/.divmora/localharness/ including conversations, brain, knowledge).
+func (e *Engine) isPathInsideWorkspaceOrAppData(p string) bool {
+	if p == "" {
+		return true
+	}
+	absPath := filepath.Clean(p)
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		realPath = absPath
+	}
+
+	// 1. Check AppDataDir (~/.divmora/localharness/ or ~/.divmora)
+	if e.appDataDir != "" {
+		appDataClean := filepath.Clean(e.appDataDir)
+		realAppData, _ := filepath.EvalSymlinks(appDataClean)
+		if strings.HasPrefix(absPath, appDataClean) || (realAppData != "" && strings.HasPrefix(realPath, realAppData)) {
+			return true
+		}
+	}
+
+	// Also check ~/.divmora generally (e.g. conversations, brain, knowledge, settings)
+	home, err := os.UserHomeDir()
+	if err == nil {
+		divmoraDir := filepath.Join(home, ".divmora")
+		realDivmora, _ := filepath.EvalSymlinks(divmoraDir)
+		if strings.HasPrefix(absPath, divmoraDir) || (realDivmora != "" && strings.HasPrefix(realPath, realDivmora)) {
+			return true
+		}
+	}
+
+	// 2. Check all attached workspaces
+	e.mu.RLock()
+	workspaces := append([]string{}, e.workspaces...)
+	e.mu.RUnlock()
+
+	for _, ws := range workspaces {
+		wsClean := filepath.Clean(ws)
+		realWS, _ := filepath.EvalSymlinks(wsClean)
+		if absPath == wsClean || strings.HasPrefix(absPath, wsClean+string(filepath.Separator)) {
+			return true
+		}
+		if realWS != "" && (realPath == realWS || strings.HasPrefix(realPath, realWS+string(filepath.Separator))) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // isAppDataDirPath returns true if the tool call targets a path inside the
 // agent-writable subdirectories of appDataDir (brain/ and knowledge/).
 // Only these directories should bypass SDK policy checks — the agent must not
@@ -1423,7 +1616,7 @@ func (e *Engine) isAppDataDirPath(tc llm.ToolCall) bool {
 		filepath.Join(e.appDataDir, "knowledge") + string(filepath.Separator),
 	}
 	// Check common path arguments used by file tools
-	for _, key := range []string{"path", "file_path", "directory_path", "search_path"} {
+	for _, key := range []string{"path", "file_path", "directory_path", "search_path", "AbsolutePath", "DirectoryPath", "TargetFile"} {
 		if p, ok := tc.Args[key].(string); ok && p != "" {
 			absPath := filepath.Clean(p)
 			for _, prefix := range allowedPrefixes {
@@ -1436,16 +1629,19 @@ func (e *Engine) isAppDataDirPath(tc llm.ToolCall) bool {
 	return false
 }
 
+
 // requestPermission emits a STATE_WAITING step with an ActionPermissionRequest
 // and blocks until the SDK responds with a PermissionResponse.
 func (e *Engine) requestPermission(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) (bool, string, error) {
 	argsJSON, _ := json.Marshal(tc.Args)
+	diffPreview := generateDiffPreview(tc)
 	req := &pb.ActionPermissionRequest{
 		RequestId:   fmt.Sprintf("perm-%d", step.StepIndex),
 		ToolName:    tc.Name,
 		ArgsJson:    string(argsJSON),
 		ArgsSummary: summarizeToolCall(tc),
 		CallId:      tc.ID,
+		DiffPreview: diffPreview,
 	}
 
 	// Create a separate StepUpdate to emit the permission request
@@ -1509,6 +1705,82 @@ func summarizeToolCall(tc llm.ToolCall) string {
 	}
 	argsJSON, _ := json.Marshal(tc.Args)
 	return fmt.Sprintf("Tool: %s, Args: %s", tc.Name, string(argsJSON))
+}
+
+func generateDiffPreview(tc llm.ToolCall) string {
+	switch tc.Name {
+	case "write_to_file":
+		path, _ := tc.Args["path"].(string)
+		content, _ := tc.Args["content"].(string)
+		if path == "" {
+			return ""
+		}
+		var oldContent string
+		if data, err := os.ReadFile(path); err == nil {
+			oldContent = string(data)
+		}
+		filename := filepath.Base(path)
+		diff := util.UnifiedDiff("a/"+filename, "b/"+filename, oldContent, content)
+		if diff == "" && oldContent == "" && content != "" {
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("--- /dev/null\n+++ b/%s\n", filename))
+			lines := strings.Split(content, "\n")
+			sb.WriteString(fmt.Sprintf("@@ -0,0 +1,%d @@\n", len(lines)))
+			for _, l := range lines {
+				sb.WriteString("+" + l + "\n")
+			}
+			return sb.String()
+		}
+		return diff
+
+	case "replace_file_content":
+		path, _ := tc.Args["path"].(string)
+		if path == "" {
+			return ""
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		oldContent := string(data)
+		lines := strings.Split(strings.ReplaceAll(oldContent, "\r\n", "\n"), "\n")
+		chunksRaw, ok := tc.Args["chunks"].([]interface{})
+		if !ok || len(chunksRaw) == 0 {
+			return ""
+		}
+		for _, c := range chunksRaw {
+			chunkMap, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			target, _ := chunkMap["target_content"].(string)
+			replacement, _ := chunkMap["replacement"].(string)
+			startLine := 1
+			if sl, ok := chunkMap["start_line"].(float64); ok && int(sl) > 0 {
+				startLine = int(sl)
+			}
+			endLine := len(lines)
+			if el, ok := chunkMap["end_line"].(float64); ok && int(el) > 0 && int(el) <= len(lines) {
+				endLine = int(el)
+			}
+			if startLine <= len(lines) && startLine <= endLine {
+				scopeStart := startLine - 1
+				scopeEnd := endLine
+				scopedText := strings.Join(lines[scopeStart:scopeEnd], "\n")
+				newScopedText := strings.Replace(scopedText, target, replacement, 1)
+				newLines := strings.Split(newScopedText, "\n")
+				result := make([]string, 0, scopeStart+len(newLines)+(len(lines)-scopeEnd))
+				result = append(result, lines[:scopeStart]...)
+				result = append(result, newLines...)
+				result = append(result, lines[scopeEnd:]...)
+				lines = result
+			}
+		}
+		newContent := strings.Join(lines, "\n")
+		filename := filepath.Base(path)
+		return util.UnifiedDiff("a/"+filename, "b/"+filename, oldContent, newContent)
+	}
+	return ""
 }
 
 // checkPlanningGuard enforces the planning workflow when EnablePlanningMode is set.

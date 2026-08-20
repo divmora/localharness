@@ -9,35 +9,39 @@ Uses **pipe-based handshake** (stdin/stdout) for secure startup and **WebSocket 
 ## Architecture
 
 ```
-SDK / CLI Client ◄─── WebSocket + Protobuf ───► LocalHarness (Go binary)
-                                                      │
-                                                      ├── Agentic Engine
-                                                      │   ├── LLM ↔ Tools ↔ Results loop
-                                                      │   └── Streaming responses (token-by-token)
-                                                      │
-                                                      ├── LLM Providers (with streaming support)
-                                                      │   ├── Gemini (function calling + SSE streaming)
-                                                      │   └── OpenAI-compatible (GPT-4o, Ollama, etc.)
-                                                      │
-                                                      ├── Built-in Tools
-                                                      │   ├── view_file
-                                                      │   ├── write_to_file
-                                                      │   ├── replace_file_content / multi_replace_file_content
-                                                      │   ├── list_dir
-                                                      │   ├── grep_search (ripgrep)
-                                                      │   ├── find_file
-                                                      │   ├── run_command (sync, background, persistent)
-                                                      │   ├── manage_task
-                                                      │   ├── finish
-                                                      │   ├── invoke_subagent (child trajectories)
-                                                      │   ├── search_web / read_url_content
-                                                      │   ├── schedule (one-shot timers, cron)
-                                                      │   ├── ask_question (interactive MCQ)
-                                                      │   ├── knowledge_write/replace/delete (KI system)
-                                                      │   └── browser (Playwright via MCP)
-                                                      │
-                                                      └── Host-side Custom Tools
-                                                          └── SDK-registered tools (forwarded via WebSocket)
+lhctl (Interactive TUI) / SDK ◄── WebSocket + Protobuf ──► LocalHarness Binary / Daemon (Go)
+                                                                 │
+                                                                 ├── Dual Execution Modes
+                                                                 │   ├── Ephemeral Subprocess (Stdin/Stdout pipe handshake)
+                                                                 │   └── Persistent Background Daemon (Unix socket + TCP)
+                                                                 │
+                                                                 ├── Interactive TUI (lhctl)
+                                                                 │   ├── Real-time token streaming & markdown rendering
+                                                                 │   ├── Animated tool spinners & execution duration
+                                                                 │   ├── Interactive unified diff approvals & YOLO mode
+                                                                 │   ├── Subagent tree & transcript drill-down
+                                                                 │   └── @file autocompletion across workspaces
+                                                                 │
+                                                                 ├── Agentic Engine
+                                                                 │   ├── LLM ↔ Tools ↔ Results loop
+                                                                 │   ├── Turn pause/resume (InterruptRequest / ResumeRequest)
+                                                                 │   └── Context compaction & reduction
+                                                                 │
+                                                                 ├── LLM Providers
+                                                                 │   ├── OpenAI-compatible (GPT-4o, Claude, DeepSeek, etc.)
+                                                                 │   └── Resilient backoff retry with Retry-After header parsing
+                                                                 │
+                                                                 ├── Multi-Workspace & Trust
+                                                                 │   ├── First-time trust prompts (~/.divmora/config/settings.json)
+                                                                 │   └── Dynamic /workspace add/remove/list
+                                                                 │
+                                                                 └── Built-in Tools
+                                                                     ├── view_file, write_to_file, replace_file_content
+                                                                     ├── list_dir, grep_search, find_file
+                                                                     ├── run_command, manage_task, finish
+                                                                     ├── invoke_subagent, define_subagent, manage_subagents
+                                                                     ├── search_web, read_url_content, schedule
+                                                                     └── knowledge_write/replace/delete, browser (Playwright)
 ```
 
 ## Prerequisites
@@ -77,20 +81,39 @@ xattr -cr localharness
 See [docs/binary-distribution.md](docs/binary-distribution.md) for the full resolution chain and cross-SDK strategy.
 ## Quick Start
 
-### Build from Source
+### 1. Interactive Terminal CLI (`lhctl`)
+
+Build and run the interactive multi-agent chat interface:
+
+```bash
+make build-lhctl
+
+# Launch interactive TUI in current directory
+./bin/lhctl
+
+# Or run with explicit model and YOLO mode
+./bin/lhctl run --model=gpt-4o --yolo
+
+# Launch background task and detach
+./bin/lhctl run --prompt="Audit project dependencies" --detach
+
+# Attach to a running session
+./bin/lhctl attach <session-id>
+```
+
+> In `lhctl`, press **`Shift+Tab`** to cycle between **`DEFAULT`** (Safe Mode), **`ACCEPT-EDITS`** (Auto-Accept Edits), and **`PLAN`** (Plan-Before-Act) modes. Type `/` for instant command autocomplete or `@` for workspace file mentions. See [docs/lhctl.md](docs/lhctl.md) for full documentation.
+
+### 2. Build Engine from Source
 
 ```bash
 make build
-# or directly:
-go build -o bin/localharness ./cmd/localharness
+# Binary created at bin/localharness
 ```
 
-### Run via Test Client
-
-The binary is designed to be spawned and managed by the SDK. Use the test client:
+### 3. Run via Test Client
 
 ```bash
-# Run a prompt (requires Gemini API key)
+# Run a prompt (requires Gemini / LiteLLM API key)
 export LITELLM_API_KEY=your_key
 go run ./cmd/testclient --prompt "List the files in the current directory"
 
@@ -103,6 +126,7 @@ go run ./cmd/testclient --thinking=medium --prompt "Explain the architecture"
 # Auto-approve all tool calls (for CI)
 go run ./cmd/testclient --auto-approve --prompt "Create hello.txt with 'Hello World'"
 ```
+
 
 
 

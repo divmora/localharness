@@ -1,18 +1,9 @@
-// lhctl — LocalHarness CLI utility for inspecting conversations and debugging.
+// lhctl — LocalHarness CLI and Interactive Terminal Interface.
 //
-// This is a lightweight, offline-only tool that reads conversation state files
-// from disk. It has zero runtime dependencies — no WebSocket, no LLM providers.
-//
-// Usage:
-//
-//	lhctl conversation inspect <id>           # Message-level analysis
-//	lhctl conversation inspect <id> --json    # Machine-readable output
-//	lhctl conversation list                   # List all conversations
-//	lhctl conversation list --recent=5        # Last 5 conversations
-//	lhctl --help                              # Show help
-//
-// The data directory defaults to ~/.divmora/localharness/ and can be
-// overridden with --data-dir.
+// Features:
+// - Interactive Terminal UI (TUI) with real-time token streaming and syntax highlighting.
+// - Multi-Client daemon connection, background detachment, and attach replay.
+// - Offline conversation inspection, trace visualization, and agent hierarchy trees.
 package main
 
 import (
@@ -20,117 +11,245 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-const usage = `lhctl — LocalHarness CLI Debugger
+var (
+	globalDataDir string
+)
 
-Usage:
-  lhctl conversation inspect <id> [flags]   Inspect a conversation's messages
-  lhctl conversation trace <id> [flags]     Show tool call timeline
-  lhctl conversation list [flags]           List all conversations
-  lhctl conversation tree <id>              Show agent tree for a conversation
-  lhctl conv inspect <id> [flags]           (alias for conversation)
-  lhctl --help                              Show this help
+func newRootCommand() *cobra.Command {
+	var (
+		modelFlag      string
+		workspacesFlag []string
+		yoloFlag       bool
+		detachFlag     bool
+		promptFlag     string
+	)
 
-Global Flags:
-  --data-dir=<path>   Override data directory (default: ~/.divmora/localharness/)
+	rootCmd := &cobra.Command{
+		Use:   "lhctl",
+		Short: "LocalHarness CLI & Interactive TUI",
+		Long: `lhctl is the command-line interface and interactive terminal for LocalHarness.
 
-Inspect Flags:
-  --json              Output as JSON (for piping to jq)
-  --top=<N>           Show top N largest messages (default: 3)
-  --steps             Show full tool args, paths, and error details
-  --step=<N>          Deep-dive into a single step (dump full args and result)
-  --errors            Show only steps that errored (policy denials, tool failures)
-
-Trace Flags:
-  --watch             Live-tail mode — poll for new trace files as agent runs
-  --commands          Show full command lines for run_command calls
-
-List Flags:
-  --recent=<N>        Show only the N most recent conversations
-
-Examples:
-  lhctl conv inspect 3c1a5fa1                    # Overview with size analysis
-  lhctl conv inspect 3c1a5fa1 --steps            # Full step trace with paths
-  lhctl conv inspect 3c1a5fa1 --errors           # Only errors and denials
-  lhctl conv inspect 3c1a5fa1 --step=1           # Deep-dive into step 1
-  lhctl conv inspect 3c1a5fa1 --json | jq '.'    # Machine-readable output
-  lhctl conv trace d2784f60                       # Tool call timeline
-  lhctl conv trace d2784f60 --watch              # Live-tail while agent runs
-  lhctl conv tree 253aacfb                        # Show agent family tree
-`
-
-func main() {
-	args := os.Args[1:]
-
-	if len(args) == 0 || contains(args, "--help") || contains(args, "-h") {
-		fmt.Print(usage)
-		os.Exit(0)
+It allows you to run interactive multi-agent coding sessions, manage background daemons,
+detach and attach to headless sessions, and inspect conversation state and traces offline.`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := runFlags{
+				model:      modelFlag,
+				workspaces: workspacesFlag,
+				yolo:       yoloFlag,
+				detach:     detachFlag,
+				prompt:     promptFlag,
+			}
+			return runInteractiveWithOptions(flags)
+		},
 	}
 
-	// Resolve data directory
-	dataDir := resolveDataDir(args)
+	// Persistent flags (available across all subcommands)
+	rootCmd.PersistentFlags().StringVar(&globalDataDir, "data-dir", getDefaultDataDir(), "Override data directory")
 
-	// Strip --data-dir from args
-	args = stripFlag(args, "--data-dir")
+	// Run / Interactive flags on root
+	addRunFlags(rootCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag)
 
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, "Error: no subcommand provided. Run 'lhctl --help' for usage.\n")
-		os.Exit(1)
+	// Subcommand: run
+	runCmd := &cobra.Command{
+		Use:   "run",
+		Short: "Start an interactive session in TUI or launch a detached task",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := runFlags{
+				model:      modelFlag,
+				workspaces: workspacesFlag,
+				yolo:       yoloFlag,
+				detach:     detachFlag,
+				prompt:     promptFlag,
+			}
+			return runInteractiveWithOptions(flags)
+		},
+	}
+	addRunFlags(runCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag)
+	rootCmd.AddCommand(runCmd)
+
+	// Subcommand: attach
+	attachCmd := &cobra.Command{
+		Use:   "attach <session-id>",
+		Short: "Attach to a running background daemon session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runAttach(getDataDir(), args[0], nil)
+			return nil
+		},
+	}
+	rootCmd.AddCommand(attachCmd)
+
+	// Subcommand: daemon
+	daemonCmd := &cobra.Command{
+		Use:   "daemon [start|stop|status]",
+		Short: "Manage the background LocalHarness daemon runtime",
 	}
 
-	// Subcommand routing
-	subcmd := args[0]
-	switch subcmd {
-	case "conversation", "conv":
-		if len(args) < 2 {
-			fmt.Fprint(os.Stderr, "Error: missing sub-subcommand. Use 'inspect' or 'list'.\n")
-			os.Exit(1)
-		}
-		switch args[1] {
-		case "inspect":
-			if len(args) < 3 {
-				fmt.Fprint(os.Stderr, "Error: missing conversation ID.\nUsage: lhctl conversation inspect <id>\n")
-				os.Exit(1)
-			}
-			runInspect(dataDir, args[2], args[3:])
-		case "list":
-			runList(dataDir, args[2:])
-		case "tree":
-			if len(args) < 3 {
-				fmt.Fprint(os.Stderr, "Error: missing conversation ID.\nUsage: lhctl conversation tree <id>\n")
-				os.Exit(1)
-			}
-			runTree(dataDir, args[2])
-		case "trace":
-			if len(args) < 3 {
-				fmt.Fprint(os.Stderr, "Error: missing conversation ID.\nUsage: lhctl conversation trace <id> [--watch] [--commands]\n")
-				os.Exit(1)
-			}
-			runTrace(dataDir, args[2], args[3:])
-		default:
-			fmt.Fprintf(os.Stderr, "Error: unknown sub-subcommand %q. Use 'inspect' or 'list'.\n", args[1])
-			os.Exit(1)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q. Run 'lhctl --help' for usage.\n", subcmd)
-		os.Exit(1)
+	daemonStartCmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the LocalHarness daemon in the background",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return startDaemon()
+		},
 	}
+	daemonStopCmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the running LocalHarness daemon",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return stopDaemon()
+		},
+	}
+	daemonStatusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Check the status of the LocalHarness daemon",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return statusDaemon()
+		},
+	}
+	daemonCmd.AddCommand(daemonStartCmd, daemonStopCmd, daemonStatusCmd)
+	rootCmd.AddCommand(daemonCmd)
+
+	// Subcommand: conversation (alias: conv)
+	convCmd := &cobra.Command{
+		Use:     "conversation",
+		Aliases: []string{"conv"},
+		Short:   "Inspect, trace, and visualize conversation state offline",
+	}
+
+	// conv inspect
+	var (
+		inspectJSON       bool
+		inspectTopN       int
+		inspectSteps      bool
+		inspectStepN      int
+		inspectErrorsOnly bool
+	)
+	inspectCmd := &cobra.Command{
+		Use:   "inspect <id>",
+		Short: "Inspect conversation messages and token usage offline",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := []string{}
+			if inspectJSON {
+				flags = append(flags, "--json")
+			}
+			if inspectSteps {
+				flags = append(flags, "--steps")
+			}
+			if inspectErrorsOnly {
+				flags = append(flags, "--errors")
+			}
+			if inspectTopN != 3 {
+				flags = append(flags, fmt.Sprintf("--top=%d", inspectTopN))
+			}
+			if inspectStepN != -1 {
+				flags = append(flags, fmt.Sprintf("--step=%d", inspectStepN))
+			}
+			runInspect(getDataDir(), args[0], flags)
+			return nil
+		},
+	}
+	inspectCmd.Flags().BoolVar(&inspectJSON, "json", false, "Output as JSON (for piping to jq)")
+	inspectCmd.Flags().IntVar(&inspectTopN, "top", 3, "Show top N largest messages")
+	inspectCmd.Flags().BoolVar(&inspectSteps, "steps", false, "Show full tool args, paths, and error details")
+	inspectCmd.Flags().IntVar(&inspectStepN, "step", -1, "Deep-dive into a single step (dump full args and result)")
+	inspectCmd.Flags().BoolVar(&inspectErrorsOnly, "errors", false, "Show only steps that errored")
+	convCmd.AddCommand(inspectCmd)
+
+	// conv trace
+	var (
+		traceWatchMode bool
+		traceCommands  bool
+	)
+	traceCmd := &cobra.Command{
+		Use:   "trace <id>",
+		Short: "Show LLM API call timeline and tool execution trace",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := []string{}
+			if traceWatchMode {
+				flags = append(flags, "--watch")
+			}
+			if traceCommands {
+				flags = append(flags, "--commands")
+			}
+			runTrace(getDataDir(), args[0], flags)
+			return nil
+		},
+	}
+	traceCmd.Flags().BoolVar(&traceWatchMode, "watch", false, "Live-tail mode — poll for new trace files as agent runs")
+	traceCmd.Flags().BoolVar(&traceCommands, "commands", false, "Show full command lines for run_command calls")
+	convCmd.AddCommand(traceCmd)
+
+	// conv tree
+	treeCmd := &cobra.Command{
+		Use:   "tree <id>",
+		Short: "Display the subagent hierarchy tree for a conversation",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runTree(getDataDir(), args[0])
+			return nil
+		},
+	}
+	convCmd.AddCommand(treeCmd)
+
+	// conv list
+	var listRecent int
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all recorded conversations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			flags := []string{}
+			if listRecent > 0 {
+				flags = append(flags, fmt.Sprintf("--recent=%d", listRecent))
+			}
+			runList(getDataDir(), flags)
+			return nil
+		},
+	}
+	listCmd.Flags().IntVar(&listRecent, "recent", 0, "Show only the N most recent conversations")
+	convCmd.AddCommand(listCmd)
+
+	rootCmd.AddCommand(convCmd)
+
+	return rootCmd
 }
 
-// resolveDataDir finds the data directory from --data-dir flag or default.
-func resolveDataDir(args []string) string {
-	for _, a := range args {
-		if strings.HasPrefix(a, "--data-dir=") {
-			return strings.TrimPrefix(a, "--data-dir=")
-		}
-	}
+func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *bool, detach *bool, prompt *string) {
+	cmd.Flags().StringVarP(model, "model", "m", "", "Target LLM model (e.g. gpt-4o, claude-3-5-sonnet)")
+	cmd.Flags().StringArrayVarP(workspaces, "workspace", "w", nil, "Attach workspace directory (repeatable)")
+	cmd.Flags().BoolVarP(yolo, "yolo", "y", false, "Enable YOLO Mode (dangerously skip permission checks)")
+	cmd.Flags().BoolVarP(detach, "detach", "d", false, "Launch prompt in background daemon without blocking")
+	cmd.Flags().StringVarP(prompt, "prompt", "p", "", "Initial prompt to execute immediately")
+}
+
+func getDefaultDataDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine home directory: %v\n", err)
-		os.Exit(1)
+		return filepath.Join(".", ".divmora", "localharness")
 	}
 	return filepath.Join(home, ".divmora", "localharness")
+}
+
+func getDataDir() string {
+	if globalDataDir != "" {
+		return globalDataDir
+	}
+	return getDefaultDataDir()
+}
+
+func main() {
+	rootCmd := newRootCommand()
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // resolveConversationID resolves a partial ID to a full UUID by matching

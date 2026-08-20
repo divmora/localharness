@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/util"
 )
 
 func registerEditFile(r *Registry) {
@@ -96,6 +97,7 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 
 	totalLines := len(lines)
+	oldFileContent := strings.Join(lines, "\n") + "\n"
 	var diffParts []string
 
 	// Apply each chunk — process in order, working on the lines slice.
@@ -171,7 +173,13 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		return fmt.Errorf("replace_file_content: write error: %w", err)
 	}
 
-	ef.DiffBlock = strings.Join(diffParts, "\n")
+	filename := filepath.Base(path)
+	unifiedDiff := util.UnifiedDiff("a/"+filename, "b/"+filename, oldFileContent, content)
+	if unifiedDiff != "" {
+		ef.DiffBlock = unifiedDiff
+	} else {
+		ef.DiffBlock = strings.Join(diffParts, "\n")
+	}
 	ef.Success = true
 
 	// Save artifact metadata sidecar if provided

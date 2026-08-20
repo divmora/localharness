@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/divmora/localharness/internal/errors"
 )
@@ -17,6 +21,7 @@ import (
 const (
 	defaultOpenAIBaseURL = "https://api.openai.com/v1"
 	defaultOpenAIModel   = "gpt-4o"
+	maxAPIRetries        = 5
 )
 
 // OpenAIProvider implements the Provider interface for OpenAI-compatible APIs.
@@ -83,7 +88,51 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 func (o *OpenAIProvider) ModelName() string { return o.model }
 func (o *OpenAIProvider) Close() error      { return nil }
 
-// Generate sends a chat completion request to the OpenAI-compatible API.
+// parseRetryAfter parses the Retry-After header which can be seconds or an HTTP-date.
+func parseRetryAfter(header string) (time.Duration, bool) {
+	if header == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second, true
+	}
+	if t, err := http.ParseTime(header); err == nil {
+		d := time.Until(t)
+		if d > 0 {
+			return d, true
+		}
+		return 0, true
+	}
+	return 0, false
+}
+
+func computeBackoff(attempt int, retryAfterHeader string) time.Duration {
+	if d, ok := parseRetryAfter(retryAfterHeader); ok && d > 0 {
+		return d
+	}
+	base := 1 * time.Second
+	maxDelay := 30 * time.Second
+	backoff := float64(base) * math.Pow(2, float64(attempt))
+	if backoff > float64(maxDelay) {
+		backoff = float64(maxDelay)
+	}
+	// Full jitter
+	jittered := rand.Float64() * backoff
+	if jittered < float64(100*time.Millisecond) {
+		jittered = float64(100 * time.Millisecond)
+	}
+	return time.Duration(jittered)
+}
+
+func isRetryableStatusCode(code int) bool {
+	return code == http.StatusTooManyRequests || // 429
+		code == http.StatusInternalServerError || // 500
+		code == http.StatusBadGateway ||          // 502
+		code == http.StatusServiceUnavailable ||  // 503
+		code == http.StatusGatewayTimeout         // 504
+}
+
+// Generate sends a chat completion request to the OpenAI-compatible API with exponential backoff retries.
 func (o *OpenAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	body := o.buildRequestBody(req)
 
@@ -98,55 +147,95 @@ func (o *OpenAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 
 	url := fmt.Sprintf("%s/chat/completions", o.baseURL)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeNetwork,
-			"failed to create HTTP request").
-			WithContext("url", url).
-			WithContext("model", o.model).
-			WithContext("provider", "openai").
-			WithComponent("llm_provider")
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if o.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+	for attempt := 0; attempt <= maxAPIRetries; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, errors.Wrap(err, errors.ErrCodeNetwork,
+				"failed to create HTTP request").
+				WithContext("url", url).
+				WithContext("model", o.model).
+				WithContext("provider", "openai").
+				WithComponent("llm_provider")
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if o.apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+		}
+
+		o.logger.Debug("calling OpenAI API", "model", o.model, "url", url, "messages", len(req.Messages), "attempt", attempt)
+
+		httpResp, err := o.client.Do(httpReq)
+		if err != nil {
+			if attempt < maxAPIRetries && ctx.Err() == nil {
+				backoff := computeBackoff(attempt, "")
+				o.logger.Warn("OpenAI API network error, retrying", "error", err, "attempt", attempt, "backoff", backoff)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+					continue
+				}
+			}
+			return nil, errors.Wrap(err, errors.ErrCodeConnectionFailed,
+				"API call failed").
+				WithContext("url", url).
+				WithContext("model", o.model).
+				WithContext("provider", "openai").
+				WithComponent("llm_provider")
+		}
+
+		respBody, err := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		if err != nil {
+			if attempt < maxAPIRetries && ctx.Err() == nil {
+				backoff := computeBackoff(attempt, "")
+				o.logger.Warn("OpenAI API response read error, retrying", "error", err, "attempt", attempt, "backoff", backoff)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+					continue
+				}
+			}
+			return nil, errors.Wrap(err, errors.ErrCodeNetwork,
+				"failed to read response").
+				WithContext("url", url).
+				WithContext("model", o.model).
+				WithContext("provider", "openai").
+				WithComponent("llm_provider")
+		}
+
+		if httpResp.StatusCode != http.StatusOK {
+			if isRetryableStatusCode(httpResp.StatusCode) && attempt < maxAPIRetries && ctx.Err() == nil {
+				retryAfter := httpResp.Header.Get("Retry-After")
+				backoff := computeBackoff(attempt, retryAfter)
+				o.logger.Warn("OpenAI API rate limit/server error, retrying",
+					"status", httpResp.StatusCode,
+					"attempt", attempt,
+					"retry_after", retryAfter,
+					"backoff", backoff,
+				)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+					continue
+				}
+			}
+			return nil, errors.New(errors.ErrCodeLLMProvider,
+				"API error").
+				WithContext("status_code", httpResp.StatusCode).
+				WithContext("response_body", string(respBody)).
+				WithContext("url", url).
+				WithContext("model", o.model).
+				WithContext("provider", "openai").
+				WithComponent("llm_provider")
+		}
+
+		return o.parseResponse(respBody)
 	}
 
-	o.logger.Debug("calling OpenAI API", "model", o.model, "url", url, "messages", len(req.Messages))
-
-	httpResp, err := o.client.Do(httpReq)
-	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeConnectionFailed,
-			"API call failed").
-			WithContext("url", url).
-			WithContext("model", o.model).
-			WithContext("provider", "openai").
-			WithComponent("llm_provider")
-	}
-	defer httpResp.Body.Close()
-
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, errors.Wrap(err, errors.ErrCodeNetwork,
-			"failed to read response").
-			WithContext("url", url).
-			WithContext("model", o.model).
-			WithContext("provider", "openai").
-			WithComponent("llm_provider")
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, errors.New(errors.ErrCodeLLMProvider,
-			"API error").
-			WithContext("status_code", httpResp.StatusCode).
-			WithContext("response_body", string(respBody)).
-			WithContext("url", url).
-			WithContext("model", o.model).
-			WithContext("provider", "openai").
-			WithComponent("llm_provider")
-	}
-
-	return o.parseResponse(respBody)
+	return nil, errors.New(errors.ErrCodeLLMProvider, "exceeded max retries for LLM API")
 }
 
 // buildRequestBody constructs the OpenAI chat completion request.
@@ -358,31 +447,71 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, req *GenerateReques
 
 		url := fmt.Sprintf("%s/chat/completions", o.baseURL)
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-		if err != nil {
-			errCh <- fmt.Errorf("openai: request error: %w", err)
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Accept", "text/event-stream")
-		if o.apiKey != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+		var httpResp *http.Response
+		for attempt := 0; attempt <= maxAPIRetries; attempt++ {
+			httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+			if err != nil {
+				errCh <- fmt.Errorf("openai: request error: %w", err)
+				return
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			httpReq.Header.Set("Accept", "text/event-stream")
+			if o.apiKey != "" {
+				httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+			}
+
+			o.logger.Debug("calling OpenAI streaming API", "model", o.model, "url", url, "messages", len(req.Messages), "attempt", attempt)
+
+			httpResp, err = o.client.Do(httpReq)
+			if err != nil {
+				if attempt < maxAPIRetries && ctx.Err() == nil {
+					backoff := computeBackoff(attempt, "")
+					o.logger.Warn("OpenAI streaming network error, retrying", "error", err, "attempt", attempt, "backoff", backoff)
+					select {
+					case <-ctx.Done():
+						errCh <- ctx.Err()
+						return
+					case <-time.After(backoff):
+						continue
+					}
+				}
+				errCh <- fmt.Errorf("openai: streaming API call failed: %w", err)
+				return
+			}
+
+			if httpResp.StatusCode != http.StatusOK {
+				respBody, _ := io.ReadAll(httpResp.Body)
+				httpResp.Body.Close()
+
+				if isRetryableStatusCode(httpResp.StatusCode) && attempt < maxAPIRetries && ctx.Err() == nil {
+					retryAfter := httpResp.Header.Get("Retry-After")
+					backoff := computeBackoff(attempt, retryAfter)
+					o.logger.Warn("OpenAI streaming rate limit/server error, retrying",
+						"status", httpResp.StatusCode,
+						"attempt", attempt,
+						"retry_after", retryAfter,
+						"backoff", backoff,
+					)
+					select {
+					case <-ctx.Done():
+						errCh <- ctx.Err()
+						return
+					case <-time.After(backoff):
+						continue
+					}
+				}
+				errCh <- fmt.Errorf("openai: streaming API error (status %d): %s", httpResp.StatusCode, string(respBody))
+				return
+			}
+
+			break
 		}
 
-		o.logger.Debug("calling OpenAI streaming API", "model", o.model, "url", url, "messages", len(req.Messages))
-
-		httpResp, err := o.client.Do(httpReq)
-		if err != nil {
-			errCh <- fmt.Errorf("openai: streaming API call failed: %w", err)
+		if httpResp == nil {
+			errCh <- fmt.Errorf("openai: streaming failed after retries")
 			return
 		}
 		defer httpResp.Body.Close()
-
-		if httpResp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(httpResp.Body)
-			errCh <- fmt.Errorf("openai: streaming API error (status %d): %s", httpResp.StatusCode, string(respBody))
-			return
-		}
 
 		o.parseOpenAISSEStream(ctx, httpResp.Body, chunks, errCh)
 	}()

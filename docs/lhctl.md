@@ -1,230 +1,177 @@
-# lhctl — LocalHarness CLI Debugger
+# lhctl — LocalHarness CLI & Interactive TUI
 
-`lhctl` is a lightweight, offline CLI tool for inspecting localharness conversation state.
-It reads `.pb` files directly from disk — no WebSocket connection, API keys, or running harness needed.
+`lhctl` is the official CLI and Interactive Terminal User Interface (TUI) for LocalHarness.
+Powered by [Charm Bubbletea](https://github.com/charmbracelet/bubbletea), [Lipgloss](https://github.com/charmbracelet/lipgloss), and [Cobra](https://github.com/spf13/cobra), it supports interactive multi-agent chat with live token streaming, animated tool spinners, syntax highlighting, unified diff approvals, operational modes, background daemon management, multi-client attach/detach, and offline conversation inspection.
 
 ## Installation
 
 ```bash
-# From the repo
-go build -o bin/lhctl ./cmd/lhctl/
-
-# Or use the Makefile
+# Build binary
 make build-lhctl
+# Binary created at bin/lhctl
 ```
 
-## Commands
+---
+
+## Interactive Terminal UI (TUI)
+
+Launch the interactive chat interface:
+
+```bash
+# Start interactive session in current directory (default)
+lhctl
+
+# Run explicitly with flags
+lhctl run --model=gpt-4o --workspace=/path/to/project --yolo
+
+# Launch background task and detach immediately
+lhctl run --prompt="Analyze codebase for performance bottlenecks" --detach
+
+# Attach to a running background daemon session
+lhctl attach <session-id>
+```
+
+### Command Flags (`lhctl` & `lhctl run`)
+
+| Flag | Short | Description | Default |
+|:---|:---|:---|:---|
+| `--model` | `-m` | Target LLM model (e.g. `gpt-4o`, `claude-3-5-sonnet`) | Harness default |
+| `--workspace` | `-w` | Attach workspace directory (repeatable) | Current working directory |
+| `--yolo` | `-y` | Enable YOLO Mode (skip all permission prompts) | `false` |
+| `--detach` | `-d` | Launch prompt in background daemon without blocking | `false` |
+| `--prompt` | `-p` | Initial prompt to execute immediately | `""` |
+| `--data-dir` | | Global data directory override | `~/.divmora/localharness/` |
+
+---
+
+## TUI Modes & Keybindings
+
+### Operational Modes (`Shift+Tab` / `/mode`)
+
+Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes:
+
+| Mode | Status Badge | Description |
+|:---|:---|:---|
+| **`DEFAULT`** | `🛡️ DEFAULT` | **Safe Mode**: Reads inside workspaces/`~/.divmora` are auto-approved. File edits and shell commands require user approval with unified diff previews. |
+| **`ACCEPT-EDITS`** | `⚡ ACCEPT-EDITS` | **Auto-Accept Edits**: All file modifications (`write_to_file`, `replace_file_content`) are auto-approved without prompts. Shell commands (`run_command`) still require confirmation. |
+| **`PLAN`** | `📋 PLAN` | **Plan-Before-Act**: Instructs the agent to research and write `implementation_plan.md` in the brain directory before modifying code. Planning guard blocks direct code modifications until a plan exists. |
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|:---|:---|
+| **`Shift+Tab`** | Cycle operational modes (`DEFAULT` ➔ `ACCEPT-EDITS` ➔ `PLAN`) |
+| **`/`** | Open instant **Slash Command Autocomplete** menu with description tooltips |
+| **`@`** | Open **Workspace File Autocomplete** matching files across attached workspaces |
+| **`↑` / `↓`** | Navigate autocomplete candidates (with wrap-around) |
+| **`Tab` / `Enter`** | Accept autocomplete selection / Send prompt / Confirm approval |
+| **`Ctrl+C`** | Interrupt/pause running turn (press twice within 2s to exit) |
+| **`Ctrl+D`** | Detach TUI cleanly (agents continue in background daemon) |
+| **`PgUp` / `PgDn`** | Scroll conversation viewport |
+| **`Esc`** | Close modal overlay / dismiss autocomplete menu |
+
+---
+
+## Slash Commands in TUI
+
+| Command | Description |
+|:---|:---|
+| `/help` | Display command catalog and keyboard shortcuts |
+| `/mode [name]` | Switch mode: `default`, `accept-edits`, `plan` (or `Shift+Tab`) |
+| `/plan [goal]` | Research codebase and create `implementation_plan.md` before coding |
+| `/pause` | Gracefully pause the active agent turn (`Ctrl+C`) |
+| `/resume [msg]` | Resume execution with optional updated instructions |
+| `/model [name]` | View or switch active LLM model target |
+| `/compact` | Trigger context window compaction |
+| `/status` | Show daemon status, active subagents, and token counters |
+| `/subagents` | View subagent hierarchy & drill down into subagent transcripts |
+| `/workspace list` | List all attached workspace roots |
+| `/workspace add <dir>` | Dynamically attach a workspace directory with trust check |
+| `/workspace remove <dir>` | Detach a workspace directory |
+| `/yolo` | Toggle YOLO Mode on/off (bypass all approval queues) |
+| `/detach` | Detach TUI while agent runs in background |
+| `/clear` | Clear the chat history viewport |
+| `/exit`, `/quit` | Exit the TUI session |
+
+---
+
+## Daemon Runtime Management
+
+Manage the persistent background daemon runtime:
+
+```bash
+# Start background daemon
+lhctl daemon start
+
+# Check daemon process status (PID, port, uptime)
+lhctl daemon status
+
+# Stop background daemon
+lhctl daemon stop
+```
+
+---
+
+## Offline Conversation Debugger
+
+`lhctl` functions offline to inspect `.pb` state files directly from disk without connecting to a running daemon.
 
 ### `conversation list` (alias: `conv list`)
 
-List all conversations sorted by most recent:
+List all recorded conversations:
 
 ```bash
 lhctl conversation list
 lhctl conv list --recent=5    # Last 5 only
 ```
 
-Output:
-```
-ID                                      Updated               Messages  Status    Agent             Size
-──────────────────────────────────────────────────────────────────────────────────────────────────────
-253aacfb-6bb2-42ad-86f8-a46da00bd159    2026-06-01T09:25:47          8  ACTIVE    root               17K
-30aef7a0-0b0b-45ab-8966-dc302db27382    2026-06-01T09:25:38          4  ACTIVE    research (d1)       6K
-cb94ce74-adae-4ae2-b8e6-e7c6f056bbaf    2026-05-30T07:33:14          8  ACTIVE    root               30K
-```
-
-The **Agent** column shows `root` for top-level conversations and `type (dN)` for subagents
-(e.g., `research (d1)` = a research agent at depth 1).
-
 ### `conversation inspect` (alias: `conv inspect`)
 
 Detailed message-level analysis of a conversation:
 
 ```bash
-lhctl conv inspect e358                  # Overview with size analysis
-lhctl conv inspect e358 --steps          # Full step trace with paths
-lhctl conv inspect e358 --errors         # Only errors and policy denials
-lhctl conv inspect e358 --step=1         # Deep-dive into a single step
-lhctl conv inspect e358 --json           # JSON output for scripting
-lhctl conv inspect e358 --top=5          # Show top 5 largest messages
+lhctl conv inspect <id>                  # Overview with size analysis
+lhctl conv inspect <id> --steps          # Full step trace with paths
+lhctl conv inspect <id> --errors         # Only errors and policy denials
+lhctl conv inspect <id> --step=1         # Deep-dive into a single step
+lhctl conv inspect <id> --json           # JSON output for scripting
+lhctl conv inspect <id> --top=5          # Show top 5 largest messages
 ```
-
-For subagent conversations, inspect also shows a **🔗 Agent Lineage** section:
-
-```
-🔗 Agent Lineage:
-  Parent:     253aacfb-6bb2-42ad-86f8-a46da00bd159
-  Role:       File Analyzer
-  Type:       research
-  Depth:      1
-```
-
-#### Default output
-
-- **Message table** with size, cumulative bytes, and tool call info
-- **Large result warnings**: ⚠️ for >5KB, 🔴 LARGE for >20KB
-- **Top N largest messages** — immediately shows which tool results bloat context
-- **Context breakdown** — bytes by role (user/model/tool call/tool result)
-
-#### `--steps` — Full tool args and error details
-
-Shows full file paths (not basenames), error messages, and status indicators:
-
-```
- #    Tool            Path/Args                                                   Size  Status
-────────────────────────────────────────────────────────────────────────────────────────────────────
- 0    (user prompt)                                                            1,934 B
- 1    view_file       /home/user/.divmora/localharness/knowledge/bolt.md        133B
- 2      └─ result                                                                  62B  ❌ ERROR
-                      Error: Permission denied: Denied by policy 'workspace_only'.
- 3    view_file       /home/user/project/.zenith/bolt.md                            68B
- 4      └─ result                                                              3,860 B  ✅
-```
-
-#### `--step=N` — Deep-dive into a single step
-
-Dumps full args and result content for one step:
-
-```
-Step 1 — model → view_file
-────────────────────────────────────────────────────────────
-  Role:      model
-  Size:      133B
-  Tool:      view_file
-  Path:      /home/user/.divmora/localharness/knowledge/.../bolt.md
-
-  Args:
-    path:                /home/user/.divmora/localharness/knowledge/.../bolt.md
-```
-
-#### `--errors` — Error-only view
-
-Quick filter for policy denials, tool failures, etc.:
-
-```
- #    Tool            Path                                                Error
-────────────────────────────────────────────────────────────────────────────────────────────────────
- 2    view_file       /home/user/.divmora/localharness/knowledge/...    Permission denied: Denied by policy 'workspace_...'
- 4    create_file     /home/user/project/.zenith/bolt.md                   Error: create_file: file already exists
-```
-
-#### `--json` — Machine-readable output
-
-Each message includes `tool_args`, `error_text`, `is_error`, `full_path`, and `timestamp` fields:
-
-```bash
-# Find all errors
-lhctl conv inspect <id> --json | jq '.messages[] | select(.is_error)'
-
-# Find all file paths accessed
-lhctl conv inspect <id> --json | jq '.messages[] | select(.full_path) | .full_path'
-
-# Find messages over 10KB
-lhctl conv inspect <id> --json | jq '.messages[] | select(.size_bytes > 10000)'
-```
-
-## Global Flags
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--data-dir=<path>` | Override data directory | `~/.divmora/localharness/` |
-
-## Debugging Workflows
-
-### Finding token-heavy conversations
-
-```bash
-lhctl conv list
-lhctl conv inspect <id>          # See size breakdown
-lhctl conv inspect <id> --steps  # Find which tool calls are large
-```
-
-### Diagnosing policy denials
-
-```bash
-lhctl conv inspect <id> --errors    # See all denied/failed steps
-lhctl conv inspect <id> --step=2    # Deep-dive into the denial
-```
-
-### Analyzing tool result bloat
-
-The cumulative column in the inspect output shows how context grows message-by-message.
-Look for sudden jumps — those are large tool results that could benefit from truncation.
-
-## Data Sources
-
-`lhctl` reads from these paths (all read-only):
-
-| Path | Content |
-|------|---------|
-| `~/.divmora/localharness/conversations/<uuid>.pb` | `ConversationState` protobuf (root + subagents) |
-| `~/.divmora/localharness/brain/<uuid>/` | Artifacts, traces, logs (flat — all agents at same level) |
 
 ### `conversation tree` (alias: `conv tree`)
 
-Visualize the agent family tree for any conversation (works from root or child):
+Visualize the subagent hierarchy tree:
 
 ```bash
-lhctl conv tree 253aacfb              # From root
-lhctl conv tree 30aef7a0              # From child — walks up to find root
+lhctl conv tree <id>
 ```
-
-Output:
-```
-🌳 Agent Tree (root: 253aacfb)
-────────────────────────────────────────────────────────────────────────────────
-🤖 253aacfb [root] (8 msgs, ✅)
-🔹 30aef7a0 [research: File Analyzer] (d1, 4 msgs, ✅) ◀
-────────────────────────────────────────────────────────────────────────────────
-
-Agents: 2 | Max depth: 1
-```
-
-The `◀` marker shows which conversation you queried. Multi-level trees render with box-drawing connectors.
-
-## Debugging Workflows
-
-### Inspecting subagent conversations
-
-```bash
-lhctl conv list --recent=10             # Spot subagents via Agent column
-lhctl conv tree <any-id>                # See the full agent hierarchy
-lhctl conv inspect <subagent-id>        # Inspect with lineage context
-```
-
-## Future Commands (Planned)
-
-- `lhctl conversation traces <id>` — Show per-API-call trace breakdown
-- `lhctl conversation export <id> --format=markdown` — Export as readable markdown
 
 ### `conversation trace` (alias: `conv trace`)
 
-Real-time tool call timeline for a conversation:
+Real-time tool call timeline:
 
 ```bash
 lhctl conv trace <id>                    # Show tool call timeline
 lhctl conv trace <id> --watch            # Live tail (updates as agent runs)
-lhctl conv trace <id> --commands         # Show full command output
+lhctl conv trace <id> --commands         # Show full command lines
 ```
 
-Output:
+---
+
+## Shell Autocompletion
+
+Generate autocompletion scripts for your shell:
+
+```bash
+# Bash
+lhctl completion bash > /etc/bash_completion.d/lhctl
+
+# Zsh
+lhctl completion zsh > ~/.zshrc.d/lhctl.zsh
+
+# Fish
+lhctl completion fish > ~/.config/fish/completions/lhctl.fish
+
+# PowerShell
+lhctl completion powershell | Out-String | Invoke-Expression
 ```
-Conversation: 55084b1a-ad45-40cb-badb-c445358f9335
-Steps: 26 | Duration: 2m 1s
-
- Step   Tool                       Detail                                              Latency
-────────────────────────────────────────────────────────────────────────────────────────────────────
-     1  🔎 find_file                pattern=*bolt.md                                    2.5s
-     3  📄 view_file                …/fms/.zenith/bolt.md                               1.7s
-     5  🔍 grep_search              "Cache::remember" in …/divmora/ifmists/fms        3.9s
-    45  ✏️ replace_file_content     …/Console/Commands/GeneratePaoCheque…               5.5s
-    47  ⚙️ run_command              php -l api/app/Console/Commands/Generate…           2.8s
-    51  ✅ finish                   ✅                                                   3.1s
-────────────────────────────────────────────────────────────────────────────────────────────────────
-
-📊 26 API calls | 1 writes | total latency: 106.7s
-   9× view_file, 7× grep_search, 5× run_command, 3× find_file, 1× replace_file_content, 1× finish
-```
-
-The trace reads from `~/.divmora/localharness/brain/<uuid>/.system_generated/traces/` which contains
-per-step JSON files with request/response metadata, token usage, and latency.

@@ -244,6 +244,69 @@ func (s *GlobalSettings) IsWorkspaceTrusted(dir string) bool {
 	return false
 }
 
+// AddTrustedWorkspace adds a directory to the trusted list and saves to settings.json.
+func AddTrustedWorkspace(dir string, logger *slog.Logger) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "invalid workspace path")
+	}
+
+	settings := LoadGlobalSettings(logger)
+	if settings.IsWorkspaceTrusted(absDir) {
+		return nil
+	}
+
+	settings.TrustedWorkspaces = append(settings.TrustedWorkspaces, absDir)
+	return SaveGlobalSettings(settings, logger)
+}
+
+// RemoveTrustedWorkspace removes a directory from the trusted list and saves to settings.json.
+func RemoveTrustedWorkspace(dir string, logger *slog.Logger) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "invalid workspace path")
+	}
+
+	settings := LoadGlobalSettings(logger)
+	var updated []string
+	for _, t := range settings.TrustedWorkspaces {
+		absT, err := filepath.Abs(t)
+		if err == nil && absT != absDir {
+			updated = append(updated, t)
+		}
+	}
+	settings.TrustedWorkspaces = updated
+	return SaveGlobalSettings(settings, logger)
+}
+
+// SaveGlobalSettings writes settings to ~/.divmora/config/settings.json.
+func SaveGlobalSettings(settings *GlobalSettings, logger *slog.Logger) error {
+	configDir, err := DivmoraConfigDir()
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot resolve config dir")
+	}
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot create config dir")
+	}
+
+	filePath := filepath.Join(configDir, "settings.json")
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot marshal settings")
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot write settings file")
+	}
+
+	if logger != nil {
+		logger.Info("saved global settings", "path", filePath, "trusted_workspaces", len(settings.TrustedWorkspaces))
+	}
+	return nil
+}
+
+
 // LiteLLMEndpoint represents a single LiteLLM server configuration.
 type LiteLLMEndpoint struct {
 BaseURL      string `json:"baseUrl"`

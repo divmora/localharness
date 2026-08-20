@@ -691,6 +691,57 @@ func (c *LocalConnection) SendToolResult(ctx context.Context, stepID, toolName, 
 	return nil
 }
 
+// Interrupt sends an InterruptRequest to the localharness server to pause execution.
+func (c *LocalConnection) Interrupt(ctx context.Context) error {
+	msg := &pb.ClientMessage{
+		Payload: &pb.ClientMessage_Interrupt{
+			Interrupt: &pb.InterruptRequest{},
+		},
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal InterruptRequest: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.running {
+		return fmt.Errorf("connection is not running")
+	}
+
+	if err := c.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		return fmt.Errorf("failed to write InterruptRequest to WebSocket: %w", err)
+	}
+	return nil
+}
+
+// Cancel sends a CancelRequest to the localharness server to abort the turn immediately.
+func (c *LocalConnection) Cancel(ctx context.Context) error {
+	msg := &pb.ClientMessage{
+		Payload: &pb.ClientMessage_Cancel{
+			Cancel: &pb.CancelRequest{},
+		},
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal CancelRequest: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.running {
+		return fmt.Errorf("connection is not running")
+	}
+
+	if err := c.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		return fmt.Errorf("failed to write CancelRequest to WebSocket: %w", err)
+	}
+	return nil
+}
+
+
 // Close shuts down the connection with graceful multi-phase teardown.
 //
 // Phase 1: Close WebSocket cleanly (sends close frame)

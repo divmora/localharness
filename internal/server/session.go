@@ -48,6 +48,13 @@ type Session struct {
 	turnWg                sync.WaitGroup                      // Tracks in-flight handleUserMessage goroutines
 	earlyUserMessages     []*pb.UserMessage                   // User messages received before engine initialization
 	earlyUserMessagesMu   sync.Mutex                          // Protects earlyUserMessages
+	wsMgr                 *workspace.Manager
+	yoloMode              bool
+	isRestricted          bool
+	isDaemon              bool
+	detached              bool
+	ringBuffer            *EventRingBuffer
+	approvalQueue         *ApprovalQueue
 }
 
 // NewSession creates a new session for a WebSocket connection.
@@ -60,6 +67,8 @@ func NewSession(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *sl
 		pendingPermissions: make(map[string]chan *pb.PermissionResponse),
 		pendingQuestions:   make(map[string]chan *pb.QuestionResponse),
 		earlyUserMessages:  make([]*pb.UserMessage, 0),
+		ringBuffer:         NewEventRingBuffer(200),
+		approvalQueue:      NewApprovalQueue(),
 	}
 }
 
@@ -143,6 +152,11 @@ func (s *Session) Run() {
 				return
 			case msg, ok := <-clientMsgs:
 				if !ok {
+					if s.isDaemon {
+						s.Detach()
+						clientMsgs = nil
+						continue
+					}
 					s.cleanup()
 					return
 				}
@@ -163,6 +177,11 @@ func (s *Session) Run() {
 				return
 			case msg, ok := <-clientMsgs:
 				if !ok {
+					if s.isDaemon {
+						s.Detach()
+						clientMsgs = nil
+						continue
+					}
 					s.cleanup()
 					return
 				}
@@ -245,6 +264,10 @@ func (s *Session) dispatchClientMessage(ctx context.Context, msg *pb.ClientMessa
 		s.handleInterrupt()
 	case *pb.ClientMessage_Resume:
 		s.handleResume(payload.Resume)
+	case *pb.ClientMessage_WorkspaceRequest:
+		s.handleWorkspaceRequest(ctx, payload.WorkspaceRequest)
+	case *pb.ClientMessage_SetYoloMode:
+		s.handleSetYoloMode(payload.SetYoloMode)
 	default:
 		s.logger.Warn("unknown client message type")
 	}
@@ -343,6 +366,25 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		s.sendError("INIT_ERROR", fmt.Sprintf("workspace error: %v", err), true)
 		return
 	}
+	s.wsMgr = wsMgr
+	s.yoloMode = cfg.YoloMode
+
+	// Workspace trust verification
+	settings := config.LoadGlobalSettings(s.logger)
+	allTrusted := true
+	for _, dir := range workspaceDirs {
+		if !settings.IsWorkspaceTrusted(dir) {
+			allTrusted = false
+			break
+		}
+	}
+	if cfg.Trusted {
+		allTrusted = true
+	}
+	s.isRestricted = !allTrusted
+	if s.isRestricted {
+		s.logger.Warn("workspace is untrusted: operating in restricted read-only mode")
+	}
 
 	// Set up conversation manager — always uses the binary's resolved data dir
 	appDataDir := s.serverCfg.AppDataDir
@@ -401,6 +443,12 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 	if builtinCfg == nil {
 		builtinCfg = config.DefaultBuiltinTools()
 	}
+	if s.isRestricted {
+		builtinCfg.CreateFile = false
+		builtinCfg.EditFile = false
+		builtinCfg.RunCommand = false
+		builtinCfg.ManageTask = false
+	}
 	tools.RegisterBuiltinTools(toolRegistry, builtinCfg)
 	s.toolRegistry = toolRegistry
 
@@ -434,51 +482,53 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 
 	// Set up MCP servers (global config + agent-level merge)
 	var mcpMgr *mcpbridge.Manager
-	globalMcpServers := config.LoadGlobalMcpConfig(s.logger)
-	mergedMcpServers := config.MergeMcpConfigs(globalMcpServers, cfg.McpServers)
+	if !s.isRestricted {
+		globalMcpServers := config.LoadGlobalMcpConfig(s.logger)
+		mergedMcpServers := config.MergeMcpConfigs(globalMcpServers, cfg.McpServers)
 
-	// Auto-inject Playwright MCP server when browser capability is enabled
-	if cfg.BuiltinTools != nil && cfg.BuiltinTools.Browser {
-		if _, err := exec.LookPath("npx"); err != nil {
-			s.logger.Warn("Browser capability enabled but npx not found in PATH — install Node.js to use browser tools")
-		} else {
-			// Check if user already configured a "playwright" MCP server
-			hasPlaywright := false
-			for _, srv := range mergedMcpServers {
-				if srv.Name == "playwright" {
-					hasPlaywright = true
-					break
+		// Auto-inject Playwright MCP server when browser capability is enabled
+		if cfg.BuiltinTools != nil && cfg.BuiltinTools.Browser {
+			if _, err := exec.LookPath("npx"); err != nil {
+				s.logger.Warn("Browser capability enabled but npx not found in PATH — install Node.js to use browser tools")
+			} else {
+				// Check if user already configured a "playwright" MCP server
+				hasPlaywright := false
+				for _, srv := range mergedMcpServers {
+					if srv.Name == "playwright" {
+						hasPlaywright = true
+						break
+					}
 				}
-			}
-			if !hasPlaywright {
-				playwrightCfg := &pb.McpServerConfig{
-					Name: "playwright",
-					Transport: &pb.McpServerConfig_Stdio{
-						Stdio: &pb.McpStdioTransport{
-							Command: "npx",
-							Args:    []string{"-y", "@playwright/mcp@latest"},
+				if !hasPlaywright {
+					playwrightCfg := &pb.McpServerConfig{
+						Name: "playwright",
+						Transport: &pb.McpServerConfig_Stdio{
+							Stdio: &pb.McpStdioTransport{
+								Command: "npx",
+								Args:    []string{"-y", "@playwright/mcp@latest"},
+							},
 						},
-					},
+					}
+					mergedMcpServers = append(mergedMcpServers, playwrightCfg)
+					s.logger.Info("auto-injecting Playwright MCP server for browser capability")
 				}
-				mergedMcpServers = append(mergedMcpServers, playwrightCfg)
-				s.logger.Info("auto-injecting Playwright MCP server for browser capability")
 			}
 		}
-	}
 
-	if len(mergedMcpServers) > 0 {
-		mcpMgr = mcpbridge.NewManager(s.logger)
-		if err := mcpMgr.Connect(ctx, mergedMcpServers); err != nil {
-			s.sendError("INIT_ERROR", fmt.Sprintf("MCP connection error: %v", err), false)
-			// Non-fatal: continue without MCP tools
-			s.logger.Error("MCP connection failed, continuing without MCP tools", "error", err)
-			mcpMgr = nil
-		} else {
-			s.mcpMgr = mcpMgr
-			s.logger.Info("MCP servers connected",
-				"servers", mcpMgr.ServerCount(),
-				"tools", mcpMgr.ToolCount(),
-			)
+		if len(mergedMcpServers) > 0 {
+			mcpMgr = mcpbridge.NewManager(s.logger)
+			if err := mcpMgr.Connect(ctx, mergedMcpServers); err != nil {
+				s.sendError("INIT_ERROR", fmt.Sprintf("MCP connection error: %v", err), false)
+				// Non-fatal: continue without MCP tools
+				s.logger.Error("MCP connection failed, continuing without MCP tools", "error", err)
+				mcpMgr = nil
+			} else {
+				s.mcpMgr = mcpMgr
+				s.logger.Info("MCP servers connected",
+					"servers", mcpMgr.ServerCount(),
+					"tools", mcpMgr.ToolCount(),
+				)
+			}
 		}
 	}
 
@@ -514,9 +564,13 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 
 	// Discover skills and plugins from filesystem (global + workspace)
 	// then merge with ADK-injected definitions (SDK > workspace > global)
-	adkSkills := protoSkillsToEngine(cfg.Skills)
-	adkPlugins := protoPluginsToEngine(cfg.Plugins)
-	allSkills, allPlugins := discovery.DiscoverAll(appDataDir, workspaceDirs, adkSkills, adkPlugins, s.logger)
+	var allSkills []engine.SkillDef
+	var allPlugins []engine.PluginDef
+	if !s.isRestricted {
+		adkSkills := protoSkillsToEngine(cfg.Skills)
+		adkPlugins := protoPluginsToEngine(cfg.Plugins)
+		allSkills, allPlugins = discovery.DiscoverAll(appDataDir, workspaceDirs, adkSkills, adkPlugins, s.logger)
+	}
 
 	// Create project registry for workspace → project UUID mapping (Knowledge Items)
 	projectRegistry := engine.NewProjectRegistry(appDataDir)
@@ -561,7 +615,9 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		NotifyCh:              notifyCh,
 		ProjectRegistry:       projectRegistry,
 		ConversationManager:   convMgr,
+		YoloMode:              s.yoloMode,
 	})
+
 
 	// Store notification channel on session for auto-wake in Run() select loop
 	s.notifyCh = notifyCh
@@ -753,6 +809,34 @@ func (s *Session) handleToolResult(result *pb.ToolResult) {
 // It creates a channel, stores it in pendingPermissions, and blocks until
 // the SDK client sends back a PermissionResponse (or timeout/context cancellation).
 func (s *Session) permissionHandler(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+	if s.yoloMode {
+		s.logger.Info("yolo mode active: auto-approving permission request", "tool", req.ToolName, "request_id", req.RequestId)
+		return true, "", nil
+	}
+
+	s.mu.Lock()
+	isDetached := s.detached || s.conn == nil
+	s.mu.Unlock()
+
+	if isDetached {
+		s.logger.Info("client detached: queuing pending approval", "tool", req.ToolName, "request_id", req.RequestId)
+		respCh := s.approvalQueue.Enqueue(req.RequestId, req.ToolName, req.ArgsSummary, req.DiffPreview)
+		select {
+		case resp, ok := <-respCh:
+			if !ok || resp == nil {
+				return false, "approval cancelled or queue cleared", nil
+			}
+			return resp.Approved, resp.DenialReason, nil
+		case <-ctx.Done():
+			s.approvalQueue.Resolve(req.RequestId, &pb.PermissionResponse{
+				RequestId:    req.RequestId,
+				Approved:     false,
+				DenialReason: "context cancelled",
+			})
+			return false, "cancelled", ctx.Err()
+		}
+	}
+
 	ch := make(chan *pb.PermissionResponse, 1)
 
 	s.pendingPermissionsMu.Lock()
@@ -780,6 +864,11 @@ func (s *Session) permissionHandler(ctx context.Context, req *pb.ActionPermissio
 // to the pending channel that the engine's permissionHandler is blocking on.
 func (s *Session) handlePermissionResponse(resp *pb.PermissionResponse) {
 	s.logger.Info("received permission response", "request_id", resp.RequestId, "approved", resp.Approved)
+
+	// First try resolving from approvalQueue
+	if s.approvalQueue.Resolve(resp.RequestId, resp) {
+		return
+	}
 
 	s.pendingPermissionsMu.Lock()
 	ch, ok := s.pendingPermissions[resp.RequestId]
@@ -1210,6 +1299,10 @@ func (s *Session) onTrajectory(state *pb.TrajectoryState) {
 // ─── Wire helpers ───────────────────────────────────────────────────────
 
 func (s *Session) sendServerMessage(msg *pb.ServerMessage) {
+	if s.ringBuffer != nil {
+		s.ringBuffer.Push(msg)
+	}
+
 	data, err := proto.Marshal(msg)
 	if err != nil {
 		s.logger.Error("protobuf marshal error", "error", err)
@@ -1219,8 +1312,268 @@ func (s *Session) sendServerMessage(msg *pb.ServerMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := s.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-		s.logger.Error("WebSocket write error", "error", err)
+	if s.conn != nil && !s.detached {
+		if err := s.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+			s.logger.Error("WebSocket write error", "error", err)
+		}
+	}
+}
+
+// SetDaemon sets the daemon mode flag.
+func (s *Session) SetDaemon(d bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.isDaemon = d
+}
+
+// Attach connects a new client WebSocket connection to an active session.
+func (s *Session) Attach(conn *websocket.Conn) {
+	s.mu.Lock()
+	s.conn = conn
+	s.detached = false
+
+	// Replay ring buffer
+	replayed := s.ringBuffer.All()
+	for _, msg := range replayed {
+		data, err := proto.Marshal(msg)
+		if err == nil {
+			_ = conn.WriteMessage(websocket.BinaryMessage, data)
+		}
+	}
+
+	// Emit ReplayComplete
+	replayComplete := &pb.ServerMessage{
+		Payload: &pb.ServerMessage_ReplayComplete{
+			ReplayComplete: &pb.ReplayComplete{
+				EventCount: int32(len(replayed)),
+			},
+		},
+	}
+	data, _ := proto.Marshal(replayComplete)
+	_ = conn.WriteMessage(websocket.BinaryMessage, data)
+
+	// Emit any pending approvals from queue
+	pendingList := s.approvalQueue.List()
+	for _, p := range pendingList {
+		permMsg := &pb.ServerMessage{
+			Payload: &pb.ServerMessage_StepUpdate{
+				StepUpdate: &pb.StepUpdate{
+					State:  pb.StepUpdate_STATE_WAITING,
+					Target: pb.StepUpdate_TARGET_USER,
+					Action: &pb.StepUpdate_PermissionRequest{
+						PermissionRequest: &pb.ActionPermissionRequest{
+							RequestId:   p.RequestID,
+							ToolName:    p.ToolName,
+							ArgsSummary: p.Description,
+							DiffPreview: p.DiffPreview,
+						},
+					},
+				},
+			},
+		}
+		pData, _ := proto.Marshal(permMsg)
+		_ = conn.WriteMessage(websocket.BinaryMessage, pData)
+	}
+	s.mu.Unlock()
+
+	// Launch reader for this attached client
+	go func() {
+		clientMsgs := make(chan *pb.ClientMessage, 10)
+		go s.readLoop(clientMsgs)
+		for msg := range clientMsgs {
+			s.dispatchClientMessage(context.Background(), msg)
+		}
+		s.Detach()
+	}()
+}
+
+// Detach disconnects the current client without stopping background execution.
+func (s *Session) Detach() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.detached = true
+	s.conn = nil
+	s.logger.Info("client detached, background execution continues")
+}
+
+func (s *Session) handleSetYoloMode(req *pb.SetYoloModeRequest) {
+	s.yoloMode = req.Enabled
+	s.logger.Info("yolo mode toggled", "enabled", s.yoloMode)
+	if s.engine != nil {
+		s.engine.SetYoloMode(s.yoloMode)
+	}
+	if s.yoloMode {
+		for _, p := range s.approvalQueue.List() {
+			s.approvalQueue.Resolve(p.RequestID, &pb.PermissionResponse{
+				RequestId: p.RequestID,
+				Approved:  true,
+			})
+		}
+	}
+}
+
+
+func (s *Session) handleWorkspaceRequest(ctx context.Context, req *pb.WorkspaceRequest) {
+	switch req.Action {
+	case "list":
+		var currentWorkspaces []*pb.Workspace
+		if s.engine != nil {
+			for _, dir := range s.engine.Workspaces() {
+				currentWorkspaces = append(currentWorkspaces, &pb.Workspace{
+					Directory: dir,
+					Name:      filepath.Base(dir),
+				})
+			}
+		}
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_WorkspaceResponse{
+				WorkspaceResponse: &pb.WorkspaceResponse{
+					Success:    true,
+					Message:    fmt.Sprintf("Loaded %d workspace(s)", len(currentWorkspaces)),
+					Workspaces: currentWorkspaces,
+				},
+			},
+		})
+
+	case "add":
+		if req.Path == "" {
+			s.sendServerMessage(&pb.ServerMessage{
+				Payload: &pb.ServerMessage_WorkspaceResponse{
+					WorkspaceResponse: &pb.WorkspaceResponse{
+						Success: false,
+						Message: "workspace path is required",
+					},
+				},
+			})
+			return
+		}
+		absPath, err := filepath.Abs(req.Path)
+		if err != nil {
+			s.sendServerMessage(&pb.ServerMessage{
+				Payload: &pb.ServerMessage_WorkspaceResponse{
+					WorkspaceResponse: &pb.WorkspaceResponse{
+						Success: false,
+						Message: fmt.Sprintf("invalid workspace path: %v", err),
+					},
+				},
+			})
+			return
+		}
+
+		if err := s.wsMgr.AddWorkspace(absPath); err != nil {
+			s.sendServerMessage(&pb.ServerMessage{
+				Payload: &pb.ServerMessage_WorkspaceResponse{
+					WorkspaceResponse: &pb.WorkspaceResponse{
+						Success: false,
+						Message: fmt.Sprintf("failed to add workspace: %v", err),
+					},
+				},
+			})
+			return
+		}
+
+		_ = config.AddTrustedWorkspace(absPath, s.logger)
+
+		if s.engine != nil {
+			s.engine.AddWorkspace(absPath, engine.WorkspaceInfo{
+				Directory:  absPath,
+				CorpusName: req.CorpusName,
+			})
+		}
+
+		if s.conv != nil && s.conv.State != nil && s.conv.State.Config != nil {
+			s.conv.State.Config.Workspaces = append(s.conv.State.Config.Workspaces, &pb.Workspace{
+				Directory:  absPath,
+				Name:       req.Name,
+				CorpusName: req.CorpusName,
+			})
+			_ = s.conv.SaveAll()
+		}
+
+		var currentWorkspaces []*pb.Workspace
+		if s.engine != nil {
+			for _, dir := range s.engine.Workspaces() {
+				currentWorkspaces = append(currentWorkspaces, &pb.Workspace{
+					Directory: dir,
+					Name:      filepath.Base(dir),
+				})
+			}
+		}
+
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_WorkspaceResponse{
+				WorkspaceResponse: &pb.WorkspaceResponse{
+					Success:    true,
+					Message:    fmt.Sprintf("Added workspace %s", absPath),
+					Workspaces: currentWorkspaces,
+				},
+			},
+		})
+
+	case "remove":
+		if req.Path == "" {
+			s.sendServerMessage(&pb.ServerMessage{
+				Payload: &pb.ServerMessage_WorkspaceResponse{
+					WorkspaceResponse: &pb.WorkspaceResponse{
+						Success: false,
+						Message: "workspace path is required",
+					},
+				},
+			})
+			return
+		}
+		absPath, err := filepath.Abs(req.Path)
+		if err != nil {
+			absPath = req.Path
+		}
+
+		if err := s.wsMgr.RemoveWorkspace(absPath); err != nil {
+			s.sendServerMessage(&pb.ServerMessage{
+				Payload: &pb.ServerMessage_WorkspaceResponse{
+					WorkspaceResponse: &pb.WorkspaceResponse{
+						Success: false,
+						Message: fmt.Sprintf("failed to remove workspace: %v", err),
+					},
+				},
+			})
+			return
+		}
+
+		if s.engine != nil {
+			s.engine.RemoveWorkspace(absPath)
+		}
+
+		if s.conv != nil && s.conv.State != nil && s.conv.State.Config != nil {
+			var updated []*pb.Workspace
+			for _, ws := range s.conv.State.Config.Workspaces {
+				if ws.Directory != absPath {
+					updated = append(updated, ws)
+				}
+			}
+			s.conv.State.Config.Workspaces = updated
+			_ = s.conv.SaveAll()
+		}
+
+
+		var currentWorkspaces []*pb.Workspace
+		if s.engine != nil {
+			for _, dir := range s.engine.Workspaces() {
+				currentWorkspaces = append(currentWorkspaces, &pb.Workspace{
+					Directory: dir,
+					Name:      filepath.Base(dir),
+				})
+			}
+		}
+
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_WorkspaceResponse{
+				WorkspaceResponse: &pb.WorkspaceResponse{
+					Success:    true,
+					Message:    fmt.Sprintf("Removed workspace %s", absPath),
+					Workspaces: currentWorkspaces,
+				},
+			},
+		})
 	}
 }
 

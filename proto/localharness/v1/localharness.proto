@@ -48,6 +48,8 @@ message ClientMessage {
     QuestionResponse question_response = 6;
     InterruptRequest interrupt = 7;
     ResumeRequest resume = 8;
+    WorkspaceRequest workspace_request = 9;
+    SetYoloModeRequest set_yolo_mode = 10;
   }
 }
 
@@ -120,6 +122,8 @@ message ServerMessage {
     TrajectoryState trajectory_state = 3;
     ErrorEvent error = 4;
     TraceEvent trace_event = 5;
+    WorkspaceResponse workspace_response = 6;
+    ReplayComplete replay_complete = 7;
   }
 }
 
@@ -313,6 +317,7 @@ message ActionWriteToFile {
 
   // Result
   bool created = 10;
+  string diff_block = 11;
 }
 
 // ActionReplaceFileContent performs targeted edits on an existing file.
@@ -632,6 +637,7 @@ message ActionPermissionRequest {
   string args_json = 3;         // Full args for policy predicate evaluation
   string args_summary = 4;      // Human-readable summary for UIs
   string call_id = 5;           // LLM-assigned tool call ID
+  string diff_preview = 6;      // Unified diff preview for mutating operations
 }
 
 // PermissionResponse is sent by the SDK after evaluating its policies.
@@ -716,6 +722,12 @@ message HarnessConfig {
   // These are merged with auto-discovered AGENTS.md files from workspace roots
   // and rendered in the <user_rules> section of every user message.
   repeated UserRuleConfig user_rules = 26;
+
+  // YOLO mode bypasses all user confirmation/permission prompts
+  bool yolo_mode = 28;
+
+  // Workspace trust status. If false, restricted mode is applied.
+  bool trusted = 29;
 }
 
 // UserRuleConfig is an SDK-injected user rule with inline content.
@@ -1136,3 +1148,33 @@ message ActionSchedule {
   // Whether the schedule was created successfully.
   bool success = 11;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// WORKSPACE & RUNTIME CONTROL
+// ═══════════════════════════════════════════════════════════════════════
+
+// WorkspaceRequest requests dynamic modification or listing of workspaces.
+message WorkspaceRequest {
+  string action = 1;      // "add", "remove", "list"
+  string path = 2;        // Directory path for add/remove
+  string name = 3;        // Optional human-readable name
+  string corpus_name = 4; // Optional semantic search corpus identifier
+}
+
+// WorkspaceResponse returns the updated list of workspaces.
+message WorkspaceResponse {
+  bool success = 1;
+  string message = 2;
+  repeated Workspace workspaces = 3;
+}
+
+// SetYoloModeRequest dynamically toggles YOLO mode (bypassing permissions).
+message SetYoloModeRequest {
+  bool enabled = 1;
+}
+
+// ReplayComplete signals that all historical buffered events have been replayed.
+message ReplayComplete {
+  int32 event_count = 1;
+}
+

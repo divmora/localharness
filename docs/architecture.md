@@ -3,27 +3,32 @@
 ## System Overview
 
 ```
-SDK/CLI Client ←→ WebSocket + Protobuf ←→ LocalHarness Binary (Go)
-                                                       ├── Built-in Tools
-                                                       │   ├── view_file
-                                                       │   ├── write_to_file
-                                                       │   ├── replace_file_content / multi_replace_file_content
-                                                       │   ├── list_dir
-                                                       │   ├── grep_search (ripgrep)
-                                                       │   ├── find_file
-                                                       │   ├── run_command (sync, background, persistent)
-                                                       │   ├── manage_task
-                                                       │   ├── finish
-                                                       │   ├── invoke_subagent (child trajectories)
-                                                       │   ├── search_web / read_url_content
-                                                       │   ├── schedule (one-shot timers, cron)
-                                                       │   ├── ask_question (interactive MCQ)
-                                                       │   └── browser (Playwright via MCP)
-                                                       ├── Engine (agentic loop)
-                                                       ├── LLM Providers (Gemini, OpenAI)
-                                                       ├── Background Tasks & Persistent Terminals
-                                                       ├── Conversation Persistence
-                                                       └── LLM Call Tracing
+lhctl (Interactive TUI / CLI) / SDK ◄── WebSocket + Protobuf ──► LocalHarness Binary / Daemon (Go)
+                                                                 ├── Dual Execution Modes
+                                                                 │   ├── Ephemeral Subprocess (Stdin/Stdout pipe handshake)
+                                                                 │   └── Persistent Background Daemon (Unix socket + TCP)
+                                                                 ├── Interactive TUI (Bubbletea + Lipgloss)
+                                                                 │   ├── Live token streaming & Markdown rendering
+                                                                 │   ├── Animated tool spinners & duration tracking
+                                                                 │   ├── Unified diff approval modal & YOLO mode
+                                                                 │   ├── Subagent hierarchy tree & transcript drill-down
+                                                                 │   └── @file autocompletion across workspaces
+                                                                 ├── Multi-Client Attach / Detach
+                                                                 │   ├── EventRingBuffer (historical event replay)
+                                                                 │   └── ApprovalQueue (pending approvals buffer)
+                                                                 ├── Workspace Trust & Dynamic Workspaces
+                                                                 │   ├── First-time trust prompts (~/.divmora/config/settings.json)
+                                                                 │   └── /workspace add, remove, list with rule reloading
+                                                                 ├── Built-in Tools
+                                                                 │   ├── view_file, write_to_file, replace_file_content
+                                                                 │   ├── list_dir, grep_search, find_file
+                                                                 │   ├── run_command, manage_task, finish
+                                                                 │   ├── invoke_subagent, define_subagent, manage_subagents
+                                                                 │   ├── search_web, read_url_content, schedule
+                                                                 │   └── knowledge_write/replace/delete, browser (Playwright)
+                                                                 ├── Agentic Engine (LLM ↔ Tools loop with interrupt/resume)
+                                                                 ├── LLM Providers (OpenAI-compatible with jittered backoff)
+                                                                 └── Conversation & Transcript Persistence
 ```
 
 ## Connection Protocol

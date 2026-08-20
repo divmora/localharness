@@ -1005,3 +1005,31 @@ func workspaceDirs(defs []WorkspaceDef) []string {
 	}
 	return dirs
 }
+
+// Workspaces returns the list of configured workspaces.
+func (a *Agent) Workspaces() []WorkspaceDef {
+	return a.config.Workspaces
+}
+
+
+// AddWorkspace adds a workspace definition to the agent configuration.
+func (a *Agent) AddWorkspace(ws WorkspaceDef) {
+	a.config.Workspaces = append(a.config.Workspaces, ws)
+}
+
+// Interrupt sends an interrupt request to pause current execution.
+func (a *Agent) Interrupt(ctx context.Context) error {
+	if a.conn != nil {
+		return a.conn.Interrupt(ctx)
+	}
+	return fmt.Errorf("agent not connected")
+}
+
+// Cancel sends a cancel request to abort current turn.
+func (a *Agent) Cancel(ctx context.Context) error {
+	if a.conn != nil {
+		return a.conn.Cancel(ctx)
+	}
+	return fmt.Errorf("agent not connected")
+}
+

@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/divmora/localharness/internal/errors"
 )
 
 // Manager validates file paths against configured workspace directories.
 type Manager struct {
+	mu           sync.RWMutex
 	workspaces   []string // Absolute paths of allowed workspace directories
 	allowedPaths []string // Additional absolute paths allowed beyond workspaces (e.g., brain dir)
 }
@@ -20,31 +22,72 @@ type Manager struct {
 func NewManager(dirs []string) (*Manager, error) {
 	m := &Manager{}
 	for _, d := range dirs {
-		abs, err := filepath.Abs(d)
-		if err != nil {
-			return nil, errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
-				"invalid workspace path").
-				WithContext("path", d).
-				WithContext("component", "workspace")
+		if err := m.AddWorkspace(d); err != nil {
+			return nil, err
 		}
-		// Verify directory exists
-		info, err := os.Stat(abs)
-		if err != nil {
-			return nil, errors.Wrap(err, errors.ErrCodeFileNotFound,
-				"workspace directory not found").
-				WithContext("path", abs).
-				WithContext("component", "workspace")
-		}
-		if !info.IsDir() {
-			return nil, errors.New(errors.ErrCodeWorkspaceValidation,
-				"workspace path is not a directory").
-				WithContext("path", abs).
-				WithContext("component", "workspace")
-		}
-		m.workspaces = append(m.workspaces, abs)
 	}
 	return m, nil
 }
+
+// AddWorkspace dynamically adds a workspace directory to the manager.
+func (m *Manager) AddWorkspace(d string) error {
+	abs, err := filepath.Abs(d)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+			"invalid workspace path").
+			WithContext("path", d).
+			WithContext("component", "workspace")
+	}
+	// Verify directory exists
+	info, err := os.Stat(abs)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeFileNotFound,
+			"workspace directory not found").
+			WithContext("path", abs).
+			WithContext("component", "workspace")
+	}
+	if !info.IsDir() {
+		return errors.New(errors.ErrCodeWorkspaceValidation,
+			"workspace path is not a directory").
+			WithContext("path", abs).
+			WithContext("component", "workspace")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, ws := range m.workspaces {
+		if ws == abs {
+			return nil // already registered
+		}
+	}
+	m.workspaces = append(m.workspaces, abs)
+	return nil
+}
+
+// RemoveWorkspace removes a workspace directory from the manager.
+func (m *Manager) RemoveWorkspace(d string) error {
+	abs, err := filepath.Abs(d)
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+			"invalid workspace path").
+			WithContext("path", d).
+			WithContext("component", "workspace")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var updated []string
+	for _, ws := range m.workspaces {
+		if ws != abs {
+			updated = append(updated, ws)
+		}
+	}
+	m.workspaces = updated
+	return nil
+}
+
 
 // AddAllowedPath registers an additional directory that ValidatePath will accept.
 // This does not appear in Workspaces() — it is for internal paths like the
@@ -58,6 +101,8 @@ func (m *Manager) AddAllowedPath(path string) error {
 			WithContext("path", path).
 			WithContext("component", "workspace")
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.allowedPaths = append(m.allowedPaths, abs)
 	return nil
 }
@@ -66,6 +111,9 @@ func (m *Manager) AddAllowedPath(path string) error {
 // Relative paths are resolved against the first configured workspace.
 // Returns the cleaned absolute path if valid, or an error if not.
 func (m *Manager) ValidatePath(path string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	var abs string
 	if filepath.IsAbs(path) {
 		abs = filepath.Clean(path)
@@ -100,16 +148,25 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 	}
 
 	for _, ws := range m.workspaces {
-		if isSubPath(ws, resolved) {
+		resolvedWS, err := filepath.EvalSymlinks(ws)
+		if err != nil {
+			resolvedWS = ws
+		}
+		if isSubPath(ws, abs) || isSubPath(ws, resolved) || isSubPath(resolvedWS, resolved) || isSubPath(resolvedWS, abs) {
 			return abs, nil
 		}
 	}
 
 	for _, ap := range m.allowedPaths {
-		if isSubPath(ap, resolved) {
+		resolvedAP, err := filepath.EvalSymlinks(ap)
+		if err != nil {
+			resolvedAP = ap
+		}
+		if isSubPath(ap, abs) || isSubPath(ap, resolved) || isSubPath(resolvedAP, resolved) || isSubPath(resolvedAP, abs) {
 			return abs, nil
 		}
 	}
+
 
 	return "", errors.New(errors.ErrCodePathTraversal,
 		"path is outside all configured workspaces").
@@ -130,5 +187,10 @@ func isSubPath(parent, child string) bool {
 
 // Workspaces returns the list of configured workspace directories.
 func (m *Manager) Workspaces() []string {
-	return m.workspaces
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]string, len(m.workspaces))
+	copy(out, m.workspaces)
+	return out
 }
+

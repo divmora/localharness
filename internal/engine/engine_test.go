@@ -2241,3 +2241,99 @@ func TestIsAppDataDirPath_PrefixTrick(t *testing.T) {
 		t.Error("knowledge-evil should not match knowledge/ prefix — missing separator check")
 	}
 }
+
+func TestEngine_AddAndRemoveWorkspace(t *testing.T) {
+	ws1 := t.TempDir()
+	ws2 := t.TempDir()
+
+	// Write AGENTS.md to ws2
+	agentsRuleContent := "# AGENTS.md for ws2\nAlways write tests."
+	if err := os.WriteFile(filepath.Join(ws2, "AGENTS.md"), []byte(agentsRuleContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := NewEngine(Config{
+		Provider: &mockProvider{
+			responses: []*llm.GenerateResponse{
+				{Content: "done", FinishReason: "stop"},
+			},
+		},
+		Workspaces: []string{ws1},
+		WorkspaceInfos: []WorkspaceInfo{
+			{Directory: ws1, CorpusName: "corpus1"},
+		},
+		ConversationID: "conv-ws-test",
+		TrajectoryID:   "traj-ws-test",
+	})
+
+	if len(eng.Workspaces()) != 1 || eng.Workspaces()[0] != ws1 {
+		t.Fatalf("expected 1 initial workspace %s, got %v", ws1, eng.Workspaces())
+	}
+	if len(eng.msgCtx.Workspaces) != 1 {
+		t.Fatalf("expected 1 msgCtx workspace, got %d", len(eng.msgCtx.Workspaces))
+	}
+
+	// Dynamically add ws2
+	eng.AddWorkspace(ws2, WorkspaceInfo{Directory: ws2, CorpusName: "corpus2"})
+
+	if len(eng.Workspaces()) != 2 {
+		t.Fatalf("expected 2 workspaces after add, got %d", len(eng.Workspaces()))
+	}
+	if len(eng.msgCtx.Workspaces) != 2 {
+		t.Fatalf("expected 2 msgCtx.Workspaces after add, got %d", len(eng.msgCtx.Workspaces))
+	}
+	if len(eng.msgCtx.UserRules) == 0 {
+		t.Fatal("expected user rules to be loaded and synced to msgCtx.UserRules after adding ws2 with AGENTS.md")
+	}
+
+	// Dynamically remove ws2
+	eng.RemoveWorkspace(ws2)
+
+	if len(eng.Workspaces()) != 1 || eng.Workspaces()[0] != ws1 {
+		t.Fatalf("expected 1 workspace %s after remove, got %v", ws1, eng.Workspaces())
+	}
+	if len(eng.msgCtx.Workspaces) != 1 {
+		t.Fatalf("expected 1 msgCtx workspace after remove, got %d", len(eng.msgCtx.Workspaces))
+	}
+	if len(eng.msgCtx.UserRules) != 0 {
+		t.Fatalf("expected 0 user rules after removing ws2, got %d", len(eng.msgCtx.UserRules))
+	}
+}
+
+func TestEngine_PathScopedPermissions(t *testing.T) {
+	wsDir := t.TempDir()
+	appDataDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	wsFile := filepath.Join(wsDir, "inside.go")
+	os.WriteFile(wsFile, []byte("package main"), 0644)
+
+	convFile := filepath.Join(appDataDir, "conversations", "conv-1.pb")
+	os.MkdirAll(filepath.Dir(convFile), 0755)
+	os.WriteFile(convFile, []byte("data"), 0644)
+
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	os.WriteFile(outsideFile, []byte("secret"), 0644)
+
+	eng := &Engine{
+		workspaces: []string{wsDir},
+		appDataDir: appDataDir,
+	}
+
+	// 1. Inside workspace path -> auto-approved
+	if !eng.isPathInsideWorkspaceOrAppData(wsFile) {
+		t.Errorf("expected %s to be inside workspace", wsFile)
+	}
+
+	// 2. Inside AppDataDir (conversations) -> auto-approved
+	if !eng.isPathInsideWorkspaceOrAppData(convFile) {
+		t.Errorf("expected %s to be inside appDataDir", convFile)
+	}
+
+	// 3. Outside workspace path -> flagged as outside
+	if eng.isPathInsideWorkspaceOrAppData(outsideFile) {
+		t.Errorf("expected %s to be outside workspace and appDataDir", outsideFile)
+	}
+}
+
+
