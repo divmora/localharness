@@ -1,0 +1,4 @@
+[submodule "agents/jules"]
+	path = agents/jules
+	url = https://github.com/divmora/jules-ai-agent
+	branch = main

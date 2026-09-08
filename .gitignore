@@ -1,0 +1,34 @@
+# Binaries
+bin/
+dist/
+/localharness
+/testclient
+*.exe
+
+# Go build cache
+*.test
+*.out
+coverage.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc
+.DS_Store
+scratch/
+
+# Test Results
+test-results/
+playwright-report/
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+
+.local/
