@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node
+**/node_modules
+**/.npm
+
+# Rust / Tauri
+gui/src-tauri/target
+target/
+
+# Go
+bin/
+testclient/
+
+# Build and OS artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+.DS_Store
+scratch/
+
+# Local agents data
+.agents
+.playwright-mcp
