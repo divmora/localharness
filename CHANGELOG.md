@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/divmora/localharness/compare/v2.0.0...v2.1.0) (2026-09-08)
+
+
+### Features
+
+* add DuckDB-backed code-graph repository knowledge graph with BM25 search ([5b2e50e](https://github.com/divmora/localharness/commit/5b2e50e3d68dd9fd2e70388f16c94b78426b3051))
+* add jules ai agent submodule ([ec6548f](https://github.com/divmora/localharness/commit/ec6548f0ac2d6f23163bc8040a4d9e5f27d350d0))
+
 ## [2.0.0](https://github.com/divmora/localharness/compare/v1.4.0...v2.0.0) (2026-08-20)
 
 
