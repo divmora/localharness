@@ -494,6 +494,18 @@ Each KI in ` + "`<appDataDir>/knowledge/<project-id>`" + ` contains:
 - **` + "`metadata.json`" + `**: Summary, timestamps, and references to original sources.
 - **` + "`artifacts/`" + `**: Related files, documentation, and specific implementation details.`
 
+// defaultCodeGraph teaches the agent to use repository code graph tools for
+// AST search, callers, call hierarchies, impact analysis, and branch diffing.
+const defaultCodeGraph = `# Repository Code Graph (code-graph)
+
+You have access to a semantic, AST-level code graph of this repository:
+- Use **codegraph_search** to find symbols, types, functions, and interfaces quickly without blind grep.
+- Use **codegraph_find_references** to locate all call sites and usages across packages.
+- Use **codegraph_call_hierarchy** to trace multi-hop incoming and outgoing call chains.
+- Use **codegraph_get_impact** to compute blast radius, downstream callers, and affected files before making major refactors.
+- Use **codegraph_diff_branches** to inspect structural additions, removals, and dependency changes between git branches.
+`
+
 // defaultSkillsGuidance explains what skills are and how to use them.
 const defaultSkillsGuidance = `You can use specialized 'skills' to help you with complex tasks. Each skill has a name and a description listed below.
 
@@ -632,6 +644,11 @@ type SystemPromptConfig struct {
 	// OFF by default. Set to true for IDE agents with a knowledge item store.
 	EnableKnowledgeItems bool
 
+	// EnableCodeGraph enables the <code_graph> section.
+	// Teaches the agent to use repository AST code graph tools for structural queries.
+	// OFF by default.
+	EnableCodeGraph bool
+
 	// Skills are the available standalone skills. If non-empty, the <skills>
 	// section is emitted in the system prompt with guidance text and available list.
 	// Data-driven: no toggle needed — presence of data IS the toggle.
@@ -737,6 +754,11 @@ func BuildSystemPrompt(cfg SystemPromptConfig) string {
 	// Placed right after messaging so the agent sees cached repo context early.
 	if cfg.EnableKnowledgeItems {
 		sections = append(sections, taggedSection{tag: "knowledge_items", content: defaultKnowledgeItems, priority: 10})
+	}
+
+	// Code graph — opt-in. Teaches agent to use code-graph tools for structural analysis.
+	if cfg.EnableCodeGraph {
+		sections = append(sections, taggedSection{tag: "code_graph", content: defaultCodeGraph, priority: 10})
 	}
 
 	// Conversation transcript — data-driven. Only emitted when BrainDir is set,

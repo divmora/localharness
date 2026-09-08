@@ -189,6 +189,7 @@ The harness provides a rich set of built-in tools organized into categories:
 | **Web** | `search_web`, `read_url_content` | Web search and URL content fetching |
 | **Agent Orchestration** | `invoke_subagent`, `define_subagent`, `manage_subagents`, `send_message` | Spawn typed child agents, define types, manage instances |
 | **Knowledge** | `knowledge_write`, `knowledge_replace`, `knowledge_delete` | Persistent project-scoped knowledge items (engine-intercepted) |
+| **Code Graph** | `codegraph_search`, `codegraph_find_references`, `codegraph_call_hierarchy`, `codegraph_get_impact`, `codegraph_diff_branches` | AST-level symbol search, call hierarchy, and blast radius in DuckDB ([docs](docs/codegraph.md)) |
 | **Interactive** | `ask_question`, `finish` | Multiple-choice questions to user, task completion signal |
 | **Browser** | `browser_*` | Browser automation via Playwright MCP ([docs](docs/browser.md)) |
 

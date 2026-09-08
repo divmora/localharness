@@ -221,6 +221,7 @@ message StepUpdate {
     ActionManageSubagents manage_subagents = 51;        // List/kill subagents
     ActionSendMessage send_message_action = 52;         // Inter-agent messaging
     ActionBrowserSubagent browser_subagent = 53;        // Spawn browser subagent
+    ActionCodeGraph code_graph = 54;                    // Code graph AST and structural queries
   }
 
   // Error details (when state = STATE_ERROR)
@@ -777,6 +778,11 @@ message PromptModules {
   // OFF by default. When enabled, teaches the agent to check curated KI
   // summaries before starting research. For IDE agents with a KI store.
   bool enable_knowledge_items = 4;
+
+  // Enable the code graph section.
+  // OFF by default. When enabled, teaches the agent to use code-graph tools
+  // for structural analysis, symbol lookups, call hierarchy, and impact radius.
+  bool enable_code_graph = 5;
 }
 
 // SlashCommandDef defines a user-facing chat shortcut that the agent can recommend.
@@ -868,6 +874,7 @@ message BuiltinToolsConfig {
   bool define_subagent = 15; // default: false (follows invoke_subagent)
   bool manage_subagents = 16; // default: false (follows invoke_subagent)
   bool send_message = 17;    // default: false (follows invoke_subagent)
+  bool code_graph = 18;       // default: true (AST repository code graph & symbol intelligence)
 }
 
 // ToolConfigs provides per-tool configuration (Phase 2).
@@ -881,6 +888,7 @@ message ToolConfigs {
   WriteToFileToolConfig write_file = 7;
   WebSearchToolConfig web_search = 8;
   WebFetchToolConfig web_fetch = 9;
+  CodeGraphToolConfig code_graph = 10;
 }
 
 // Per-tool configuration messages.
@@ -913,6 +921,12 @@ message WebSearchToolConfig {
 
 message WebFetchToolConfig {
   int64 max_content_size = 1;     // Max content size to fetch in bytes. Default: 51200 (50KB)
+}
+
+message CodeGraphToolConfig {
+  bool auto_index = 1;            // Auto-index workspace on session startup (default: true)
+  int32 max_depth = 2;            // Max traversal depth (default: 5)
+  int32 max_results = 3;          // Max results to return (default: 50)
 }
 
 // Workspace defines a directory the agent can operate in.
@@ -1158,6 +1172,44 @@ message ActionSchedule {
 
   // Whether the schedule was created successfully.
   bool success = 11;
+}
+
+// ActionCodeGraph performs structural queries on the repository code graph.
+message ActionCodeGraph {
+  // Query operation: "search", "references", "callers", "callees", "impact", "diff", "query"
+  string operation = 1;
+  string query = 2;              // Symbol name or search pattern
+  string branch = 3;             // Branch name (empty = active branch)
+  int32 depth = 4;               // Traversal depth for hierarchy / impact
+  string target_branch = 5;      // For branch diff operations
+
+  // Result fields (populated on STATE_DONE)
+  repeated CodeGraphNode nodes = 10;
+  repeated CodeGraphEdge edges = 11;
+  string summary = 12;
+  int32 total_matches = 13;
+}
+
+// CodeGraphNode represents an indexed code symbol in the graph.
+message CodeGraphNode {
+  string symbol_id = 1;          // e.g. "pkg/auth:ValidateToken"
+  string kind = 2;               // "function", "struct", "interface", "method", "class", "type"
+  string name = 3;
+  string file_path = 4;
+  int32 start_line = 5;
+  int32 end_line = 6;
+  string signature = 7;
+  string docstring = 8;
+  string blob_hash = 9;
+}
+
+// CodeGraphEdge represents a relationship between two symbols.
+message CodeGraphEdge {
+  string source_symbol = 1;
+  string target_symbol = 2;
+  string relation = 3;           // "calls", "imports", "implements", "references"
+  string file_path = 4;
+  int32 line = 5;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

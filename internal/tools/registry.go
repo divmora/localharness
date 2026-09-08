@@ -277,6 +277,7 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 			RunCommand: false,
 			Finish:     true,
 			Schedule:   true,
+			CodeGraph:  true,
 		}
 	}
 
@@ -316,6 +317,9 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 	}
 	if cfg.Schedule {
 		registerSchedule(r)
+	}
+	if cfg.CodeGraph {
+		registerCodeGraphTools(r)
 	}
 
 	// Always register ask_question — it's a harmless clarification tool

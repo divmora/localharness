@@ -94,6 +94,7 @@ All runtime references **must** read from `config.HarnessVersion` — never hard
 | `~/.divmora/localharness/bin/v<VER>/localharness` | Cached binary (shared across all SDKs) |
 | `~/.divmora/localharness/projects.json` | Project registry (workspace → UUID mapping) |
 | `~/.divmora/localharness/knowledge/<project-uuid>/` | Knowledge Items (per-project, persistent) |
+| `~/.divmora/localharness/knowledge/<project-uuid>/codegraph.duckdb` | Repository AST code graph (DuckDB-compatible) |
 | `~/.divmora/localharness/plugins/` | Global plugins (auto-discovered at session init) |
 | `~/.divmora/localharness/skills/` | Global standalone skills (auto-discovered at session init) |
 | `<workspace>/.agents/plugins/` | Workspace-level plugins (auto-discovered) |

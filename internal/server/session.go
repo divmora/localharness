@@ -611,6 +611,7 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		EnableSlashCommands:   cfg.PromptModules != nil && cfg.PromptModules.EnableSlashCommands,
 		SlashCommands:         protoSlashCommandsToEngine(cfg.SlashCommands),
 		EnableKnowledgeItems:  cfg.PromptModules != nil && cfg.PromptModules.EnableKnowledgeItems,
+		EnableCodeGraph:       cfg.PromptModules != nil && cfg.PromptModules.EnableCodeGraph,
 		Skills:                allSkills,
 		Plugins:               allPlugins,
 		NotifyCh:              notifyCh,

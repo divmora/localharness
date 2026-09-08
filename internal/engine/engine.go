@@ -15,6 +15,7 @@ import (
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/codegraph"
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/conversation"
 	"github.com/divmora/localharness/internal/errors"
@@ -112,6 +113,10 @@ type Engine struct {
 	globalKnowledgeStore     *KnowledgeStore
 	workspaceKnowledgeStores map[string]*KnowledgeStore // keyed by absolute workspace path
 
+	// Code Graph
+	codeGraphManager *codegraph.Manager
+	projectRegistry  *ProjectRegistry
+
 	// Multi-agent coordination
 	agentBus *AgentBus              // Shared pub/sub bus across agent family (nil for standalone)
 	convMgr  *conversation.Manager // For creating child conversations (nil if not passed)
@@ -149,6 +154,7 @@ type Config struct {
 	MCPManager          *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
 	YoloMode            bool                       // Bypass all tool permission checks
 
+	CodeGraphManager    *codegraph.Manager
 
 	// Structured system instructions (takes priority over SystemPrompt if set)
 	StructuredInstructions *pb.StructuredSystemInstructions
@@ -176,6 +182,7 @@ type Config struct {
 	EnableSlashCommands     bool             // Enable the <slash_commands> section (off by default)
 	SlashCommands           []SlashCommandDef // Available slash commands (only with EnableSlashCommands)
 	EnableKnowledgeItems    bool             // Enable the <knowledge_items> section (off by default)
+	EnableCodeGraph         bool             // Enable the <code_graph> section (off by default)
 	Skills                  []SkillDef       // Available skills (data-driven: non-empty = enabled)
 	Plugins                 []PluginDef      // Installed plugins (data-driven: non-empty = enabled)
 
@@ -274,12 +281,29 @@ func NewEngine(cfg Config) *Engine {
 		EnableSlashCommands:    cfg.EnableSlashCommands,
 		SlashCommands:          cfg.SlashCommands,
 		EnableKnowledgeItems:   cfg.EnableKnowledgeItems,
+		EnableCodeGraph:        cfg.EnableCodeGraph,
 		Skills:                 cfg.Skills,
 		Plugins:                cfg.Plugins,
 		SubagentsEnabled:       cfg.SubagentsEnabled,
 		SubagentTypes:          subagentTypes,
 		BrainDir:               cfg.BrainDir,
 	})
+
+	// Initialize code graph manager
+	codeGraphMgr := cfg.CodeGraphManager
+	if codeGraphMgr == nil && cfg.AppDataDir != "" {
+		codeGraphMgr = codegraph.NewManager(filepath.Join(cfg.AppDataDir, "knowledge"))
+	}
+	if codeGraphMgr != nil && cfg.ProjectRegistry != nil {
+		for _, ws := range cfg.Workspaces {
+			if proj, _ := cfg.ProjectRegistry.FindOrCreate([]string{ws}); proj != nil {
+				codeGraphMgr.RegisterWorkspace(ws, proj.ID)
+				go func(pID, w string) {
+					_, _ = codeGraphMgr.IndexWorkspace(context.Background(), pID, w, "")
+				}(proj.ID, ws)
+			}
+		}
+	}
 
 	// Initialize agent bus: root creates, children inherit.
 	bus := cfg.AgentBus
@@ -337,6 +361,8 @@ func NewEngine(cfg Config) *Engine {
 		excludeMCPTools:          cfg.ExcludeMCPTools,
 		globalKnowledgeStore:     globalKnowledgeStore,
 		workspaceKnowledgeStores: workspaceKnowledgeStores,
+		codeGraphManager:         codeGraphMgr,
+		projectRegistry:          cfg.ProjectRegistry,
 		agentBus:                 bus,
 		convMgr:                  cfg.ConversationManager,
 		workspaces:               cfg.Workspaces,
@@ -1153,6 +1179,20 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 		return e.executeKnowledgeDelete(ctx, tc, step)
 	}
 
+	// Check if this is a code-graph tool (handled by engine directly)
+	switch tc.Name {
+	case "codegraph_search":
+		return e.executeCodeGraphSearch(ctx, tc, step)
+	case "codegraph_find_references":
+		return e.executeCodeGraphFindReferences(ctx, tc, step)
+	case "codegraph_call_hierarchy":
+		return e.executeCodeGraphCallHierarchy(ctx, tc, step)
+	case "codegraph_get_impact":
+		return e.executeCodeGraphGetImpact(ctx, tc, step)
+	case "codegraph_diff_branches":
+		return e.executeCodeGraphDiffBranches(ctx, tc, step)
+	}
+
 	// Check if this is the publish tool (agent bus coordination)
 	if tc.Name == "publish" {
 		return e.executePublish(ctx, tc, step)
@@ -1213,6 +1253,20 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 		}
 		e.emitStep(step)
 		return err
+	}
+
+	// Trigger live incremental code graph indexing on file mutations
+	if e.codeGraphManager != nil {
+		switch tc.Name {
+		case "write_to_file", "replace_file_content", "multi_replace_file_content":
+			if p, ok := tc.Args["path"].(string); ok && p != "" {
+				ws := "."
+				if len(e.workspaces) > 0 {
+					ws = e.workspaces[0]
+				}
+				_ = e.codeGraphManager.UpdateFile(context.Background(), ws, p)
+			}
+		}
 	}
 
 	// Emit completed step (STATE_DONE) with usage attached

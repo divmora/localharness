@@ -247,6 +247,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	convCmd.AddCommand(listCmd)
 
 	rootCmd.AddCommand(convCmd)
+	rootCmd.AddCommand(newCodeGraphCommand())
 
 	return rootCmd
 }
