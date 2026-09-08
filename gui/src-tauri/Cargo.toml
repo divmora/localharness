@@ -1,0 +1,48 @@
+[package]
+name = "divmora"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "divmora_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+prost-build = "0.14.4"
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-shell = "2"
+prost = "0.14.4"
+bytes = "1.12.1"
+tauri-plugin-websocket = "2"
+dirs = "6.0.0"
+reqwest = { version = "0.13.4", features = ["json"] }
+tar = "0.4.46"
+flate2 = "1.1.9"
+tokio = { version = "1.53.1", features = ["full"] }
+base64 = "0.23.1"
+chrono = "0.4.45"
+tauri-plugin-dialog = "2.7.2"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+uuid = { version = "1.24.0", features = ["v4"] }
+tauri-plugin-notification = "2"
+tauri-plugin-os = "2"
+tauri-plugin-playwright = "0.4.1"
+portable-pty = "0.9.0"
+tokio-tungstenite = "0.30.0"
+futures-util = "0.3.34"
+url = "2.5.8"
+log = { version = "0.4.33", features = ["std"] }
+
