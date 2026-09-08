@@ -1,0 +1,135 @@
+version: 2
+
+project_name: localharness
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod verify
+
+builds:
+  # ============================================================================
+  # LocalHarness Core Daemon & Runtime Engine
+  # ============================================================================
+  - id: localharness
+    main: ./cmd/localharness
+    binary: localharness
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/divmora/localharness/internal/config.HarnessVersion={{ .Version }}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+  # ============================================================================
+  # lhctl Interactive TUI & Debugger CLI
+  # ============================================================================
+  - id: lhctl
+    main: ./cmd/lhctl
+    binary: lhctl
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/divmora/localharness/internal/config.HarnessVersion={{ .Version }}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  # LocalHarness primary binary distribution archive (matches ADK binary resolver naming)
+  - id: localharness-archive
+    ids:
+      - localharness
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - ROADMAP.md
+
+  # lhctl standalone CLI distribution archive
+  - id: lhctl-archive
+    ids:
+      - lhctl
+    name_template: "lhctl-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '(?i)^docs:'
+      - '(?i)^test:'
+      - '(?i)^chore:'
+      - 'Merge pull request'
+      - 'Merge branch'
+  groups:
+    - title: '✨ Features'
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: '🐛 Bug Fixes'
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: '⚡ Performance Improvements'
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 2
+    - title: '🔒 Security Updates'
+      regexp: "^.*sec[(\\w)]*:+.*$"
+      order: 3
+    - title: '♻️ Refactoring'
+      regexp: "^.*refactor[(\\w)]*:+.*$"
+      order: 4
+    - title: '📚 Documentation'
+      regexp: "^.*docs[(\\w)]*:+.*$"
+      order: 5
+    - title: '🧪 Testing & QA'
+      regexp: "^.*test[(\\w)]*:+.*$"
+      order: 6
+    - title: '🔧 Tooling & CI'
+      regexp: "^.*chore[(\\w)]*:+.*$"
+      order: 7
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  github:
+    owner: divmora
+    name: localharness
+  draft: false
+  prerelease: auto
+  mode: replace
