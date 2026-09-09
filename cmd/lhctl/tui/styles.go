@@ -8,6 +8,7 @@ var (
 	// Base Colors
 	ColorPrimary   = lipgloss.Color("#7D56F4") // Purple
 	ColorSecondary = lipgloss.Color("#04B575") // Green
+	ColorSuccess   = ColorSecondary            // Green alias
 	ColorAccent    = lipgloss.Color("#EE6FF8") // Pink
 	ColorWarning   = lipgloss.Color("#FFB86C") // Orange/Yellow
 	ColorError     = lipgloss.Color("#FF5555") // Red

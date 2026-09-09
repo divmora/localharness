@@ -137,7 +137,33 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		// Search within scoped region only
 		count := strings.Count(scopedText, target)
 		if count == 0 {
-			return fmt.Errorf("replace_file_content: chunk %d: target_content not found within lines %d-%d", i, startLine, endLine)
+			// Resilient fallback 1: Expand search window by ±20 lines
+			expStart := scopeStart - 20
+			if expStart < 0 {
+				expStart = 0
+			}
+			expEnd := scopeEnd + 20
+			if expEnd > len(lines) {
+				expEnd = len(lines)
+			}
+			expText := strings.Join(lines[expStart:expEnd], "\n")
+			if strings.Count(expText, target) == 1 {
+				scopeStart = expStart
+				scopeEnd = expEnd
+				scopedText = expText
+				count = 1
+			} else {
+				// Resilient fallback 2: Check if target is unique across entire file
+				fullText := strings.Join(lines, "\n")
+				if strings.Count(fullText, target) == 1 {
+					scopeStart = 0
+					scopeEnd = len(lines)
+					scopedText = fullText
+					count = 1
+				} else {
+					return fmt.Errorf("replace_file_content: chunk %d: target_content not found within lines %d-%d", i, startLine, endLine)
+				}
+			}
 		}
 		if count > 1 && !chunk.AllowMultiple {
 			return fmt.Errorf("replace_file_content: chunk %d: target_content found %d times in lines %d-%d (set allow_multiple=true to replace all)", i, count, startLine, endLine)

@@ -386,6 +386,9 @@ type GlobalLiteLLMConfig struct {
 // LoadGlobalLiteLLMConfig reads ~/.divmora/config/litellm.json.
 // Returns an empty config if the file doesn't exist.
 func LoadGlobalLiteLLMConfig(logger *slog.Logger) *GlobalLiteLLMConfig {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	configDir, err := DivmoraConfigDir()
 	if err != nil {
 		logger.Warn("cannot resolve divmora config dir", "error", err)
@@ -396,6 +399,9 @@ func LoadGlobalLiteLLMConfig(logger *slog.Logger) *GlobalLiteLLMConfig {
 
 // LoadGlobalLiteLLMConfigFrom reads LiteLLM config from a specific path.
 func LoadGlobalLiteLLMConfigFrom(path string, logger *slog.Logger) *GlobalLiteLLMConfig {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

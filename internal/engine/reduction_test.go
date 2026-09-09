@@ -435,3 +435,123 @@ func TestTruncateString(t *testing.T) {
 		t.Errorf("got: %s", truncateString("this is a longer string", 10))
 	}
 }
+
+// --- Context Pruning Tests ---
+
+func TestPruneHistoricalUserContext_Parts(t *testing.T) {
+	userRulesPart := "<user_rules>\nRule 1: Always check boundaries\n</user_rules>"
+	userReq1 := "<USER_REQUEST>\nFirst task\n</USER_REQUEST>"
+	userReq2 := "<USER_REQUEST>\nSecond task\n</USER_REQUEST>"
+	userReq3 := "<USER_REQUEST>\nThird task\n</USER_REQUEST>"
+
+	messages := []llm.Message{
+		// Turn 0 (should stay intact)
+		{Role: "user", Parts: []string{"<user_information>\nOS: mac\n</user_information>", userRulesPart, userReq1}},
+		{Role: "model", Content: "working on task 1"},
+		// Turn 1 (intermediate, outside fresh window — should have rules pruned)
+		{Role: "user", Parts: []string{"<user_information>\nOS: mac\n</user_information>", userRulesPart, userReq2}},
+		{Role: "model", Content: "working on task 2"},
+		// Turn 2 (latest turn — should stay intact)
+		{Role: "user", Parts: []string{"<user_information>\nOS: mac\n</user_information>", userRulesPart, userReq3}},
+		{Role: "model", Content: "working on task 3"},
+	}
+
+	// freshWindow = 2 so messages[2] (Turn 1 user) is stale (staleEnd = 6 - 2 = 4, index 2 < 4)
+	reduced, stats := ReduceHistory(messages, 2)
+
+	if stats.PrunedUserContext != 1 {
+		t.Fatalf("expected 1 pruned user context, got %d", stats.PrunedUserContext)
+	}
+	if stats.TokensSaved <= 0 {
+		t.Fatalf("expected tokens saved > 0, got %d", stats.TokensSaved)
+	}
+
+	// Turn 0 must keep user_rules
+	if !strings.Contains(reduced[0].TextContent(), "Always check boundaries") {
+		t.Fatal("Turn 0 lost user rules")
+	}
+
+	// Turn 1 must have user_rules pruned, but keep USER_REQUEST
+	turn1Text := reduced[2].TextContent()
+	if strings.Contains(turn1Text, "Always check boundaries") {
+		t.Fatal("Turn 1 still contains user rules")
+	}
+	if !strings.Contains(turn1Text, "Second task") {
+		t.Fatal("Turn 1 lost its user request")
+	}
+	if !strings.Contains(turn1Text, "Historical system & user rules omitted") {
+		t.Fatal("Turn 1 missing placeholder marker")
+	}
+
+	// Turn 2 (latest) must keep user_rules
+	if !strings.Contains(reduced[4].TextContent(), "Always check boundaries") {
+		t.Fatal("Turn 2 (latest) lost user rules")
+	}
+}
+
+func TestPruneHistoricalUserContext_Content(t *testing.T) {
+	ruleBlock := "<user_rules>\nRule 1: Always check boundaries\n</user_rules>\n"
+	userInfoBlock := "<user_information>\nOS: mac\n</user_information>\n"
+
+	messages := []llm.Message{
+		// Turn 0
+		{Role: "user", Content: userInfoBlock + ruleBlock + "<USER_REQUEST>\nFirst\n</USER_REQUEST>"},
+		{Role: "model", Content: "ok"},
+		// Turn 1 (intermediate)
+		{Role: "user", Content: userInfoBlock + ruleBlock + "<USER_REQUEST>\nSecond\n</USER_REQUEST>"},
+		{Role: "model", Content: "ok"},
+		// Turn 2 (latest)
+		{Role: "user", Content: userInfoBlock + ruleBlock + "<USER_REQUEST>\nThird\n</USER_REQUEST>"},
+		{Role: "model", Content: "ok"},
+	}
+
+	reduced, stats := ReduceHistory(messages, 2)
+
+	if stats.PrunedUserContext != 1 {
+		t.Fatalf("expected 1 pruned user context, got %d", stats.PrunedUserContext)
+	}
+
+	// Turn 1 content should not contain user_rules but retain Second
+	turn1Content := reduced[2].Content
+	if strings.Contains(turn1Content, "Always check boundaries") {
+		t.Fatal("Turn 1 still contains user rules")
+	}
+	if !strings.Contains(turn1Content, "Second") {
+		t.Fatal("Turn 1 lost user request")
+	}
+}
+
+func TestTrimLargeResults_DiffBlock(t *testing.T) {
+	var diffLines []string
+	for i := 1; i <= 60; i++ {
+		diffLines = append(diffLines, fmt.Sprintf("+ added line %d in some file", i))
+	}
+	diffContent := strings.Join(diffLines, "\n")
+
+	messages := []llm.Message{
+		{Role: "user", Content: "make changes"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "replace_file_content"}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "replace_file_content", Content: diffContent}},
+		{Role: "model", Content: "changes made"},
+		{Role: "user", Content: "continue"},
+		{Role: "model", Content: "ok"},
+	}
+
+	// freshWindow = 2, so index 2 (replace_file_content result) is stale
+	reduced, stats := ReduceHistory(messages, 2)
+
+	if stats.TrimmedResults != 1 {
+		t.Fatalf("expected 1 trimmed result, got %d", stats.TrimmedResults)
+	}
+
+	trimmedContent := reduced[2].ToolResult.Content
+	if !strings.Contains(trimmedContent, "diff lines trimmed") {
+		t.Fatalf("expected diff lines trimmed marker, got: %s", trimmedContent)
+	}
+	if !strings.Contains(trimmedContent, "added line 1") {
+		t.Fatal("top lines should be preserved")
+	}
+	if !strings.Contains(trimmedContent, "added line 60") {
+		t.Fatal("bottom lines should be preserved")
+	}
+}

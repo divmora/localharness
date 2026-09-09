@@ -29,6 +29,7 @@ type Model struct {
 	autocompleteState AutocompleteState
 	approval          *ActiveApproval
 	question          *ActiveQuestion
+	artifactReview    *ActiveArtifactReview
 	showHelp          bool
 	showSubagents     bool
 	showTasks         bool
@@ -362,6 +363,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Interactive Artifact Review Card Handling
+		if m.artifactReview != nil {
+			if m.artifactReview.IsWritingFeedback {
+				switch msg.String() {
+				case "enter":
+					feedback := strings.TrimSpace(m.artifactReview.TextInput.Value())
+					if feedback == "" {
+						feedback = "Proceed"
+					}
+					m.history.AddUserMessage(feedback)
+					m.history.AddSystemMessage(fmt.Sprintf("✓ Feedback submitted for %s", m.artifactReview.Filename))
+					if m.mode == ModePlan {
+						m.mode = ModeAcceptEdits
+						m.history.AddSystemMessage("Plan approved — switched mode to ACCEPT-EDITS.")
+					}
+					_ = m.client.SendUserMessage(feedback, nil, nil)
+					m.artifactReview = nil
+					m.status = "RUNNING"
+					m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+					m.viewport.GotoBottom()
+					return m, nil
+				case "esc":
+					m.artifactReview.CancelFeedback()
+					return m, nil
+				default:
+					var cmd tea.Cmd
+					m.artifactReview.TextInput, cmd = m.artifactReview.TextInput.Update(msg)
+					return m, cmd
+				}
+			}
+
+			switch msg.String() {
+			case "enter", "p", "P":
+				proceedMsg := "Proceed with the plan."
+				m.history.AddUserMessage(proceedMsg)
+				m.history.AddSystemMessage(fmt.Sprintf("✓ Approved artifact: %s", m.artifactReview.Filename))
+				if m.mode == ModePlan {
+					m.mode = ModeAcceptEdits
+					m.history.AddSystemMessage("Plan approved — switched mode to ACCEPT-EDITS.")
+				}
+				_ = m.client.SendUserMessage(proceedMsg, nil, nil)
+				m.artifactReview = nil
+				m.status = "RUNNING"
+				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+				m.viewport.GotoBottom()
+				return m, nil
+			case "f", "F", "e", "E":
+				m.artifactReview.StartFeedback()
+				return m, nil
+			case "v", "V":
+				m.artifactReview.ToggleView()
+				return m, nil
+			case "esc", "q", "Q":
+				m.history.AddSystemMessage(fmt.Sprintf("↷ Dismissed review for %s", m.artifactReview.Filename))
+				m.artifactReview = nil
+				m.status = "IDLE"
+				return m, nil
+			}
+			return m, nil
+		}
+
 		if m.showSubagents {
 			switch msg.String() {
 			case "up", "k":
@@ -529,6 +591,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
 		m.viewport.GotoBottom()
 		cmds = append(cmds, listenForEvents(m.client))
+
+	case SideQuestionResultMsg:
+		m.history.AddSideQuestion(msg.Question, msg.Answer)
+		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+		m.viewport.GotoBottom()
+		return m, nil
 
 	case WSErrorMsg:
 		if m.quitting {
@@ -742,6 +810,32 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		_ = m.client.SendUserMessage("[Compact Context]", nil, []string{"Please compact previous messages and summarize progress."})
 		return nil
 
+	case "context":
+		sessionID := ""
+		if m.client != nil {
+			sessionID = m.client.SessionID()
+		}
+		ctxInfo := ContextInfo{
+			ModelName:        m.modelName,
+			PromptTokens:     m.promptTokens,
+			CompletionTokens: m.completionTokens,
+			TotalTokens:      m.totalTokens,
+			Workspaces:       m.workspaces,
+			SessionID:        sessionID,
+		}
+		rendered := RenderContextView(ctxInfo, m.width)
+		m.history.AddSystemMessage(rendered)
+		return nil
+
+	case "btw":
+		if len(cmd.Args) == 0 {
+			m.history.AddSystemMessage("Usage: /btw <question> (Ask a side question without interrupting current task)")
+			return nil
+		}
+		sideQ := strings.Join(cmd.Args, " ")
+		m.history.AddSideQuestion(sideQ, "Analyzing side question...")
+		return AskSideQuestionCmd(sideQ, m.history, m.modelName)
+
 	case "model":
 		if len(cmd.Args) > 0 {
 			m.modelName = cmd.Args[0]
@@ -826,7 +920,7 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
 				return
 			}
-			if m.mode == ModeAcceptEdits && (pr.ToolName == "write_to_file" || pr.ToolName == "replace_file_content") {
+			if m.mode == ModeAcceptEdits && (pr.ToolName == "write_to_file" || pr.ToolName == "replace_file_content" || pr.ToolName == "multi_replace_file_content") {
 				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
 				return
 			}
@@ -882,6 +976,17 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 			isErr := step.State == pb.StepUpdate_STATE_ERROR
 			name, diff, res := extractActionResult(step)
 			m.history.FinishToolCall(name, res, isErr, diff)
+
+			// Surface interactive review card when an artifact requesting feedback is written/updated
+			if !isErr {
+				if wtf := step.GetWriteToFile(); wtf != nil && wtf.ArtifactMetadata != nil && wtf.ArtifactMetadata.RequestFeedback {
+					m.artifactReview = NewActiveArtifactReview(wtf.Path, wtf.ArtifactMetadata.ArtifactType, wtf.ArtifactMetadata.Summary)
+					m.status = "WAITING"
+				} else if rfc := step.GetReplaceFileContent(); rfc != nil && rfc.ArtifactMetadata != nil && rfc.ArtifactMetadata.RequestFeedback {
+					m.artifactReview = NewActiveArtifactReview(rfc.Path, rfc.ArtifactMetadata.ArtifactType, rfc.ArtifactMetadata.Summary)
+					m.status = "WAITING"
+				}
+			}
 
 			// Update task state upon completion
 			if rc := step.GetRunCommand(); rc != nil && rc.TaskId != "" {
@@ -1068,6 +1173,8 @@ func (m Model) View() string {
 		bottomInteraction = RenderApprovalInline(m.approval, m.width)
 	} else if m.question != nil {
 		bottomInteraction = RenderQuestionInline(m.question, m.width)
+	} else if m.artifactReview != nil {
+		bottomInteraction = RenderArtifactReviewInline(m.artifactReview, m.width)
 	} else {
 		autocompleteView := ""
 		if m.autocompleteState.Active {

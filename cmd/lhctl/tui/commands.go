@@ -55,6 +55,8 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		{"/resume [msg]", "Resume execution with optional instructions"},
 		{"/model [name]", "View or switch active LLM model"},
 		{"/compact", "Trigger context window compaction"},
+		{"/context", "Visualize 2D context usage, tokens & active items"},
+		{"/btw <q>", "Ask a side question without interrupting current task"},
 		{"/status", "Display daemon state, tokens & subagent metrics"},
 		{"/subagents", "View subagent hierarchy & drill-down transcript"},
 		{"/tasks", "View background tasks, running commands & timers"},

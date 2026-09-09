@@ -732,6 +732,7 @@ drained:
 				"dedup_files", reduction.DeduplicatedFiles,
 				"collapsed_cmds", reduction.CollapsedCommands,
 				"trimmed", reduction.TrimmedResults,
+				"pruned_user_ctx", reduction.PrunedUserContext,
 				"tokens_saved", reduction.TokensSaved,
 			)
 		}
@@ -1809,7 +1810,7 @@ func summarizeToolCall(tc llm.ToolCall) string {
 		if path, ok := tc.Args["path"].(string); ok {
 			return fmt.Sprintf("Create file: %s", path)
 		}
-	case "replace_file_content":
+	case "replace_file_content", "multi_replace_file_content":
 		if path, ok := tc.Args["path"].(string); ok {
 			return fmt.Sprintf("Edit file: %s", path)
 		}
@@ -1864,7 +1865,7 @@ func generateDiffPreview(tc llm.ToolCall) string {
 		}
 		return diff
 
-	case "replace_file_content":
+	case "replace_file_content", "multi_replace_file_content":
 		path, _ := tc.Args["path"].(string)
 		if path == "" {
 			return ""
@@ -1938,7 +1939,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 
 	// Only guard write tools
 	switch tc.Name {
-	case "write_to_file", "replace_file_content":
+	case "write_to_file", "replace_file_content", "multi_replace_file_content":
 		// continue to check
 	default:
 		return false, ""

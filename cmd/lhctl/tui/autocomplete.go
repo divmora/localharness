@@ -38,6 +38,8 @@ var AvailableSlashCommands = []SlashCommandDef{
 	{"/yolo", "Toggle YOLO Mode (skip all permission prompts)"},
 	{"/status", "Display daemon state, tokens & subagent metrics"},
 	{"/compact", "Compact conversation context history"},
+	{"/context", "Visualize 2D context usage, tokens & active items"},
+	{"/btw", "Ask a side question without interrupting current task"},
 	{"/clear", "Clear chat viewport history"},
 	{"/detach", "Detach TUI (agents continue in background)"},
 	{"/exit", "Exit the TUI session"},

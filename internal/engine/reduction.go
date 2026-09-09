@@ -21,6 +21,11 @@ type ReductionResult struct {
 	// their content truncated to first/last N lines.
 	TrimmedResults int
 
+	// PrunedUserContext is the number of historical user messages whose redundant
+	// system XML tags (<user_rules>, <user_information>, <subagents>, <skills>, etc.)
+	// were pruned.
+	PrunedUserContext int
+
 	// TokensSaved is the estimated number of tokens freed by reduction.
 	TokensSaved int
 }
@@ -28,14 +33,18 @@ type ReductionResult struct {
 // ReduceHistory performs zero-cost optimizations on conversation history
 // to reduce token usage without losing active information.
 //
-// Three optimizations (in order):
+// Four optimizations (in order):
 //  1. Deduplicate re-reads: when the same file is read multiple times with
 //     the same or subset range, the older read is replaced with a pointer
 //     to the newer one. Only safe when newer range ⊇ older range.
 //  2. Collapse command reruns: when the same command is run multiple times,
 //     older results are replaced with a pointer to the latest.
 //  3. Trim large stale results: view_file results older than freshWindow
-//     that exceed 100 lines are trimmed to first 50 + last 50 lines.
+//     that exceed 100 lines are trimmed to first 50 + last 50 lines. Large
+//     diffs (>40 lines) from edit tools are also trimmed.
+//  4. Prune historical user context: intermediate user turns older than
+//     freshWindow have redundant XML boilerplate (<user_rules>, <skills>,
+//     <user_information>) pruned while keeping Turn 0 and Turn N intact.
 //
 // The freshWindow parameter controls how many recent messages are never
 // touched (default: 8). Messages within the fresh window are always
@@ -62,9 +71,14 @@ func ReduceHistory(messages []llm.Message, freshWindow int) ([]llm.Message, Redu
 	stats.CollapsedCommands = collapsed
 	stats.TokensSaved += tokensSaved
 
-	// Phase 3: Trim large stale view_file results
+	// Phase 3: Trim large stale view_file and diff results
 	trimmed, tokensSaved := trimLargeResults(result, freshWindow)
 	stats.TrimmedResults = trimmed
+	stats.TokensSaved += tokensSaved
+
+	// Phase 4: Prune redundant user context from historical turns
+	pruned, tokensSaved := pruneHistoricalUserContext(result, freshWindow)
+	stats.PrunedUserContext = pruned
 	stats.TokensSaved += tokensSaved
 
 	return result, stats
@@ -246,7 +260,45 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 
 	for i := 0; i < staleEnd; i++ {
 		msg := messages[i]
-		if msg.ToolResult == nil || msg.ToolResult.Name != "view_file" || msg.ToolResult.IsError {
+		if msg.ToolResult == nil || msg.ToolResult.IsError {
+			continue
+		}
+
+		// Handle stale edit diff results (>40 lines)
+		if msg.ToolResult.Name == "replace_file_content" || msg.ToolResult.Name == "multi_replace_file_content" {
+			content := msg.ToolResult.Content
+			if strings.HasPrefix(content, "[... diff lines trimmed") {
+				continue
+			}
+			lines := strings.Split(content, "\n")
+			if len(lines) <= 40 {
+				continue
+			}
+			oldTokens := estimateStringTokens(content)
+			topLines := lines[:15]
+			bottomLines := lines[len(lines)-15:]
+			trimmedCount := len(lines) - 30
+
+			var sb strings.Builder
+			sb.WriteString(strings.Join(topLines, "\n"))
+			sb.WriteString(fmt.Sprintf("\n\n[... %d diff lines trimmed — edit already applied in earlier turn ...]\n\n", trimmedCount))
+			sb.WriteString(strings.Join(bottomLines, "\n"))
+
+			newContent := sb.String()
+			messages[i].ToolResult = &llm.ToolCallResult{
+				CallID:           msg.ToolResult.CallID,
+				Name:             msg.ToolResult.Name,
+				Content:          newContent,
+				IsError:          false,
+				ThoughtSignature: msg.ToolResult.ThoughtSignature,
+			}
+
+			tokensSaved += oldTokens - estimateStringTokens(newContent)
+			trimmed++
+			continue
+		}
+
+		if msg.ToolResult.Name != "view_file" {
 			continue
 		}
 
@@ -286,6 +338,139 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 	}
 
 	return trimmed, tokensSaved
+}
+
+// pruneHistoricalUserContext removes redundant system XML boilerplate
+// (<user_rules>, <user_information>, <skills>, <plugins>, <subagents>,
+// <knowledge_items>, <slash_commands>, <ADDITIONAL_METADATA>) from historical
+// user messages.
+//
+// Preserves:
+//   - Turn 0 (the first user message) — keeps full initial rules and context.
+//   - Turn N (the latest user message) — keeps current reinforcement.
+//   - Messages within freshWindow — keeps immediate recent turns intact.
+//
+// For intermediate turns outside freshWindow, redundant boilerplate is
+// replaced with a concise pointer.
+func pruneHistoricalUserContext(messages []llm.Message, freshWindow int) (int, int) {
+	staleEnd := len(messages) - freshWindow
+	if staleEnd <= 0 {
+		return 0, 0
+	}
+
+	var userIndices []int
+	for i, m := range messages {
+		if m.Role == "user" {
+			userIndices = append(userIndices, i)
+		}
+	}
+
+	// Need at least 3 user turns to have an intermediate turn (0, 1..N-1, N)
+	if len(userIndices) < 3 {
+		return 0, 0
+	}
+
+	prunedCount := 0
+	tokensSaved := 0
+
+	boilerplateTags := []string{
+		"user_information",
+		"user_rules",
+		"skills",
+		"plugins",
+		"knowledge_items",
+		"slash_commands",
+		"subagents",
+		"ADDITIONAL_METADATA",
+	}
+
+	isBoilerplatePart := func(s string) bool {
+		trimmed := strings.TrimSpace(s)
+		for _, tag := range boilerplateTags {
+			if strings.HasPrefix(trimmed, "<"+tag+">") || strings.HasPrefix(trimmed, "<"+tag+" ") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Iterate intermediate user turns: exclude index 0 and latest user turn
+	for k := 1; k < len(userIndices)-1; k++ {
+		idx := userIndices[k]
+		if idx >= staleEnd {
+			continue // Within fresh window
+		}
+
+		msg := messages[idx]
+
+		if len(msg.Parts) > 0 {
+			oldTokens := estimateStringTokens(msg.TextContent())
+			var newParts []string
+			hasPruned := false
+
+			for _, p := range msg.Parts {
+				if isBoilerplatePart(p) {
+					hasPruned = true
+				} else {
+					newParts = append(newParts, p)
+				}
+			}
+
+			if hasPruned {
+				placeholder := "[Historical system & user rules omitted — see initial turn]"
+				newParts = append([]string{placeholder}, newParts...)
+				messages[idx].Parts = newParts
+				newTokens := estimateStringTokens(messages[idx].TextContent())
+				if oldTokens > newTokens {
+					tokensSaved += oldTokens - newTokens
+				}
+				prunedCount++
+			}
+		} else if msg.Content != "" {
+			oldTokens := estimateStringTokens(msg.Content)
+			content := msg.Content
+			modified := false
+
+			for _, tag := range boilerplateTags {
+				startTag := "<" + tag
+				endTag := "</" + tag + ">"
+				for {
+					start := strings.Index(content, startTag)
+					if start == -1 {
+						break
+					}
+					// Find closing > of the opening tag
+					openClose := strings.Index(content[start:], ">")
+					if openClose == -1 {
+						break
+					}
+					end := strings.Index(content[start:], endTag)
+					if end == -1 {
+						break
+					}
+					endPos := start + end + len(endTag)
+					if endPos < len(content) && content[endPos] == '\n' {
+						endPos++
+					}
+					content = content[:start] + content[endPos:]
+					modified = true
+				}
+			}
+
+			if modified {
+				placeholder := "[Historical system & user rules omitted — see initial turn]\n"
+				content = placeholder + strings.TrimSpace(content)
+				messages[idx].Content = content
+				newTokens := estimateStringTokens(content)
+				if oldTokens > newTokens {
+					tokensSaved += oldTokens - newTokens
+				}
+				prunedCount++
+			}
+		}
+	}
+
+	return prunedCount, tokensSaved
 }
 
 // extractViewFileArgs finds the view_file tool call arguments (path, start_line, end_line)

@@ -39,6 +39,8 @@ lhctl attach <session-id>
 ```
 
 > **Resume on Exit**: Whenever you exit an interactive session (`/exit`, `/quit`, `Ctrl+C`, `Ctrl+D`), `lhctl` automatically displays the exact command to resume your conversation session (e.g. `lhctl -c <id>`).
+>
+> **Automatic Workspace Restoration**: When resuming with `lhctl -c <id>`, the session automatically restores all active workspace directories persisted in the conversation state, eliminating the need to manually pass `--workspace` again.
 
 ### Command Flags (`lhctl` & `lhctl run`)
 
@@ -131,6 +133,8 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/resume [msg]` | Resume execution with optional updated instructions |
 | `/model [name]` | View or switch active LLM model target |
 | `/compact` | Trigger context window compaction |
+| `/context` | Visualize 2D block grid (`◉`/`□`), token usage breakdown & active context items |
+| `/btw <question>` | Ask a side question without interrupting the current task or trajectory |
 | `/status` | Show daemon status, active subagents, running tasks, and token counters |
 | `/subagents` | View subagent hierarchy & drill down into subagent transcripts |
 | `/tasks`, `/ps` | View running background tasks, shell commands, timers, and live output |
@@ -141,6 +145,19 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/detach` | Detach TUI while agent runs in background |
 | `/clear` | Clear the chat history viewport |
 | `/exit`, `/quit` | Exit the TUI session |
+
+---
+
+## Interactive Artifact Review Cards
+
+When the agent writes or updates an artifact with review requested (e.g. `implementation_plan.md` in `PLAN` mode), `lhctl` renders an interactive card directly in the bottom interaction area:
+
+| Key | Action |
+|:---|:---|
+| **`Enter`** or **`p`** | **Proceed**: Approves the artifact and instructs the agent to continue. In `PLAN` mode, automatically switches mode to `ACCEPT-EDITS`. |
+| **`f`** or **`e`** | **Provide Feedback**: Enters inline typing mode to supply revisions or specific instructions. |
+| **`v`** | **Toggle Full View**: Expands and previews the complete artifact content inline. |
+| **`Esc`** or **`q`** | **Dismiss**: Dismisses the review prompt. |
 
 ---
 

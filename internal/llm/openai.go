@@ -47,6 +47,9 @@ type OpenAIConfig struct {
 
 // NewOpenAIProvider creates a new OpenAI-compatible provider.
 func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
 		baseURL = defaultOpenAIBaseURL

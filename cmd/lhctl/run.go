@@ -34,7 +34,11 @@ func formatResumeCommand(sessionID string, flags runFlags) string {
 	if flags.model != "" {
 		parts = append(parts, fmt.Sprintf("--model=%s", flags.model))
 	}
-	for _, ws := range flags.explicitWorkspaces {
+	wsList := flags.explicitWorkspaces
+	if len(wsList) == 0 {
+		wsList = flags.workspaces
+	}
+	for _, ws := range wsList {
 		parts = append(parts, fmt.Sprintf("--workspace=%s", ws))
 	}
 	if flags.yolo {
@@ -120,6 +124,16 @@ func runInteractiveWithOptions(flags runFlags) error {
 			var state pb.ConversationState
 			if err := proto.Unmarshal(data, &state); err == nil {
 				initialState = &state
+			}
+		}
+
+		// Restore persisted workspaces from conversation state if no explicit workspaces were provided
+		if initialState != nil && initialState.Config != nil && len(flags.explicitWorkspaces) == 0 && len(initialState.Config.Workspaces) > 0 {
+			flags.workspaces = nil
+			for _, ws := range initialState.Config.Workspaces {
+				if ws.Directory != "" {
+					flags.workspaces = append(flags.workspaces, ws.Directory)
+				}
 			}
 		}
 	}
@@ -262,6 +276,14 @@ func runAttach(dataDir string, sessionID string, args []string) {
 
 	cwd, _ := os.Getwd()
 	workspaces := []string{cwd}
+	if initialState != nil && initialState.Config != nil && len(initialState.Config.Workspaces) > 0 {
+		workspaces = nil
+		for _, ws := range initialState.Config.Workspaces {
+			if ws.Directory != "" {
+				workspaces = append(workspaces, ws.Directory)
+			}
+		}
+	}
 
 	p := tea.NewProgram(
 		tui.InitialModelWithHistory(cl, workspaces, false, initialState),

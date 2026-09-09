@@ -214,6 +214,11 @@ func (c *Client) SessionID() string {
 	return c.sessionID
 }
 
+// APIKey returns the configured API key.
+func (c *Client) APIKey() string {
+	return c.apiKey
+}
+
 func (c *Client) send(msg *pb.ClientMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

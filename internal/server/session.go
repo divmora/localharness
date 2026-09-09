@@ -325,6 +325,9 @@ func (s *Session) cleanup() {
 	s.logger.Info("session cleanup: all turns complete, saving state")
 
 	if s.conv != nil {
+		if s.conv.State != nil && s.conv.State.Status == pb.ConversationState_STATUS_ACTIVE {
+			s.conv.State.Status = pb.ConversationState_STATUS_COMPLETED
+		}
 		if err := s.conv.SaveAll(); err != nil {
 			s.logger.Error("failed to save conversation state during cleanup", "error", err)
 		}
@@ -405,6 +408,24 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 			return
 		}
 		s.logger.Info("resumed conversation", "id", s.conv.ID)
+
+		// Restore persisted workspaces if client did not supply explicit workspaces
+		if len(cfg.Workspaces) == 0 && s.conv.State != nil && s.conv.State.Config != nil && len(s.conv.State.Config.Workspaces) > 0 {
+			workspaceDirs = nil
+			workspaceInfos = nil
+			for _, ws := range s.conv.State.Config.Workspaces {
+				workspaceDirs = append(workspaceDirs, ws.Directory)
+				workspaceInfos = append(workspaceInfos, engine.WorkspaceInfo{
+					Directory:  ws.Directory,
+					CorpusName: ws.CorpusName,
+				})
+			}
+			if newWsMgr, wsErr := workspace.NewManager(workspaceDirs); wsErr == nil {
+				wsMgr = newWsMgr
+				s.wsMgr = wsMgr
+				s.logger.Info("restored persisted workspaces for resumed conversation", "count", len(workspaceDirs))
+			}
+		}
 	} else {
 		// Create new conversation
 		s.conv, err = convMgr.CreateWithID(s.serverCfg.SessionID, cfg)

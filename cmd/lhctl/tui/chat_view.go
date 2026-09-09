@@ -22,6 +22,7 @@ const (
 	ChatItemToolResult
 	ChatItemSystem
 	ChatItemError
+	ChatItemSideQuestion
 )
 
 // ChatItem represents a rendered entry in the conversation log.
@@ -201,6 +202,17 @@ func (h *ChatHistory) AddSystemMessage(content string) {
 	})
 }
 
+// AddSideQuestion appends a side inquiry and response without disrupting the main trajectory.
+func (h *ChatHistory) AddSideQuestion(question, answer string) {
+	h.FlushStreaming()
+	h.items = append(h.items, ChatItem{
+		Type:      ChatItemSideQuestion,
+		ToolName:  question,
+		Content:   answer,
+		Timestamp: time.Now(),
+	})
+}
+
 // Clear flushes all history.
 func (h *ChatHistory) Clear() {
 	h.items = nil
@@ -275,6 +287,16 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 		case ChatItemSystem:
 			wrapped := wrapString("ℹ️  "+item.Content, contentWidth)
 			sb.WriteString("\n" + SystemMsgStyle.Render(wrapped) + "\n")
+
+		case ChatItemSideQuestion:
+			sideBox := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorHighlight).
+				Padding(0, 1).
+				Width(contentWidth)
+			title := lipgloss.NewStyle().Bold(true).Foreground(ColorHighlight).Render("💬 Side Question (/btw): ") + item.ToolName
+			body := wrapString(item.Content, contentWidth-4)
+			sb.WriteString("\n" + sideBox.Render(title+"\n\n"+body) + "\n")
 		}
 	}
 
