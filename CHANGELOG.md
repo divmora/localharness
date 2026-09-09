@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/divmora/localharness/compare/v0.2.1...v0.3.0) (2026-09-09)
+
+
+### Features
+
+* add /context, /btw, artifact review card, and context reduction ([58db642](https://github.com/divmora/localharness/commit/58db642d5a9383a6a86bd9fd66d01c669628ad50))
+
+
+### Bug Fixes
+
+* allow lhctl to self-host daemon when localharness binary is not in PATH ([cb1990e](https://github.com/divmora/localharness/commit/cb1990edb19b1b3abdbc30a84a304211c41f5993))
+
 ## [0.2.1](https://github.com/divmora/localharness/compare/v0.2.0...v0.2.1) (2026-09-09)
 
 
