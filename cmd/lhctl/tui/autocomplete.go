@@ -40,6 +40,7 @@ var AvailableSlashCommands = []SlashCommandDef{
 	{"/compact", "Compact conversation context history"},
 	{"/context", "Visualize 2D context usage, tokens & active items"},
 	{"/btw", "Ask a side question without interrupting current task"},
+	{"/version", "Display client & daemon version and runtime"},
 	{"/clear", "Clear chat viewport history"},
 	{"/detach", "Detach TUI (agents continue in background)"},
 	{"/exit", "Exit the TUI session"},

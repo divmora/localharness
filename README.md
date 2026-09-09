@@ -107,6 +107,9 @@ make build-lhctl
 
 # Attach to a running session
 ./bin/lhctl attach <session-id>
+
+# View version and runtime information
+./bin/lhctl version
 ```
 
 > In `lhctl`, sessions always start fresh by default. Use `-c` to resume the most recent conversation or `-c <id>` to resume by ID. On exit, `lhctl` displays the exact command to resume your session. Press **`Shift+Tab`** to cycle between **`DEFAULT`** (Safe Mode), **`ACCEPT-EDITS`** (Auto-Accept Edits), and **`PLAN`** (Plan-Before-Act) modes. Type `/` for instant command autocomplete or `@` for workspace file mentions. See [docs/lhctl.md](docs/lhctl.md) for full documentation.

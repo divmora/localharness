@@ -65,6 +65,7 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		{"/workspace remove <dir>", "Detach a workspace directory"},
 		{"/detach", "Detach TUI while background agents continue running"},
 		{"/yolo", "Toggle YOLO Mode (bypass all approval queues)"},
+		{"/version", "Display client & daemon version and runtime"},
 		{"/clear", "Clear chat viewport history"},
 		{"/exit, /quit", "Exit the TUI session"},
 	}

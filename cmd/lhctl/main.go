@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/config"
 )
 
 var (
@@ -62,6 +63,10 @@ detach and attach to headless sessions, and inspect conversation state and trace
 			return runInteractiveWithOptions(flags)
 		},
 	}
+
+	// Version configuration
+	rootCmd.Version = formatVersion(config.HarnessVersion)
+	rootCmd.SetVersionTemplate("lhctl version {{.Version}}\n")
 
 	// Persistent flags (available across all subcommands)
 	rootCmd.PersistentFlags().StringVar(&globalDataDir, "data-dir", getDefaultDataDir(), "Override data directory")
@@ -256,6 +261,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 
 	rootCmd.AddCommand(convCmd)
 	rootCmd.AddCommand(newCodeGraphCommand())
+	rootCmd.AddCommand(newVersionCommand())
 
 	return rootCmd
 }

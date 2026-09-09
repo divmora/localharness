@@ -58,8 +58,8 @@ test-client:
 # Build lhctl CLI debugger
 build-lhctl:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/lhctl$(EXE_EXT) ./cmd/lhctl
-	@echo "==> Built $(BIN_DIR)/lhctl$(EXE_EXT)"
+	go build -ldflags="-X github.com/divmora/localharness/internal/config.HarnessVersion=$(VERSION)" -o $(BIN_DIR)/lhctl$(EXE_EXT) ./cmd/lhctl
+	@echo "==> Built $(BIN_DIR)/lhctl$(EXE_EXT) ($(VERSION))"
 
 # Full build: proto + binary + tools + agents
 all: proto build test-client build-lhctl

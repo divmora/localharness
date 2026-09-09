@@ -13,6 +13,9 @@ import (
 
 	"github.com/divmora/localharness/cmd/lhctl/client"
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/daemon"
+	"runtime"
 )
 
 // Model is the main Bubbletea TUI application model.
@@ -849,6 +852,24 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		statusMsg := fmt.Sprintf("Session Status: %s | YOLO: %v | Workspaces: %d | Subagents: %d active | Tokens: %d",
 			m.status, m.yoloMode, len(m.workspaces), m.subagents.RunningCount(), m.totalTokens)
 		m.history.AddSystemMessage(statusMsg)
+		return nil
+
+	case "version":
+		ver := config.HarnessVersion
+		if !strings.HasPrefix(ver, "v") {
+			ver = "v" + ver
+		}
+		running, info, _ := daemon.IsDaemonRunning()
+		daemonStr := "not running"
+		if running && info != nil {
+			dVer := info.Version
+			if !strings.HasPrefix(dVer, "v") {
+				dVer = "v" + dVer
+			}
+			daemonStr = fmt.Sprintf("running (PID %d, Port %d, %s)", info.PID, info.Port, dVer)
+		}
+		versionMsg := fmt.Sprintf("lhctl version %s (%s/%s, %s) | Daemon: %s", ver, runtime.GOOS, runtime.GOARCH, runtime.Version(), daemonStr)
+		m.history.AddSystemMessage(versionMsg)
 		return nil
 
 	case "clear":

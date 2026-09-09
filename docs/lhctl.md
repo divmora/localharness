@@ -209,6 +209,28 @@ lhctl daemon stop
 
 > **Self-Hosting Daemon**: If the `localharness` binary is not found in system `$PATH` or cache, `lhctl` automatically self-hosts the background daemon using its internal runtime (`lhctl daemon run`), making `lhctl` completely self-contained with no external binary dependency.
 
+---
+
+## Version Information
+
+Check client version and runtime details:
+
+```bash
+# Standard version display (client build info & daemon status)
+lhctl version
+
+# Flag equivalent
+lhctl --version
+lhctl -v
+
+# Print only version string (for scripts and CI)
+lhctl version --short   # or -s
+
+# Structured JSON output
+lhctl version --json
+```
+
+In interactive TUI mode, type `/version` to view version and daemon state directly in the conversation window.
 
 ---
 
