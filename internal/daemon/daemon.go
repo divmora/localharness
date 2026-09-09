@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/divmora/localharness/internal/errors"
@@ -93,15 +92,7 @@ func IsDaemonRunning() (bool, *Info, error) {
 		return false, nil, err
 	}
 
-	// Check if process exists
-	process, err := os.FindProcess(info.PID)
-	if err != nil {
-		return false, info, nil
-	}
-
-	// Send signal 0 to check liveness
-	err = process.Signal(syscall.Signal(0))
-	if err == nil {
+	if isProcessAlive(info.PID) {
 		return true, info, nil
 	}
 
@@ -123,21 +114,15 @@ func StopDaemon(logger *slog.Logger) error {
 		return nil
 	}
 
-	process, err := os.FindProcess(info.PID)
-	if err != nil {
-		_ = RemoveDaemonInfo()
-		return nil
-	}
-
-	// Send SIGTERM
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return errors.Wrap(err, errors.ErrCodeEngineError, "failed to send SIGTERM to daemon")
+	// Send termination signal
+	if err := terminateProcess(info.PID); err != nil {
+		return errors.Wrap(err, errors.ErrCodeEngineError, "failed to terminate daemon")
 	}
 
 	// Wait up to 5 seconds for process to exit
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
-		if err := process.Signal(syscall.Signal(0)); err != nil {
+		if !isProcessAlive(info.PID) {
 			_ = RemoveDaemonInfo()
 			if logger != nil {
 				logger.Info("daemon stopped successfully", "pid", info.PID)
@@ -146,8 +131,10 @@ func StopDaemon(logger *slog.Logger) error {
 		}
 	}
 
-	// Force kill with SIGKILL if still running
-	_ = process.Signal(syscall.SIGKILL)
+	// Force kill if still running
+	if p, err := os.FindProcess(info.PID); err == nil {
+		_ = p.Kill()
+	}
 	_ = RemoveDaemonInfo()
 	if logger != nil {
 		logger.Info("daemon killed", "pid", info.PID)

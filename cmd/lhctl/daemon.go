@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/divmora/localharness/adk/connection"
 	"github.com/divmora/localharness/internal/daemon"
 )
 
@@ -48,14 +49,10 @@ func startDaemon() error {
 		return fmt.Errorf("cannot resolve daemon directory: %w", err)
 	}
 
-	selfPath, err := os.Executable()
+	resolver := &connection.BinaryResolver{Logger: slog.Default()}
+	harnessBin, err := resolver.Resolve("")
 	if err != nil {
-		selfPath = "localharness"
-	}
-	binDir := filepath.Dir(selfPath)
-	harnessBin := filepath.Join(binDir, "localharness")
-	if _, err := os.Stat(harnessBin); err != nil {
-		harnessBin = "localharness"
+		return fmt.Errorf("resolve localharness binary: %w", err)
 	}
 
 	logFile, err := os.OpenFile(filepath.Join(daemonDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

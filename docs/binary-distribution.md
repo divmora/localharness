@@ -85,24 +85,24 @@ Development builds (`0.0.0-dev`) skip auto-download and require manual installat
 | Linux | ARM64 | `linux-arm64` |
 | macOS | Intel | `darwin-amd64` |
 | macOS | Apple Silicon | `darwin-arm64` |
+| Windows | x86_64 | `windows-amd64` |
+| Windows | ARM64 | `windows-arm64` |
 
 ## Release Asset Format
 
-Each GitHub release contains:
+Each GitHub release contains `.tar.gz` archives for Linux/macOS and `.zip` archives for Windows:
 
 ```
 localharness-0.3.0-linux-amd64.tar.gz       # Tarball (binary at root)
-localharness-0.3.0-linux-amd64.tar.gz.sha256 # Per-platform checksum
 localharness-0.3.0-linux-arm64.tar.gz
-localharness-0.3.0-linux-arm64.tar.gz.sha256
 localharness-0.3.0-darwin-amd64.tar.gz
-localharness-0.3.0-darwin-amd64.tar.gz.sha256
 localharness-0.3.0-darwin-arm64.tar.gz
-localharness-0.3.0-darwin-arm64.tar.gz.sha256
-checksums.txt                                 # All checksums in one file
+localharness-0.3.0-windows-amd64.zip        # Zip archive (binary at root)
+localharness-0.3.0-windows-arm64.zip
+checksums.txt                               # All checksums in one file
 ```
 
-The SDK's `BinaryResolver` downloads the tarball, verifies the SHA256 checksum from `checksums.txt`, extracts the binary, and caches it.
+The SDK's `BinaryResolver` downloads the archive (`.tar.gz` or `.zip`), verifies the SHA256 checksum from `checksums.txt`, extracts the binary (`localharness` or `localharness.exe`), and caches it.
 
 ## Building from Source
 

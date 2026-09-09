@@ -162,7 +162,7 @@ func TestPlatformSuffix(t *testing.T) {
 	suffix, err := platformSuffix()
 	if err != nil {
 		// Only fail if we're on a supported platform
-		if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		if runtime.GOOS == "linux" || runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
 			t.Fatalf("expected valid suffix on %s/%s: %v", runtime.GOOS, runtime.GOARCH, err)
 		}
 		t.Skipf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -178,14 +178,22 @@ func TestIsExecutable(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Executable file
-	execFile := filepath.Join(tmpDir, "exec")
+	execName := "exec"
+	if runtime.GOOS == "windows" {
+		execName = "exec.exe"
+	}
+	execFile := filepath.Join(tmpDir, execName)
 	_ = os.WriteFile(execFile, []byte("test"), 0755)
 	if !isExecutable(execFile) {
 		t.Error("expected file to be executable")
 	}
 
 	// Non-executable file
-	noExecFile := filepath.Join(tmpDir, "noexec")
+	noExecName := "noexec"
+	if runtime.GOOS == "windows" {
+		noExecName = "noexec.txt"
+	}
+	noExecFile := filepath.Join(tmpDir, noExecName)
 	_ = os.WriteFile(noExecFile, []byte("test"), 0644)
 	if isExecutable(noExecFile) {
 		t.Error("expected file to not be executable")

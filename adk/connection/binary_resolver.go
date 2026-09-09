@@ -2,6 +2,7 @@ package connection
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -47,8 +48,15 @@ const (
 	modulePath        = "github.com/divmora/localharness"
 )
 
+func binaryNameForOS() string {
+	if runtime.GOOS == "windows" {
+		return "localharness.exe"
+	}
+	return "localharness"
+}
+
 // platformSuffix returns the platform identifier for GitHub release assets.
-// e.g., "linux-amd64", "darwin-arm64"
+// e.g., "linux-amd64", "darwin-arm64", "windows-amd64"
 func platformSuffix() (string, error) {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
@@ -62,8 +70,12 @@ func platformSuffix() (string, error) {
 		return "darwin-amd64", nil
 	case goos == "darwin" && goarch == "arm64":
 		return "darwin-arm64", nil
+	case goos == "windows" && goarch == "amd64":
+		return "windows-amd64", nil
+	case goos == "windows" && goarch == "arm64":
+		return "windows-arm64", nil
 	default:
-		return "", fmt.Errorf("unsupported platform: %s/%s (supported: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64)", goos, goarch)
+		return "", fmt.Errorf("unsupported platform: %s/%s (supported: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64)", goos, goarch)
 	}
 }
 
@@ -96,19 +108,46 @@ func (r *BinaryResolver) Resolve(explicitPath string) (string, error) {
 	}
 
 	// Step 3: System PATH
-	if pathBin, err := exec.LookPath(binaryName); err == nil {
-		abs, _ := filepath.Abs(pathBin)
-		logger.Debug("binary resolved via PATH", "path", abs)
-		return abs, nil
+	for _, name := range []string{binaryNameForOS(), binaryName} {
+		if pathBin, err := exec.LookPath(name); err == nil {
+			abs, _ := filepath.Abs(pathBin)
+			logger.Debug("binary resolved via PATH", "path", abs)
+			return abs, nil
+		}
+	}
+
+	// Step 3.2: Adjacent to current executable (e.g. lhctl beside localharness)
+	if selfPath, err := os.Executable(); err == nil {
+		binDir := filepath.Dir(selfPath)
+		for _, name := range []string{binaryNameForOS(), binaryName} {
+			cand := filepath.Join(binDir, name)
+			if isExecutable(cand) {
+				logger.Debug("binary resolved adjacent to executable", "path", cand)
+				return cand, nil
+			}
+		}
 	}
 
 	// Step 3.5: Local development paths (./bin/localharness, ./localharness)
 	// This enables the `make build && go run ./cmd/testclient` workflow.
-	for _, localPath := range []string{
-		"./bin/localharness",
-		"./localharness",
-		"../bin/localharness", // When running from a subdirectory (e.g., examples/)
-	} {
+	var devPaths []string
+	if runtime.GOOS == "windows" {
+		devPaths = []string{
+			"./bin/localharness.exe",
+			"./localharness.exe",
+			"../bin/localharness.exe",
+			"./bin/localharness",
+			"./localharness",
+			"../bin/localharness",
+		}
+	} else {
+		devPaths = []string{
+			"./bin/localharness",
+			"./localharness",
+			"../bin/localharness",
+		}
+	}
+	for _, localPath := range devPaths {
 		if abs, err := filepath.Abs(localPath); err == nil && isExecutable(abs) {
 			logger.Debug("binary resolved via local dev path", "path", abs)
 			return abs, nil
@@ -133,10 +172,12 @@ func (r *BinaryResolver) Resolve(explicitPath string) (string, error) {
 	}
 
 	cacheDir := r.resolveCacheDir()
-	cachedPath := filepath.Join(cacheDir, "v"+version, binaryName)
-	if isExecutable(cachedPath) {
-		logger.Debug("binary resolved via cache", "path", cachedPath, "version", version)
-		return cachedPath, nil
+	for _, name := range []string{binaryNameForOS(), binaryName} {
+		cachedPath := filepath.Join(cacheDir, "v"+version, name)
+		if isExecutable(cachedPath) {
+			logger.Debug("binary resolved via cache", "path", cachedPath, "version", version)
+			return cachedPath, nil
+		}
 	}
 
 	// Step 5: Auto-download from GitHub releases
@@ -170,6 +211,12 @@ func (r *BinaryResolver) resolveExplicit(path string) (string, error) {
 			return path, nil
 		}
 		return abs, nil
+	}
+
+	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(path), ".exe") {
+		if isExecutable(path + ".exe") {
+			return filepath.Abs(path + ".exe")
+		}
 	}
 
 	// Maybe it's a command name resolvable via PATH
@@ -266,7 +313,11 @@ func (r *BinaryResolver) downloadAndCache(version, cacheDir string, logger *slog
 	}
 
 	// Find matching asset
-	expectedAsset := fmt.Sprintf("localharness-%s-%s.tar.gz", version, platSuffix)
+	ext := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		ext = ".zip"
+	}
+	expectedAsset := fmt.Sprintf("localharness-%s-%s%s", version, platSuffix, ext)
 	var assetURL, checksumsURL string
 
 	assets, _ := release["assets"].([]any)
@@ -301,7 +352,7 @@ func (r *BinaryResolver) downloadAndCache(version, cacheDir string, logger *slog
 		)
 	}
 
-	// Download tarball to temp file
+	// Download archive to temp file
 	logger.Info("downloading", "url", assetURL)
 	tmpDir, err := os.MkdirTemp("", "localharness-download-*")
 	if err != nil {
@@ -309,24 +360,30 @@ func (r *BinaryResolver) downloadAndCache(version, cacheDir string, logger *slog
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tarballPath := filepath.Join(tmpDir, expectedAsset)
-	if err := httpDownload(assetURL, tarballPath); err != nil {
-		return "", fmt.Errorf("download tarball: %w", err)
+	archivePath := filepath.Join(tmpDir, expectedAsset)
+	if err := httpDownload(assetURL, archivePath); err != nil {
+		return "", fmt.Errorf("download archive: %w", err)
 	}
 
 	// Verify checksum if available
 	if checksumsURL != "" {
-		if err := verifyChecksum(tarballPath, expectedAsset, checksumsURL, tmpDir, logger); err != nil {
+		if err := verifyChecksum(archivePath, expectedAsset, checksumsURL, tmpDir, logger); err != nil {
 			return "", err
 		}
 	} else {
 		logger.Warn("no checksums.txt found — skipping checksum verification")
 	}
 
-	// Extract binary from tarball
-	extractedBin, err := extractBinaryFromTarGz(tarballPath, tmpDir)
+	// Extract binary from archive
+	binName := binaryNameForOS()
+	var extractedBin string
+	if strings.HasSuffix(expectedAsset, ".zip") {
+		extractedBin, err = extractBinaryFromZip(archivePath, tmpDir, binName)
+	} else {
+		extractedBin, err = extractBinaryFromTarGz(archivePath, tmpDir, binName)
+	}
 	if err != nil {
-		return "", fmt.Errorf("extract tarball: %w", err)
+		return "", fmt.Errorf("extract archive: %w", err)
 	}
 
 	// Cache it
@@ -335,14 +392,16 @@ func (r *BinaryResolver) downloadAndCache(version, cacheDir string, logger *slog
 		return "", fmt.Errorf("create cache dir: %w", err)
 	}
 
-	cachedBin := filepath.Join(versionDir, binaryName)
+	cachedBin := filepath.Join(versionDir, binName)
 	if err := copyFile(extractedBin, cachedBin); err != nil {
 		return "", fmt.Errorf("cache binary: %w", err)
 	}
 
-	// Ensure executable
-	if err := os.Chmod(cachedBin, 0755); err != nil {
-		return "", fmt.Errorf("chmod cached binary: %w", err)
+	// Ensure executable on Unix
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(cachedBin, 0755); err != nil {
+			return "", fmt.Errorf("chmod cached binary: %w", err)
+		}
 	}
 
 	return cachedBin, nil
@@ -350,7 +409,7 @@ func (r *BinaryResolver) downloadAndCache(version, cacheDir string, logger *slog
 
 // --- Helper functions ---
 
-// isExecutable checks if a file exists and has the executable bit set.
+// isExecutable checks if a file exists and has executable permissions.
 func isExecutable(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -358,6 +417,10 @@ func isExecutable(path string) bool {
 	}
 	if info.IsDir() {
 		return false
+	}
+	if runtime.GOOS == "windows" {
+		ext := strings.ToLower(filepath.Ext(path))
+		return ext == ".exe" || ext == ".bat" || ext == ".cmd" || ext == ".com"
 	}
 	// On Unix, check executable bit
 	return info.Mode()&0111 != 0
@@ -470,8 +533,8 @@ func verifyChecksum(tarballPath, expectedName, checksumsURL, tmpDir string, logg
 	return nil
 }
 
-// extractBinaryFromTarGz extracts the "localharness" binary from a .tar.gz archive.
-func extractBinaryFromTarGz(tarballPath, destDir string) (string, error) {
+// extractBinaryFromTarGz extracts the target binary from a .tar.gz archive.
+func extractBinaryFromTarGz(tarballPath, destDir, targetBinary string) (string, error) {
 	f, err := os.Open(tarballPath)
 	if err != nil {
 		return "", err
@@ -496,14 +559,14 @@ func extractBinaryFromTarGz(tarballPath, destDir string) (string, error) {
 
 		// Security: skip path traversal attempts
 		cleanName := filepath.Clean(header.Name)
-		if strings.Contains(cleanName, "..") || strings.HasPrefix(cleanName, "/") {
+		if strings.Contains(cleanName, "..") || strings.HasPrefix(cleanName, "/") || strings.HasPrefix(cleanName, "\\") {
 			continue
 		}
 
 		// Look for the binary
 		baseName := filepath.Base(cleanName)
-		if baseName == binaryName && header.Typeflag == tar.TypeReg {
-			destPath := filepath.Join(destDir, binaryName)
+		if (baseName == targetBinary || baseName == "localharness" || baseName == "localharness.exe") && header.Typeflag == tar.TypeReg {
+			destPath := filepath.Join(destDir, targetBinary)
 			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 			if err != nil {
 				return "", err
@@ -520,7 +583,48 @@ func extractBinaryFromTarGz(tarballPath, destDir string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("binary %q not found in archive", binaryName)
+	return "", fmt.Errorf("binary %q not found in archive", targetBinary)
+}
+
+// extractBinaryFromZip extracts the target binary from a .zip archive.
+func extractBinaryFromZip(zipPath, destDir, targetBinary string) (string, error) {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", fmt.Errorf("zip open: %w", err)
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		cleanName := filepath.Clean(f.Name)
+		if strings.Contains(cleanName, "..") || strings.HasPrefix(cleanName, "/") || strings.HasPrefix(cleanName, "\\") {
+			continue
+		}
+
+		baseName := filepath.Base(cleanName)
+		if (baseName == targetBinary || baseName == "localharness" || baseName == "localharness.exe") && !f.FileInfo().IsDir() {
+			destPath := filepath.Join(destDir, targetBinary)
+			rc, err := f.Open()
+			if err != nil {
+				return "", err
+			}
+			defer rc.Close()
+
+			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			if err != nil {
+				return "", err
+			}
+
+			_, err = io.Copy(out, io.LimitReader(rc, 500*1024*1024))
+			out.Close()
+			if err != nil {
+				return "", err
+			}
+
+			return destPath, nil
+		}
+	}
+
+	return "", fmt.Errorf("binary %q not found in zip archive", targetBinary)
 }
 
 // copyFile copies a file from src to dst, preserving permissions.

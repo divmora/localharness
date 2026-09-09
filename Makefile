@@ -58,31 +58,38 @@ test-client:
 # Build lhctl CLI debugger
 build-lhctl:
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/lhctl ./cmd/lhctl
-	@echo "==> Built $(BIN_DIR)/lhctl"
+	go build -o $(BIN_DIR)/lhctl$(EXE_EXT) ./cmd/lhctl
+	@echo "==> Built $(BIN_DIR)/lhctl$(EXE_EXT)"
 
 # Full build: proto + binary + tools + agents
 all: proto build test-client build-lhctl
 	@echo "==> Full build complete."
 
 # Cross-compile for all supported platforms
-# Produces: dist/localharness-<VERSION>-<PLATFORM>.tar.gz + checksums.txt
+# Produces: dist/localharness-<VERSION>-<PLATFORM>.(tar.gz|zip) + checksums.txt
 cross-compile:
 	@echo "==> Cross-compiling $(BINARY) v$(VERSION) for all platforms..."
 	@mkdir -p $(DIST_DIR)
-	@for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do \
-		GOOS=$$(echo $$platform | cut -d- -f1) \
-		GOARCH=$$(echo $$platform | cut -d- -f2) \
+	@for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64; do \
+		GOOS=$$(echo $$platform | cut -d- -f1) ; \
+		GOARCH=$$(echo $$platform | cut -d- -f2) ; \
+		EXE="" ; \
+		if [ "$$GOOS" = "windows" ]; then EXE=".exe"; fi ; \
 		go build \
 			-ldflags="-s -w -X github.com/divmora/localharness/internal/config.HarnessVersion=$(VERSION)" \
-			-o $(DIST_DIR)/$(BINARY) \
+			-o $(DIST_DIR)/$(BINARY)$$EXE \
 			./cmd/localharness && \
-		tar -czf $(DIST_DIR)/$(BINARY)-$(VERSION)-$$platform.tar.gz \
-			-C $(DIST_DIR) $(BINARY) && \
-		rm $(DIST_DIR)/$(BINARY) && \
+		if [ "$$GOOS" = "windows" ]; then \
+			(cd $(DIST_DIR) && zip -q $(BINARY)-$(VERSION)-$$platform.zip $(BINARY)$$EXE) && \
+			rm $(DIST_DIR)/$(BINARY)$$EXE ; \
+		else \
+			tar -czf $(DIST_DIR)/$(BINARY)-$(VERSION)-$$platform.tar.gz \
+				-C $(DIST_DIR) $(BINARY) && \
+			rm $(DIST_DIR)/$(BINARY) ; \
+		fi && \
 		echo "    ✓ $$platform"; \
 	done
 	@echo "==> Generating checksums..."
-	@cd $(DIST_DIR) && sha256sum *.tar.gz > checksums.txt
+	@cd $(DIST_DIR) && (sha256sum *.tar.gz *.zip 2>/dev/null || shasum -a 256 *.tar.gz *.zip) > checksums.txt
 	@echo "==> Done. Artifacts in $(DIST_DIR)/"
 	@ls -lh $(DIST_DIR)/

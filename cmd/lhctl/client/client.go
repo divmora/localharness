@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/divmora/localharness/adk/connection"
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/daemon"
 )
@@ -112,15 +113,10 @@ func ConnectOrStartDaemonWithSession(logger *slog.Logger, sessionID string) (*Cl
 			return nil, fmt.Errorf("get daemon dir: %w", err)
 		}
 
-		selfPath, err := os.Executable()
+		resolver := &connection.BinaryResolver{Logger: logger}
+		harnessBin, err := resolver.Resolve("")
 		if err != nil {
-			selfPath = "localharness"
-		}
-		// If selfPath is lhctl, try to find localharness binary or use localharness command
-		binDir := filepath.Dir(selfPath)
-		harnessBin := filepath.Join(binDir, "localharness")
-		if _, err := os.Stat(harnessBin); err != nil {
-			harnessBin = "localharness"
+			return nil, fmt.Errorf("resolve localharness binary: %w", err)
 		}
 
 		logFile, err := os.OpenFile(filepath.Join(daemonDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
