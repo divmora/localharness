@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -40,24 +39,21 @@ func AskSideQuestionCmd(question string, history *ChatHistory, modelName string)
 			}
 		}
 
-		// Try to answer via configured LiteLLM / OpenAI provider if reachable
+		// Resolve the LiteLLM endpoint from the global config, mirroring
+		// Session.createProvider so side questions use the same provider as
+		// the main engine rather than reaching for direct Gemini/OpenAI keys.
 		liteCfg := config.LoadGlobalLiteLLMConfig(nil)
-		baseURL := ""
-		apiKey := os.Getenv("GEMINI_API_KEY")
-		if apiKey == "" {
-			apiKey = os.Getenv("OPENAI_API_KEY")
-		}
 
+		var baseURL, apiKey, model string
 		if liteCfg != nil && liteCfg.DefaultEndpoint != "" {
 			if ep, ok := liteCfg.Endpoints[liteCfg.DefaultEndpoint]; ok {
 				baseURL = ep.BaseURL
-				if ep.APIKey != "" {
-					apiKey = ep.APIKey
-				}
-				if ep.DefaultModel != "" && modelName == "" {
-					modelName = ep.DefaultModel
-				}
+				apiKey = ep.APIKey
+				model = ep.DefaultModel
 			}
+		}
+		if modelName == "" {
+			modelName = model
 		}
 
 		if baseURL != "" && apiKey != "" {
