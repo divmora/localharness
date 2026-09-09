@@ -58,3 +58,12 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Real-time DAG visualizer in the desktop GUI displaying active subagents, message flows, and token consumption metrics.
 - [ ] **Desktop Bundle Optimization**
   - Slim down bundled Tauri assets and reduce startup latency across macOS, Linux, and Windows.
+
+---
+
+## 6. Agent Integrations
+
+- [ ] **Agent Auto-Discovery**
+  - Automatically discover and build agent submodules under `agents/` without manual `go build` commands.
+- [ ] **Agent Version Matrix**
+  - Track and validate ADK version compatibility for each integrated agent submodule.

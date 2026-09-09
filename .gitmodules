@@ -2,3 +2,7 @@
 	path = agents/jules
 	url = https://github.com/divmora/jules-ai-agent
 	branch = main
+[submodule "agents/code-reviewer"]
+	path = agents/code-reviewer
+	url = https://github.com/divmora/code-reviewer-ai-agent
+	branch = main
