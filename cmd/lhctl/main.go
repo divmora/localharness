@@ -142,7 +142,15 @@ detach and attach to headless sessions, and inspect conversation state and trace
 			return statusDaemon()
 		},
 	}
-	daemonCmd.AddCommand(daemonStartCmd, daemonStopCmd, daemonStatusCmd)
+	daemonRunCmd := &cobra.Command{
+		Use:    "run",
+		Short:  "Run the LocalHarness daemon listener in foreground",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDaemon()
+		},
+	}
+	daemonCmd.AddCommand(daemonStartCmd, daemonStopCmd, daemonStatusCmd, daemonRunCmd)
 	rootCmd.AddCommand(daemonCmd)
 
 	// Subcommand: conversation (alias: conv)

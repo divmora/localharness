@@ -103,6 +103,40 @@ func ConnectOrStartDaemon(logger *slog.Logger) (*Client, error) {
 	return ConnectOrStartDaemonWithSession(logger, "")
 }
 
+// ResolveDaemonBinary finds an executable to run the daemon server.
+// Resolution chain:
+//  1. Universal 5-step BinaryResolver (looks for localharness binary)
+//  2. Local executable (lhctl itself can run "daemon run" directly)
+func ResolveDaemonBinary(logger *slog.Logger) (string, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	// 1. Try resolving localharness binary via standard chain
+	resolver := &connection.BinaryResolver{Logger: logger}
+	if bin, err := resolver.Resolve(""); err == nil {
+		return bin, nil
+	}
+
+	// 2. If running as lhctl, lhctl can run "daemon run" directly!
+	if selfPath, err := os.Executable(); err == nil {
+		absSelf, err := filepath.Abs(selfPath)
+		if err == nil {
+			// Check if localharness is beside self
+			dir := filepath.Dir(absSelf)
+			for _, name := range []string{"localharness", "localharness.exe"} {
+				cand := filepath.Join(dir, name)
+				if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+					return cand, nil
+				}
+			}
+			return absSelf, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not resolve localharness or lhctl binary")
+}
+
 // ConnectOrStartDaemonWithSession connects to an existing daemon with an optional target session ID.
 func ConnectOrStartDaemonWithSession(logger *slog.Logger, sessionID string) (*Client, error) {
 	running, info, _ := daemon.IsDaemonRunning()
@@ -113,10 +147,9 @@ func ConnectOrStartDaemonWithSession(logger *slog.Logger, sessionID string) (*Cl
 			return nil, fmt.Errorf("get daemon dir: %w", err)
 		}
 
-		resolver := &connection.BinaryResolver{Logger: logger}
-		harnessBin, err := resolver.Resolve("")
+		harnessBin, err := ResolveDaemonBinary(logger)
 		if err != nil {
-			return nil, fmt.Errorf("resolve localharness binary: %w", err)
+			return nil, fmt.Errorf("resolve daemon binary: %w", err)
 		}
 
 		logFile, err := os.OpenFile(filepath.Join(daemonDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

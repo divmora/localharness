@@ -113,3 +113,13 @@ func TestClientCommunication(t *testing.T) {
 		t.Errorf("expected 7 client messages received, got %d", count)
 	}
 }
+
+func TestResolveDaemonBinary(t *testing.T) {
+	bin, err := ResolveDaemonBinary(nil)
+	if err != nil {
+		t.Fatalf("ResolveDaemonBinary failed: %v", err)
+	}
+	if bin == "" {
+		t.Fatalf("expected non-empty binary path")
+	}
+}

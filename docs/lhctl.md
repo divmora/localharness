@@ -207,6 +207,9 @@ lhctl daemon status
 lhctl daemon stop
 ```
 
+> **Self-Hosting Daemon**: If the `localharness` binary is not found in system `$PATH` or cache, `lhctl` automatically self-hosts the background daemon using its internal runtime (`lhctl daemon run`), making `lhctl` completely self-contained with no external binary dependency.
+
+
 ---
 
 ## Offline Conversation Debugger

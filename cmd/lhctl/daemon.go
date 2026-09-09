@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/divmora/localharness/adk/connection"
+	"github.com/divmora/localharness/cmd/lhctl/client"
 	"github.com/divmora/localharness/internal/daemon"
 )
 
@@ -49,10 +49,9 @@ func startDaemon() error {
 		return fmt.Errorf("cannot resolve daemon directory: %w", err)
 	}
 
-	resolver := &connection.BinaryResolver{Logger: slog.Default()}
-	harnessBin, err := resolver.Resolve("")
+	harnessBin, err := client.ResolveDaemonBinary(slog.Default())
 	if err != nil {
-		return fmt.Errorf("resolve localharness binary: %w", err)
+		return fmt.Errorf("resolve daemon binary: %w", err)
 	}
 
 	logFile, err := os.OpenFile(filepath.Join(daemonDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -78,4 +77,9 @@ func startDaemon() error {
 	}
 	fmt.Println("LocalHarness daemon started in background.")
 	return nil
+}
+
+func runDaemon() error {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	return daemon.RunDaemonServer(logger)
 }
