@@ -37,7 +37,6 @@ Runnable Go programs using the `adk` package:
 | [adk-subagents](adk-subagents/) | Custom subagent types with tool-group control | `go run ./examples/adk-subagents` |
 | [adk-middleware](adk-middleware/) | Middleware pipeline: logging, token guard, tool selector, retry | `go run ./examples/adk-middleware` |
 | [adk-research](adk-research/) | Read-only research agent with checkpoints and resume | `go run ./examples/adk-research` |
-| [adk-code-review](adk-code-review/) | Code review agent with dynamic tool selection and failover | `go run ./examples/adk-code-review` |
 | [adk-subtask](adk-subtask/) | Ergonomic subtask API: sync, async, parallel, model override | `go run ./examples/adk-subtask` |
 | [auto-discovery](auto-discovery/) | Auto-discover skills/plugins from workspace `.agents/` directory | `go run ./examples/auto-discovery` |
 ## Test Client Examples (CLI)
