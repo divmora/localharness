@@ -1,29 +1,70 @@
 # Browser Automation (Playwright)
 
-LocalHarness provides built-in browser automation via [Playwright](https://playwright.dev/). When enabled, the agent can navigate websites, interact with UI elements, take screenshots, and verify web applications — powered by the official `@playwright/mcp` server.
+LocalHarness provides zero-config, built-in browser automation via [Playwright](https://playwright.dev/).
+Whenever Node.js/`npx` is installed in PATH, browser capability (`browser_subagent` and `@playwright/mcp`) is **automatically enabled by default**. Furthermore, LocalHarness **autonomously decides headed vs. headless mode**:
+- **Interactive Desktop Sessions** (macOS, Windows, or Linux with `$DISPLAY`/`$WAYLAND_DISPLAY`): The browser launches in **headed** mode with a visible browser window, allowing you to observe agent actions and solve logins/CAPTCHAs.
+- **Detached Daemons / Headless Environments** (`--detach`, CI, headless servers): LocalHarness runs the browser in **headless** mode invisibly.
+- **Explicit Overrides**: Pass `--headless` or `--headed` to force a specific mode, or `--no-browser` to disable browser tools entirely.
 
 ## Prerequisites
 
 - **Node.js 18+** installed on the host
-- **npx** available in PATH (comes with Node.js)
+- **npx** available in PATH (bundled with Node.js)
 
 Playwright browsers are auto-downloaded on first use by `@playwright/mcp`.
 
 ## Quick Start
 
-### SDK (Go)
+### CLI (`lhctl`)
 
-```go
-agent, _ := adk.NewAgent(&sdk.LocalAgentConfig{
-    LitellmAPIKey: os.Getenv("LITELLM_API_KEY"),
-    Capabilities: sdk.CapabilitiesConfig{
-        // ... other capabilities ...
-        Browser: true,
-    },
-})
+```bash
+# Just run lhctl — browser capability and headed mode are automatically active!
+lhctl run --prompt "Navigate to http://localhost:8080 and test the signup flow"
+
+# Force headless execution on a desktop machine
+lhctl run --headless --prompt "Run headless audit of https://example.com"
+
+# Force disable browser tools
+lhctl run --no-browser --prompt "Refactor internal Go code"
+
+# Custom browser profile directory
+lhctl run --browser-profile=~/.my-browser-profile --prompt "Access staging console"
+
+# Ephemeral isolated mode (no state saved between sessions)
+lhctl run --isolated --prompt "Run clean end-to-end checkout test"
+
+# Connect to an existing running browser via Chrome DevTools Protocol (CDP)
+lhctl run --connect-browser=http://localhost:9222 --prompt "Inspect current tab"
 ```
 
-That's it. The engine auto-injects `@playwright/mcp` as an MCP server.
+### Persistent Browser Profiles
+
+By default, LocalHarness provisions a persistent Chromium user profile at `~/.divmora/localharness/browser_profile`.
+- **Session Continuity**: Cookies, local storage, indexedDB, and session tokens persist across runs. Once you log in to an internal service, GitHub, or an authenticated portal, subsequent runs remain authenticated.
+- **Custom Profile**: Use `--browser-profile <path>` to target an existing Chrome/Chromium profile or project-specific directory.
+- **Clean-Slate Isolation**: Pass `--isolated` to run in memory without saving cookies or state across runs (ideal for automated CI tests).
+
+### Vision & Element Bounding Boxes
+
+The browser agent operates with full multimodal and visual grounding capabilities:
+- **`--snapshot-boxes`**: Element snapshots include exact bounding box coordinates `[box=x,y,width,height]`.
+- **`--caps=vision`**: Multimodal vision models can observe rendered page snapshots alongside accessibility tree refs.
+- **Session Recordings**: Traces and action artifacts are automatically saved into the conversation brain artifacts folder (`~/.divmora/localharness/brain/<session-id>/artifacts/`).
+
+### Human-in-the-Loop Handoff (2FA / CAPTCHA)
+
+When navigating web applications protected by Cloudflare bot checks, CAPTCHAs, or 2FA/MFA:
+1. The browser subagent detects the authentication barrier.
+2. Instead of failing or endlessly looping, it triggers an `ask_question` prompt asking the user to solve the verification.
+3. In headed mode (`--headed`), the user completes the challenge in the visible browser window, confirms in the terminal, and the subagent automatically resumes with the authenticated session intact.
+
+### Browser Modes
+
+The `browser_subagent` supports 4 operational modes:
+- **`auto`** (default): Starts headless for speed; automatically escalates to headed or prompts user if captcha/auth challenges are encountered.
+- **`headed`**: Launches a visible browser window so user can view interactions and intervene for 2FA/logins.
+- **`headless`**: Runs entirely invisibly in the background.
+- **`connect`**: Attaches to an already running Chromium/Chrome browser via CDP URL.
 
 ### Manual MCP Config (Alternative)
 

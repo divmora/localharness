@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -57,36 +58,40 @@ type QuestionHandler func(ctx context.Context, req *pb.ActionUserQuestion) (*pb.
 
 // Engine orchestrates the agentic loop.
 type Engine struct {
-	provider            llm.Provider
-	toolRegistry        *tools.Registry
-	logger              *slog.Logger
-	stepCB              StepCallback
-	trajCB              TrajectoryCallback
-	stepIndex           atomic.Int32
-	trajectoryID        string
-	convID              string
-	sysPrompt           string
-	history             []llm.Message
-	maxTurns            int // Safety limit on agentic loop iterations
-	compactionThreshold int // Token threshold for context compaction (0 = disabled)
-	keepRecentMessages  int // Messages to preserve during compaction
-	lastRealTokenCount  int // Most recent real token count from LLM provider
-	tracer              *Tracer
-	brainDir            string                     // For child engine tracing
-	appDataDir          string                     // Root data dir (for subagent inheritance)
-	enablePlanningMode  bool                       // Planning guard: block workspace writes until plan exists
-	researchToolCount   int                        // Tracks research tool calls (view_file, list_dir, search_dir)
-	hostToolHandler     HostToolHandler            // Called for SDK-registered tools
-	hostToolNames       map[string]bool            // Fast lookup of host tool names
-	hostToolDecls       []llm.FunctionDeclaration  // Host tool schemas for LLM
-	permissionHandler   PermissionHandler          // Called before tool execution for policy checks
-	permissionGrants    []PermissionGrant          // Grants from ask_permission (session-scoped)
-	questionHandler     QuestionHandler            // Called for ask_question tool
-	mcpMgr              *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
-	msgCtx              MessageContextConfig       // Per-message context enrichment config
-	notifyCh            <-chan tools.SystemMessage // System notifications (timers, task completions)
-	running             atomic.Int32               // 1 = engine is running a turn, 0 = idle
-	preCompletionHook   func()                     // Called before TRAJ_IDLE so session can save state
+	provider             llm.Provider
+	toolRegistry         *tools.Registry
+	logger               *slog.Logger
+	stepCB               StepCallback
+	trajCB               TrajectoryCallback
+	stepIndex            atomic.Int32
+	trajectoryID         string
+	convID               string
+	sysPrompt            string
+	history              []llm.Message
+	maxTurns             int // Safety limit on agentic loop iterations
+	compactionThreshold  int // Token threshold for context compaction (0 = disabled)
+	keepRecentMessages   int // Messages to preserve during compaction
+	lastRealTokenCount   int // Most recent real token count from LLM provider
+	tracer               *Tracer
+	brainDir             string                     // For child engine tracing
+	appDataDir           string                     // Root data dir (for subagent inheritance)
+	enablePlanningMode   bool                       // Planning guard: block workspace writes until plan exists
+	researchToolCount    int                        // Tracks research tool calls (view_file, list_dir, search_dir)
+	hostToolHandler      HostToolHandler            // Called for SDK-registered tools
+	hostToolNames        map[string]bool            // Fast lookup of host tool names
+	hostToolDecls        []llm.FunctionDeclaration  // Host tool schemas for LLM
+	permissionHandler    PermissionHandler          // Called before tool execution for policy checks
+	permissionGrants     []PermissionGrant          // Grants from ask_permission (session-scoped)
+	questionHandler      QuestionHandler            // Called for ask_question tool
+	mcpMgr               *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
+	msgCtx               MessageContextConfig       // Per-message context enrichment config
+	notifyCh             <-chan tools.SystemMessage // System notifications (timers, task completions)
+	notifySendCh         chan<- tools.SystemMessage // Channel to forward notifications from subagents
+	hasBrowserConfig     bool                       // Explicit browser configuration flag
+	hasDesktopConfig     bool                       // Explicit desktop configuration flag
+	pendingSyntheticMsgs []string                   // Buffered synthetic notifications to include on next turn
+	running              atomic.Int32               // 1 = engine is running a turn, 0 = idle
+	preCompletionHook    func()                     // Called before TRAJ_IDLE so session can save state
 
 	// Interruption API channels
 	pauseCh  chan struct{}
@@ -187,7 +192,11 @@ type Config struct {
 	Plugins              []PluginDef       // Installed plugins (data-driven: non-empty = enabled)
 
 	// System notification channel (from timers, background tasks)
-	NotifyCh <-chan tools.SystemMessage
+	NotifyCh     <-chan tools.SystemMessage
+	NotifySendCh chan<- tools.SystemMessage // Channel for subagents to send completion notifications
+
+	HasBrowserConfig bool // Whether browser capability is explicitly configured
+	HasDesktopConfig bool // Whether desktop capability is explicitly configured
 
 	// Tool group filtering for subagents.
 	// ExcludeToolGroups is a set of ToolGroup values to hide from the LLM.
@@ -237,8 +246,10 @@ func NewEngine(cfg Config) *Engine {
 	}
 
 	// Create subagent tracker with parent notification channel
-	var trackerNotifyCh chan tools.SystemMessage
-	if cfg.SubagentsEnabled {
+	var trackerNotifyCh chan<- tools.SystemMessage
+	if cfg.NotifySendCh != nil {
+		trackerNotifyCh = cfg.NotifySendCh
+	} else if cfg.SubagentsEnabled {
 		trackerNotifyCh = make(chan tools.SystemMessage, 32)
 	}
 	subagentTracker := NewSubagentTracker(trackerNotifyCh)
@@ -349,6 +360,9 @@ func NewEngine(cfg Config) *Engine {
 			SubagentTypes:  subagentTypes,
 		},
 		notifyCh:                 cfg.NotifyCh,
+		notifySendCh:             cfg.NotifySendCh,
+		hasBrowserConfig:         cfg.HasBrowserConfig,
+		hasDesktopConfig:         cfg.HasDesktopConfig,
 		depth:                    cfg.Depth,
 		maxDepth:                 cfg.MaxDepth,
 		maxSubagents:             cfg.MaxSubagents,
@@ -618,6 +632,12 @@ func (e *Engine) RunWithContext(ctx context.Context, userMessage string, hostCtx
 		}
 	}
 drained:
+	e.mu.Lock()
+	if len(e.pendingSyntheticMsgs) > 0 {
+		pendingMsgs = append(pendingMsgs, e.pendingSyntheticMsgs...)
+		e.pendingSyntheticMsgs = nil
+	}
+	e.mu.Unlock()
 
 	// Enrich the user message with dynamic context for the LLM
 	msgCtx := e.msgCtx // Copy base config (includes any ADK-injected ephemeral messages)
@@ -1166,6 +1186,24 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 		return e.executeSendMessage(ctx, tc, step)
 	case "browser_subagent":
 		return e.executeBrowserSubagent(ctx, tc, step)
+	case "desktop_subagent":
+		return e.executeDesktopSubagent(ctx, tc, step)
+	}
+
+	// Check if this is a desktop atomic tool
+	switch tc.Name {
+	case "desktop_screenshot":
+		return e.executeDesktopScreenshot(ctx, tc, step)
+	case "desktop_list_windows":
+		return e.executeDesktopListWindows(ctx, tc, step)
+	case "desktop_focus_window":
+		return e.executeDesktopFocusWindow(ctx, tc, step)
+	case "desktop_click":
+		return e.executeDesktopClick(ctx, tc, step)
+	case "desktop_type":
+		return e.executeDesktopType(ctx, tc, step)
+	case "desktop_shortcut":
+		return e.executeDesktopShortcut(ctx, tc, step)
 	}
 
 	// Check if this is a knowledge tool (handled by engine directly)
@@ -2057,6 +2095,11 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 		_ = json.Unmarshal(argsJSON, action)
 		step.Action = &pb.StepUpdate_BrowserSubagent{BrowserSubagent: action}
 
+	case "desktop_subagent":
+		action := &pb.ActionDesktopSubagent{}
+		_ = json.Unmarshal(argsJSON, action)
+		step.Action = &pb.StepUpdate_DesktopSubagent{DesktopSubagent: action}
+
 	case "search_web":
 		action := &pb.ActionSearchWeb{}
 		_ = json.Unmarshal(argsJSON, action)
@@ -2205,7 +2248,17 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 			"server": mt.ServerName, "tool": mt.ToolName,
 			"result": mt.ResultJson, "is_error": mt.IsError,
 		}
+	case *pb.StepUpdate_DesktopSubagent:
+		da := a.DesktopSubagent
+		result = map[string]interface{}{
+			"conversation_id": da.ConversationId,
+			"target_app":      da.TargetApplication,
+			"error":           da.ErrorMessage,
+		}
 	default:
+		if step.Text != "" {
+			return step.Text
+		}
 		result = map[string]interface{}{"status": "done"}
 	}
 
@@ -2407,9 +2460,19 @@ func (e *Engine) buildToolDeclarations() []llm.FunctionDeclaration {
 		decls = append(decls, subagentToolDeclarations()...)
 	}
 
-	// Append browser subagent if enabled and depth allows
-	if e.subagentsEnabled && e.depth < e.maxDepth {
+	// Append browser subagent if enabled, depth allows, and browser capability is available
+	if e.subagentsEnabled && e.depth < e.maxDepth && e.hasBrowserCapability() {
 		decls = append(decls, browserSubagentDeclaration())
+	}
+
+	// Append desktop subagent if enabled, depth allows, and desktop capability is available
+	if e.subagentsEnabled && e.depth < e.maxDepth && e.hasDesktopCapability() {
+		decls = append(decls, desktopSubagentDeclaration())
+	}
+
+	// Append direct desktop tools if desktop capability is configured
+	if e.hasDesktopConfig {
+		decls = append(decls, desktopToolDeclarations()...)
 	}
 
 	return decls
@@ -2453,10 +2516,64 @@ func (e *Engine) knownToolNames() map[string]bool {
 		"invoke_subagent", "define_subagent", "manage_subagents",
 		"send_message", "ask_question", "ask_permission", "list_permissions",
 		"knowledge_write", "knowledge_replace", "knowledge_delete",
-		"publish", "finish", "browser_subagent",
+		"publish", "finish", "browser_subagent", "desktop_subagent",
+		"desktop_screenshot", "desktop_list_windows", "desktop_focus_window",
+		"desktop_click", "desktop_type", "desktop_shortcut",
 	} {
 		names[name] = true
 	}
 
 	return names
+}
+
+func (e *Engine) hasBrowserCapability() bool {
+	if e.hasBrowserConfig {
+		return true
+	}
+	if e.mcpMgr != nil {
+		for _, d := range e.mcpMgr.ToolDeclarations() {
+			lower := strings.ToLower(d.Name)
+			if strings.HasPrefix(lower, "browser_") || strings.HasPrefix(lower, "playwright_") || strings.Contains(lower, "browser") {
+				return true
+			}
+		}
+	}
+	for name := range e.hostToolNames {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "browser_") || strings.HasPrefix(lower, "playwright_") || strings.Contains(lower, "browser") {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) hasDesktopCapability() bool {
+	if e.hasDesktopConfig {
+		return true
+	}
+	switch runtime.GOOS {
+	case "darwin", "linux", "windows":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Engine) notifyParent(msg tools.SystemMessage) {
+	if e.notifySendCh != nil {
+		select {
+		case e.notifySendCh <- msg:
+		default:
+		}
+	}
+	if e.subagentTracker != nil {
+		e.subagentTracker.NotifyParent(msg)
+	}
+}
+
+// AddPendingMessages adds synthetic messages/notifications to be processed on the next turn.
+func (e *Engine) AddPendingMessages(msgs ...string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.pendingSyntheticMsgs = append(e.pendingSyntheticMsgs, msgs...)
 }

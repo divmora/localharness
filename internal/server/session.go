@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,34 +30,36 @@ import (
 
 // Session manages a single WebSocket connection from an SDK client.
 type Session struct {
-	conn                 *websocket.Conn
-	logger               *slog.Logger
-	serverCfg            *config.ServerConfig
-	mu                   sync.Mutex // Protects writes to conn
-	engine               *engine.Engine
-	conv                 *conversation.Conversation
-	cancel               context.CancelFunc
-	toolRegistry         *tools.Registry
-	mcpMgr               *mcpbridge.Manager                     // MCP server bridge
-	pendingToolResults   map[string]chan *pb.ToolResult         // stepID → result channel
-	pendingMu            sync.Mutex                             // Protects pendingToolResults
-	pendingPermissions   map[string]chan *pb.PermissionResponse // requestID → response channel
-	pendingPermissionsMu sync.Mutex                             // Protects pendingPermissions
-	pendingQuestions     map[string]chan *pb.QuestionResponse   // requestID → response channel
-	pendingQuestionsMu   sync.Mutex                             // Protects pendingQuestions
-	notifyCh             <-chan tools.SystemMessage             // System notifications for auto-wake
-	maxAutoWakeTurns     int                                    // Max synthetic turns before needing real user message (0 = disabled)
-	autoWakeCount        int                                    // Current count of consecutive auto-wake turns
-	turnWg               sync.WaitGroup                         // Tracks in-flight handleUserMessage goroutines
-	earlyUserMessages    []*pb.UserMessage                      // User messages received before engine initialization
-	earlyUserMessagesMu  sync.Mutex                             // Protects earlyUserMessages
-	wsMgr                *workspace.Manager
-	yoloMode             bool
-	isRestricted         bool
-	isDaemon             bool
-	detached             bool
-	ringBuffer           *EventRingBuffer
-	approvalQueue        *ApprovalQueue
+	conn                   *websocket.Conn
+	logger                 *slog.Logger
+	serverCfg              *config.ServerConfig
+	mu                     sync.Mutex // Protects writes to conn
+	engine                 *engine.Engine
+	conv                   *conversation.Conversation
+	cancel                 context.CancelFunc
+	toolRegistry           *tools.Registry
+	mcpMgr                 *mcpbridge.Manager                     // MCP server bridge
+	pendingToolResults     map[string]chan *pb.ToolResult         // stepID → result channel
+	pendingMu              sync.Mutex                             // Protects pendingToolResults
+	pendingPermissions     map[string]chan *pb.PermissionResponse // requestID → response channel
+	pendingPermissionsMu   sync.Mutex                             // Protects pendingPermissions
+	pendingQuestions       map[string]chan *pb.QuestionResponse   // requestID → response channel
+	pendingQuestionsMu     sync.Mutex                             // Protects pendingQuestions
+	notifyCh               <-chan tools.SystemMessage             // System notifications for auto-wake
+	pendingNotifications   []tools.SystemMessage                  // Buffered notifications when auto-wake is disabled or engine busy
+	pendingNotificationsMu sync.Mutex                             // Protects pendingNotifications
+	maxAutoWakeTurns       int                                    // Max synthetic turns before needing real user message (0 = disabled)
+	autoWakeCount          int                                    // Current count of consecutive auto-wake turns
+	turnWg                 sync.WaitGroup                         // Tracks in-flight handleUserMessage goroutines
+	earlyUserMessages      []*pb.UserMessage                      // User messages received before engine initialization
+	earlyUserMessagesMu    sync.Mutex                             // Protects earlyUserMessages
+	wsMgr                  *workspace.Manager
+	yoloMode               bool
+	isRestricted           bool
+	isDaemon               bool
+	detached               bool
+	ringBuffer             *EventRingBuffer
+	approvalQueue          *ApprovalQueue
 }
 
 // NewSession creates a new session for a WebSocket connection.
@@ -165,10 +169,12 @@ func (s *Session) Run() {
 				// Auto-wake: if engine is idle and within limit, start a synthetic turn
 				if s.engine != nil && s.engine.IsIdle() && s.canAutoWake() {
 					s.handleAutoWake(ctx, notif)
+				} else {
+					// Buffer unhandled notification so the engine processes it on the next turn
+					s.pendingNotificationsMu.Lock()
+					s.pendingNotifications = append(s.pendingNotifications, notif)
+					s.pendingNotificationsMu.Unlock()
 				}
-				// If engine is busy, the notification was drained from the channel.
-				// It won't be re-queued, but the engine will drain any remaining
-				// notifications at the start of its next turn.
 			}
 		} else {
 			select {
@@ -505,10 +511,14 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		globalMcpServers := config.LoadGlobalMcpConfig(s.logger)
 		mergedMcpServers := config.MergeMcpConfigs(globalMcpServers, cfg.McpServers)
 
-		// Auto-inject Playwright MCP server when browser capability is enabled
-		if cfg.BuiltinTools != nil && cfg.BuiltinTools.Browser {
+		// Auto-inject Playwright MCP server when browser capability is enabled (default: true if npx available)
+		browserEnabled := true
+		if cfg.BuiltinTools != nil {
+			browserEnabled = cfg.BuiltinTools.Browser
+		}
+		if browserEnabled {
 			if _, err := exec.LookPath("npx"); err != nil {
-				s.logger.Warn("Browser capability enabled but npx not found in PATH — install Node.js to use browser tools")
+				s.logger.Debug("npx not found in PATH — browser tools unavailable")
 			} else {
 				// Check if user already configured a "playwright" MCP server
 				hasPlaywright := false
@@ -519,17 +529,38 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 					}
 				}
 				if !hasPlaywright {
+					pwArgs := []string{"-y", "@playwright/mcp@latest"}
+					if s.detached || !config.HasGuiDisplay() {
+						pwArgs = append(pwArgs, "--headless")
+					}
+					if cfg.IsolatedBrowser {
+						pwArgs = append(pwArgs, "--isolated")
+					} else {
+						profileDir := cfg.BrowserProfileDir
+						if profileDir == "" {
+							profileDir = filepath.Join(appDataDir, "browser_profile")
+						}
+						_ = os.MkdirAll(profileDir, 0755)
+						pwArgs = append(pwArgs, fmt.Sprintf("--user-data-dir=%s", profileDir))
+					}
+					pwArgs = append(pwArgs, "--snapshot-boxes", "--caps=vision")
+					if s.conv != nil && s.conv.ID != "" {
+						brainArtifactsDir := filepath.Join(appDataDir, "brain", s.conv.ID, "artifacts")
+						_ = os.MkdirAll(brainArtifactsDir, 0755)
+						pwArgs = append(pwArgs, "--save-session", fmt.Sprintf("--output-dir=%s", brainArtifactsDir))
+					}
+
 					playwrightCfg := &pb.McpServerConfig{
 						Name: "playwright",
 						Transport: &pb.McpServerConfig_Stdio{
 							Stdio: &pb.McpStdioTransport{
 								Command: "npx",
-								Args:    []string{"-y", "@playwright/mcp@latest"},
+								Args:    pwArgs,
 							},
 						},
 					}
 					mergedMcpServers = append(mergedMcpServers, playwrightCfg)
-					s.logger.Info("auto-injecting Playwright MCP server for browser capability")
+					s.logger.Info("auto-injecting Playwright MCP server for browser capability", "profile", cfg.BrowserProfileDir, "isolated", cfg.IsolatedBrowser, "headless", s.detached || !config.HasGuiDisplay())
 				}
 			}
 		}
@@ -574,11 +605,13 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 	// Wire system notification channel: timers, cron, and task completions
 	// all push to the same channel so the engine can drain them before each turn.
 	var notifyCh <-chan tools.SystemMessage
+	var notifySendCh chan<- tools.SystemMessage
 	if toolRegistry.TaskManager() != nil {
 		schedMgr := toolRegistry.TaskManager().ScheduleManager()
 		notifyCh = schedMgr.Notifications()
+		notifySendCh = schedMgr.NotifyChannel()
 		// TaskManager pushes completions to the same underlying channel
-		toolRegistry.TaskManager().SetNotifyChannel(schedMgr.NotifyChannel())
+		toolRegistry.TaskManager().SetNotifyChannel(notifySendCh)
 	}
 
 	// Discover skills and plugins from filesystem (global + workspace)
@@ -633,6 +666,9 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		Skills:                 allSkills,
 		Plugins:                allPlugins,
 		NotifyCh:               notifyCh,
+		NotifySendCh:           notifySendCh,
+		HasBrowserConfig:       builtinCfg.Browser,
+		HasDesktopConfig:       builtinCfg.Desktop,
 		ProjectRegistry:        projectRegistry,
 		ConversationManager:    convMgr,
 		YoloMode:               s.yoloMode,
@@ -710,7 +746,20 @@ func (s *Session) handleUserMessage(ctx context.Context, msg *pb.UserMessage) {
 
 	defer s.turnWg.Done()
 
-	s.logger.Info("user message received", "content_len", len(msg.Content))
+	// Reset auto-wake count on user messages so the user gets fresh auto-wake budget
+	if !strings.HasPrefix(msg.Content, "[System notification:") {
+		s.autoWakeCount = 0
+	}
+
+	// Drain any unhandled buffered notifications into the engine's pending queue
+	s.pendingNotificationsMu.Lock()
+	if len(s.pendingNotifications) > 0 {
+		for _, notif := range s.pendingNotifications {
+			s.engine.AddPendingMessages(fmt.Sprintf("[System notification: %s] %s", notif.Source, notif.Content))
+		}
+		s.pendingNotifications = nil
+	}
+	s.pendingNotificationsMu.Unlock()
 
 	// Log user message to conversation
 	s.conv.AddMessage(&pb.ConversationMessage{

@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,6 +13,137 @@ import (
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
+
+// SemanticAction defines the high-level human-readable action category.
+type SemanticAction int
+
+const (
+	ActionUnknown SemanticAction = iota
+	ActionRead
+	ActionSearch
+	ActionFind
+	ActionWrite
+	ActionRun
+	ActionBrowse
+	ActionDesktop
+	ActionAgent
+)
+
+func (a SemanticAction) String() string {
+	switch a {
+	case ActionRead:
+		return "Read"
+	case ActionSearch:
+		return "Search"
+	case ActionFind:
+		return "Find"
+	case ActionWrite:
+		return "Write"
+	case ActionRun:
+		return "Run"
+	case ActionBrowse:
+		return "Browse"
+	case ActionDesktop:
+		return "Desktop"
+	case ActionAgent:
+		return "Agent"
+	default:
+		return "Tool"
+	}
+}
+
+func (a SemanticAction) Verb() string {
+	switch a {
+	case ActionRead:
+		return "Reading"
+	case ActionSearch:
+		return "Searching"
+	case ActionFind:
+		return "Finding"
+	case ActionWrite:
+		return "Writing"
+	case ActionRun:
+		return "Running"
+	case ActionBrowse:
+		return "Browsing"
+	case ActionDesktop:
+		return "Desktop"
+	case ActionAgent:
+		return "Agent"
+	default:
+		return "Running"
+	}
+}
+
+func (a SemanticAction) DoneVerb() string {
+	switch a {
+	case ActionRead:
+		return "Read"
+	case ActionSearch:
+		return "Searched"
+	case ActionFind:
+		return "Found"
+	case ActionWrite:
+		return "Wrote"
+	case ActionRun:
+		return "Ran"
+	case ActionBrowse:
+		return "Browsed"
+	case ActionDesktop:
+		return "Desktop"
+	case ActionAgent:
+		return "Agent"
+	default:
+		return "Ran"
+	}
+}
+
+func (a SemanticAction) BadgeStyle() lipgloss.Style {
+	switch a {
+	case ActionRead:
+		return ActionBadgeRead
+	case ActionSearch:
+		return ActionBadgeSearch
+	case ActionFind:
+		return ActionBadgeFind
+	case ActionWrite:
+		return ActionBadgeWrite
+	case ActionRun:
+		return ActionBadgeRun
+	case ActionBrowse:
+		return ActionBadgeBrowse
+	case ActionDesktop:
+		return ActionBadgeDesktop
+	case ActionAgent:
+		return ActionBadgeAgent
+	default:
+		return ToolCallHeaderStyle
+	}
+}
+
+func inferSemanticAction(toolName string) SemanticAction {
+	lower := strings.ToLower(toolName)
+	switch {
+	case lower == "view_file" || lower == "read_url_content" || strings.HasPrefix(lower, "read_"):
+		return ActionRead
+	case lower == "grep_search" || lower == "search_web" || strings.Contains(lower, "search"):
+		return ActionSearch
+	case lower == "find_file" || lower == "list_dir" || strings.HasPrefix(lower, "find_") || strings.HasPrefix(lower, "list_"):
+		return ActionFind
+	case lower == "write_to_file" || lower == "replace_file_content" || lower == "multi_replace_file_content" || strings.HasPrefix(lower, "write_") || strings.HasPrefix(lower, "edit_"):
+		return ActionWrite
+	case lower == "run_command" || lower == "execute_command" || lower == "bash" || lower == "sh":
+		return ActionRun
+	case strings.HasPrefix(lower, "browser_") || strings.HasPrefix(lower, "playwright_"):
+		return ActionBrowse
+	case strings.HasPrefix(lower, "desktop_"):
+		return ActionDesktop
+	case strings.Contains(lower, "subagent"):
+		return ActionAgent
+	default:
+		return ActionUnknown
+	}
+}
 
 // ChatItemType defines the kind of chat entry.
 type ChatItemType int
@@ -27,29 +161,45 @@ const (
 
 // ChatItem represents a rendered entry in the conversation log.
 type ChatItem struct {
-	Type      ChatItemType
-	Content   string
-	Timestamp time.Time
-	ToolName  string
-	ToolArgs  string
-	Duration  time.Duration
-	IsActive  bool
-	IsError   bool
-	DiffBlock string
+	Type           ChatItemType
+	Content        string
+	Timestamp      time.Time
+	ToolName       string
+	ToolArgs       string
+	Duration       time.Duration
+	IsActive       bool
+	IsError        bool
+	DiffBlock      string
+	SemanticAction SemanticAction
+	Target         string
+	Summary        string
 }
 
 // ChatHistory manages the ordered list of chat items and streaming buffer.
 type ChatHistory struct {
-	items          []ChatItem
-	streamingText  strings.Builder
-	thinkingText   strings.Builder
-	activeToolItem *ChatItem
-	toolStartTime  time.Time
+	items             []ChatItem
+	streamingText     strings.Builder
+	thinkingText      strings.Builder
+	thinkingStartTime time.Time
+	activeToolItem    *ChatItem
+	toolStartTime     time.Time
+	workspaces        []string
+	showThinking      bool
 }
 
 // NewChatHistory creates a new chat history tracker.
 func NewChatHistory() *ChatHistory {
 	return &ChatHistory{}
+}
+
+// SetWorkspaces sets the current workspace roots for relative path display.
+func (h *ChatHistory) SetWorkspaces(ws []string) {
+	h.workspaces = ws
+}
+
+// SetShowThinking toggles raw thinking visibility.
+func (h *ChatHistory) SetShowThinking(show bool) {
+	h.showThinking = show
 }
 
 // LoadFromState populates chat history from a loaded ConversationState protobuf.
@@ -78,26 +228,49 @@ func (h *ChatHistory) LoadFromState(state *pb.ConversationState) {
 				})
 			}
 			for _, tc := range msg.ToolCalls {
+				action := inferSemanticAction(tc.Name)
+				target := extractTargetFromArgs(tc.Name, tc.ArgsJson)
 				h.items = append(h.items, ChatItem{
-					Type:      ChatItemToolCall,
-					ToolName:  tc.Name,
-					ToolArgs:  tc.ArgsJson,
-					Timestamp: time.Now(),
+					Type:           ChatItemToolCall,
+					ToolName:       tc.Name,
+					ToolArgs:       tc.ArgsJson,
+					SemanticAction: action,
+					Target:         target,
+					Timestamp:      time.Now(),
 				})
 			}
 		case "tool":
 			if msg.ToolResult != nil {
-				itemType := ChatItemToolResult
-				if msg.ToolResult.IsError {
-					itemType = ChatItemError
+				// Attach result cleanly to the matching preceding tool call if available
+				if len(h.items) > 0 && h.items[len(h.items)-1].Type == ChatItemToolCall && h.items[len(h.items)-1].ToolName == msg.ToolResult.Name {
+					last := &h.items[len(h.items)-1]
+					last.IsError = msg.ToolResult.IsError
+					if msg.ToolResult.IsError {
+						last.Content = msg.ToolResult.Content
+						last.Summary = "failed"
+					} else {
+						lineCount := strings.Count(msg.ToolResult.Content, "\n")
+						if lineCount > 0 {
+							last.Summary = fmt.Sprintf("%d lines", lineCount)
+						} else if len(msg.ToolResult.Content) > 0 && len(msg.ToolResult.Content) < 40 {
+							last.Summary = msg.ToolResult.Content
+						} else {
+							last.Summary = "ok"
+						}
+					}
+				} else {
+					itemType := ChatItemToolResult
+					if msg.ToolResult.IsError {
+						itemType = ChatItemError
+					}
+					h.items = append(h.items, ChatItem{
+						Type:      itemType,
+						ToolName:  msg.ToolResult.Name,
+						Content:   msg.ToolResult.Content,
+						IsError:   msg.ToolResult.IsError,
+						Timestamp: time.Now(),
+					})
 				}
-				h.items = append(h.items, ChatItem{
-					Type:      itemType,
-					ToolName:  msg.ToolResult.Name,
-					Content:   msg.ToolResult.Content,
-					IsError:   msg.ToolResult.IsError,
-					Timestamp: time.Now(),
-				})
 			}
 		case "system":
 			if msg.Content != "" {
@@ -128,15 +301,20 @@ func (h *ChatHistory) AppendStreamingText(delta string) {
 
 // AppendThinkingText adds thinking/reasoning delta.
 func (h *ChatHistory) AppendThinkingText(delta string) {
+	if h.thinkingText.Len() == 0 {
+		h.thinkingStartTime = time.Now()
+	}
 	h.thinkingText.WriteString(delta)
 }
 
 // FlushStreaming commits any active streaming or thinking buffer into chat items.
 func (h *ChatHistory) FlushStreaming() {
 	if h.thinkingText.Len() > 0 {
+		dur := time.Since(h.thinkingStartTime)
 		h.items = append(h.items, ChatItem{
 			Type:      ChatItemThinking,
 			Content:   h.thinkingText.String(),
+			Duration:  dur,
 			Timestamp: time.Now(),
 		})
 		h.thinkingText.Reset()
@@ -154,12 +332,16 @@ func (h *ChatHistory) FlushStreaming() {
 // StartToolCall registers an active tool execution.
 func (h *ChatHistory) StartToolCall(name, args string) {
 	h.FlushStreaming()
+	action := inferSemanticAction(name)
+	target := extractTargetFromArgs(name, args)
 	item := ChatItem{
-		Type:      ChatItemToolCall,
-		ToolName:  name,
-		ToolArgs:  args,
-		Timestamp: time.Now(),
-		IsActive:  true,
+		Type:           ChatItemToolCall,
+		ToolName:       name,
+		ToolArgs:       args,
+		SemanticAction: action,
+		Target:         target,
+		Timestamp:      time.Now(),
+		IsActive:       true,
 	}
 	h.items = append(h.items, item)
 	h.activeToolItem = &h.items[len(h.items)-1]
@@ -173,22 +355,28 @@ func (h *ChatHistory) FinishToolCall(name string, result string, isError bool, d
 		h.activeToolItem.IsActive = false
 		h.activeToolItem.Duration = dur
 		h.activeToolItem.IsError = isError
+		h.activeToolItem.Summary = result
+		h.activeToolItem.DiffBlock = diff
+		if isError {
+			h.activeToolItem.Content = result
+		}
 		h.activeToolItem = nil
+		return
 	}
 
-	itemType := ChatItemToolResult
-	if isError {
-		itemType = ChatItemError
-	}
-
+	action := inferSemanticAction(name)
+	target := extractTargetFromArgs(name, "")
 	h.items = append(h.items, ChatItem{
-		Type:      itemType,
-		ToolName:  name,
-		Content:   result,
-		Duration:  dur,
-		IsError:   isError,
-		DiffBlock: diff,
-		Timestamp: time.Now(),
+		Type:           ChatItemToolCall,
+		ToolName:       name,
+		SemanticAction: action,
+		Target:         target,
+		Duration:       dur,
+		IsError:        isError,
+		Summary:        result,
+		DiffBlock:      diff,
+		Content:        result,
+		Timestamp:      time.Now(),
 	})
 }
 
@@ -239,33 +427,108 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 			sb.WriteString("\n" + AssistantMsgStyle.Render("🤖 Assistant:") + "\n" + wrapString(item.Content, contentWidth) + "\n")
 
 		case ChatItemThinking:
-			sb.WriteString("\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+item.Content) + "\n")
+			if h.showThinking {
+				sb.WriteString("\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+item.Content) + "\n")
+			} else {
+				thoughtDur := item.Duration
+				durStr := ""
+				if thoughtDur > 0 {
+					durStr = fmt.Sprintf(" for %s", thoughtDur.Round(100*time.Millisecond).String())
+				}
+				sb.WriteString("  " + ThinkingCollapsedStyle.Render(fmt.Sprintf("💭 Thought%s", durStr)) + "\n")
+			}
 
 		case ChatItemToolCall:
+			action := item.SemanticAction
+			if action == ActionUnknown {
+				action = inferSemanticAction(item.ToolName)
+			}
+			target := item.Target
+			if target == "" {
+				target = extractTargetFromArgs(item.ToolName, item.ToolArgs)
+			}
+			target = formatRelativePath(target, h.workspaces)
+			maxTargetLen := max(15, contentWidth-35)
+			if len(target) > maxTargetLen {
+				target = target[:maxTargetLen-3] + "..."
+			}
+
 			if item.IsActive {
 				dur := time.Since(h.toolStartTime).Round(100 * time.Millisecond)
 				spinnerView := spin.View()
-				argsSummary := summarizeToolArgs(item.ToolArgs, max(20, contentWidth-35))
-				line := fmt.Sprintf("%s %s %s [%s]",
+				verb := action.Verb()
+				if action == ActionUnknown {
+					verb = "Running " + item.ToolName
+				}
+				line := fmt.Sprintf("  %s %s %s [%s]",
 					spinnerView,
-					ToolCallHeaderStyle.Render("Running "+item.ToolName),
-					lipgloss.NewStyle().Faint(true).Render(argsSummary),
+					action.BadgeStyle().Render(verb),
+					ActionTargetStyle.Render(target),
 					lipgloss.NewStyle().Foreground(ColorWarning).Render(dur.String()),
 				)
 				sb.WriteString(line + "\n")
 			} else {
-				icon := "✅"
 				if item.IsError {
-					icon = "❌"
+					durStr := ""
+					if item.Duration > 0 {
+						durStr = fmt.Sprintf(" [%s]", item.Duration.Round(10*time.Millisecond).String())
+					}
+					line := fmt.Sprintf("  %s %s %s%s",
+						lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("✗"),
+						lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Failed: "+action.String()),
+						ActionTargetStyle.Render(target),
+						ActionDurStyle.Render(durStr),
+					)
+					sb.WriteString(line + "\n")
+					if item.Content != "" {
+						errStr := strings.TrimSpace(item.Content)
+						if len(errStr) > 400 {
+							errStr = errStr[:400] + "..."
+						}
+						sb.WriteString("    " + ErrorMsgStyle.Render(wrapString(errStr, contentWidth-6)) + "\n")
+					}
+				} else {
+					summary := item.Summary
+					if summary != "" {
+						// Filter out raw dumps or overly long text from summary badge
+						if len(summary) > 60 || strings.Contains(summary, "\n") {
+							summary = ""
+						} else {
+							summary = "(" + summary + ")"
+						}
+					}
+					verb := action.DoneVerb()
+					if action == ActionUnknown {
+						verb = item.ToolName
+					}
+					durStr := ""
+					if item.Duration > 0 {
+						durStr = "· " + item.Duration.Round(10*time.Millisecond).String()
+					}
+
+					var line string
+					if summary != "" {
+						line = fmt.Sprintf("  %s %s %s %s %s",
+							action.BadgeStyle().Render("●"),
+							action.BadgeStyle().Render(verb),
+							ActionTargetStyle.Render(target),
+							ActionMetricStyle.Render(summary),
+							ActionDurStyle.Render(durStr),
+						)
+					} else {
+						line = fmt.Sprintf("  %s %s %s %s",
+							action.BadgeStyle().Render("●"),
+							action.BadgeStyle().Render(verb),
+							ActionTargetStyle.Render(target),
+							ActionDurStyle.Render(durStr),
+						)
+					}
+					sb.WriteString(strings.TrimRight(line, " ") + "\n")
+
+					if item.DiffBlock != "" {
+						sb.WriteString(renderDiffSnippet(item.DiffBlock, contentWidth) + "\n")
+					}
 				}
-				argsSummary := summarizeToolArgs(item.ToolArgs, max(20, contentWidth-30))
-				line := fmt.Sprintf("  %s %s %s [%s]",
-					icon,
-					ToolCallHeaderStyle.Render(item.ToolName),
-					lipgloss.NewStyle().Faint(true).Render(argsSummary),
-					lipgloss.NewStyle().Faint(true).Render(item.Duration.Round(10*time.Millisecond).String()),
-				)
-				sb.WriteString(line + "\n")
 			}
 
 		case ChatItemToolResult:
@@ -273,8 +536,8 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 				sb.WriteString(renderDiffSnippet(item.DiffBlock, contentWidth) + "\n")
 			} else if item.Content != "" {
 				res := strings.TrimSpace(item.Content)
-				if len(res) > 500 {
-					res = res[:500] + "..."
+				if len(res) > 200 {
+					res = res[:200] + "..."
 				}
 				wrapped := wrapString(res, contentWidth-4)
 				sb.WriteString("    " + lipgloss.NewStyle().Foreground(ColorMuted).Render(wrapped) + "\n")
@@ -302,7 +565,12 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 
 	// Live streaming buffer
 	if h.thinkingText.Len() > 0 {
-		sb.WriteString("\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+h.thinkingText.String()) + "\n")
+		if h.showThinking {
+			sb.WriteString("\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+h.thinkingText.String()) + "\n")
+		} else {
+			dur := time.Since(h.thinkingStartTime).Round(100 * time.Millisecond)
+			sb.WriteString("  " + spin.View() + " " + ThinkingCollapsedStyle.Render(fmt.Sprintf("Thinking... [%s]", dur.String())) + "\n")
+		}
 	}
 	if h.streamingText.Len() > 0 {
 		sb.WriteString("\n" + AssistantMsgStyle.Render("🤖 Assistant:") + "\n" + wrapString(h.streamingText.String(), contentWidth) + "\n")
@@ -318,18 +586,72 @@ func wrapString(text string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(text)
 }
 
-func summarizeToolArgs(args string, maxLen int) string {
-	args = strings.ReplaceAll(args, "\n", " ")
+func extractTargetFromArgs(name, args string) string {
 	args = strings.TrimSpace(args)
-	if maxLen > 5 && len(args) > maxLen {
-		return args[:maxLen-3] + "..."
+	if args == "" {
+		return ""
+	}
+	if strings.HasPrefix(args, "{") && strings.HasSuffix(args, "}") {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(args), &m); err == nil {
+			for _, k := range []string{
+				"TargetFile", "TargetDirectory", "path", "Path", "file", "File",
+				"DirectoryPath", "SearchDirectory", "SearchPath", "query", "Query",
+				"pattern", "Pattern", "command", "Command", "CommandLine",
+				"url", "Url", "URL", "TaskName", "Task",
+			} {
+				if v, ok := m[k].(string); ok && v != "" {
+					return v
+				}
+			}
+		}
+	}
+	for _, prefix := range []string{"path: ", "Path: ", "TargetFile: ", "Query: ", "Command: ", "command: "} {
+		if strings.HasPrefix(args, prefix) {
+			return strings.TrimPrefix(args, prefix)
+		}
 	}
 	return args
 }
 
+func formatRelativePath(path string, workspaces []string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	// Do not touch URLs or shell commands with spaces/flags
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.Contains(path, " ") {
+		return path
+	}
+
+	clean := filepath.Clean(path)
+	for _, ws := range workspaces {
+		absWS, err := filepath.Abs(ws)
+		if err != nil {
+			absWS = ws
+		}
+		if clean == absWS {
+			return "."
+		}
+		if strings.HasPrefix(clean, absWS+string(filepath.Separator)) {
+			rel, err := filepath.Rel(absWS, clean)
+			if err == nil && !strings.HasPrefix(rel, "..") {
+				return rel
+			}
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(clean, home+string(filepath.Separator)) {
+		rel, err := filepath.Rel(home, clean)
+		if err == nil {
+			return "~/" + rel
+		}
+	}
+	return clean
+}
+
 func renderDiffSnippet(diff string, width int) string {
 	lines := strings.Split(diff, "\n")
-	maxL := 12
+	maxL := 10
 	if len(lines) > maxL {
 		lines = lines[:maxL]
 		lines = append(lines, lipgloss.NewStyle().Faint(true).Render("..."))

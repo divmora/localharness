@@ -76,13 +76,13 @@ func (i *SubagentInstance) GetState() SubagentState {
 type SubagentTracker struct {
 	mu        sync.RWMutex
 	instances map[string]*SubagentInstance // conversationID → instance
-	notifyCh  chan tools.SystemMessage     // Parent's notification channel
+	notifyCh  chan<- tools.SystemMessage   // Parent's notification channel
 }
 
 // NewSubagentTracker creates a new tracker.
 // notifyCh is the parent engine's notification channel for receiving
 // messages from children (completion notifications, send_message, etc.).
-func NewSubagentTracker(notifyCh chan tools.SystemMessage) *SubagentTracker {
+func NewSubagentTracker(notifyCh chan<- tools.SystemMessage) *SubagentTracker {
 	return &SubagentTracker{
 		instances: make(map[string]*SubagentInstance),
 		notifyCh:  notifyCh,

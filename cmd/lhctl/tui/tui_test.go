@@ -243,14 +243,21 @@ func TestChatHistory(t *testing.T) {
 	if !strings.Contains(rendered, "Hello agent") {
 		t.Errorf("expected user message in chat: %s", rendered)
 	}
-	if !strings.Contains(rendered, "Thinking:") {
-		t.Errorf("expected thinking block in chat: %s", rendered)
+	if !strings.Contains(rendered, "Thought") {
+		t.Errorf("expected collapsed thinking block in chat: %s", rendered)
 	}
 	if !strings.Contains(rendered, "Hello! How can I help?") {
 		t.Errorf("expected assistant response in chat: %s", rendered)
 	}
-	if !strings.Contains(rendered, "view_file") {
-		t.Errorf("expected tool call in chat: %s", rendered)
+	if !strings.Contains(rendered, "Read") || !strings.Contains(rendered, "main.go") {
+		t.Errorf("expected semantic tool call badge in chat: %s", rendered)
+	}
+
+	// Test expanded thinking mode
+	h.SetShowThinking(true)
+	renderedExpanded := h.RenderView(s, 80)
+	if !strings.Contains(renderedExpanded, "Thinking:") || !strings.Contains(renderedExpanded, "Thinking about how to respond") {
+		t.Errorf("expected expanded thinking block in chat: %s", renderedExpanded)
 	}
 }
 
@@ -307,8 +314,8 @@ func TestChatHistory_LoadFromState(t *testing.T) {
 	h := NewChatHistory()
 	h.LoadFromState(state)
 
-	if len(h.items) != 5 {
-		t.Fatalf("expected 5 items in chat history, got %d", len(h.items))
+	if len(h.items) != 4 {
+		t.Fatalf("expected 4 items in chat history (tool call and result merged), got %d", len(h.items))
 	}
 
 	if h.items[0].Type != ChatItemUser || h.items[0].Content != "Refactor the database queries" {
@@ -317,14 +324,11 @@ func TestChatHistory_LoadFromState(t *testing.T) {
 	if h.items[1].Type != ChatItemAssistant || h.items[1].Content != "I will check the db files first." {
 		t.Errorf("unexpected item 1: %+v", h.items[1])
 	}
-	if h.items[2].Type != ChatItemToolCall || h.items[2].ToolName != "view_file" {
+	if h.items[2].Type != ChatItemToolCall || h.items[2].ToolName != "view_file" || h.items[2].Summary != "1 lines" {
 		t.Errorf("unexpected item 2: %+v", h.items[2])
 	}
-	if h.items[3].Type != ChatItemToolResult || h.items[3].ToolName != "view_file" {
+	if h.items[3].Type != ChatItemSystem || h.items[3].Content != "System info message" {
 		t.Errorf("unexpected item 3: %+v", h.items[3])
-	}
-	if h.items[4].Type != ChatItemSystem || h.items[4].Content != "System info message" {
-		t.Errorf("unexpected item 4: %+v", h.items[4])
 	}
 
 	s := spinner.New()

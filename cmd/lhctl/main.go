@@ -27,12 +27,21 @@ var (
 
 func newRootCommand() *cobra.Command {
 	var (
-		modelFlag      string
-		workspacesFlag []string
-		yoloFlag       bool
-		detachFlag     bool
-		promptFlag     string
-		convFlag       string
+		modelFlag          string
+		workspacesFlag     []string
+		yoloFlag           bool
+		detachFlag         bool
+		promptFlag         string
+		convFlag           string
+		browserFlag        bool
+		noBrowserFlag      bool
+		desktopFlag        bool
+		headedFlag         bool
+		headlessFlag       bool
+		connectBrowserFlag string
+		browserProfileFlag string
+		isolatedFlag       bool
+		maxAutoWakeFlag    int
 	)
 
 	rootCmd := &cobra.Command{
@@ -59,6 +68,15 @@ detach and attach to headless sessions, and inspect conversation state and trace
 				detach:             detachFlag,
 				prompt:             promptFlag,
 				sessionID:          sessionID,
+				browser:            browserFlag,
+				noBrowser:          noBrowserFlag,
+				desktop:            desktopFlag,
+				headed:             headedFlag,
+				headless:           headlessFlag,
+				connectBrowser:     connectBrowserFlag,
+				browserProfile:     browserProfileFlag,
+				isolated:           isolatedFlag,
+				maxAutoWake:        maxAutoWakeFlag,
 			}
 			return runInteractiveWithOptions(flags)
 		},
@@ -72,16 +90,25 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	rootCmd.PersistentFlags().StringVar(&globalDataDir, "data-dir", getDefaultDataDir(), "Override data directory")
 
 	// Run / Interactive flags on root
-	addRunFlags(rootCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag)
+	addRunFlags(rootCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag, &browserFlag, &noBrowserFlag, &desktopFlag, &headedFlag, &headlessFlag, &connectBrowserFlag, &browserProfileFlag, &isolatedFlag, &maxAutoWakeFlag)
 
 	// Subcommand: run
 	var (
-		runModelFlag      string
-		runWorkspacesFlag []string
-		runYoloFlag       bool
-		runDetachFlag     bool
-		runPromptFlag     string
-		runConvFlag       string
+		runModelFlag          string
+		runWorkspacesFlag     []string
+		runYoloFlag           bool
+		runDetachFlag         bool
+		runPromptFlag         string
+		runConvFlag           string
+		runBrowserFlag        bool
+		runNoBrowserFlag      bool
+		runDesktopFlag        bool
+		runHeadedFlag         bool
+		runHeadlessFlag       bool
+		runConnectBrowserFlag string
+		runBrowserProfileFlag string
+		runIsolatedFlag       bool
+		runMaxAutoWakeFlag    int
 	)
 	runCmd := &cobra.Command{
 		Use:   "run",
@@ -101,11 +128,20 @@ detach and attach to headless sessions, and inspect conversation state and trace
 				detach:             runDetachFlag,
 				prompt:             runPromptFlag,
 				sessionID:          sessionID,
+				browser:            runBrowserFlag,
+				noBrowser:          runNoBrowserFlag,
+				desktop:            runDesktopFlag,
+				headed:             runHeadedFlag,
+				headless:           runHeadlessFlag,
+				connectBrowser:     runConnectBrowserFlag,
+				browserProfile:     runBrowserProfileFlag,
+				isolated:           runIsolatedFlag,
+				maxAutoWake:        runMaxAutoWakeFlag,
 			}
 			return runInteractiveWithOptions(flags)
 		},
 	}
-	addRunFlags(runCmd, &runModelFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag)
+	addRunFlags(runCmd, &runModelFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag, &runBrowserFlag, &runNoBrowserFlag, &runDesktopFlag, &runHeadedFlag, &runHeadlessFlag, &runConnectBrowserFlag, &runBrowserProfileFlag, &runIsolatedFlag, &runMaxAutoWakeFlag)
 	rootCmd.AddCommand(runCmd)
 
 	// Subcommand: attach
@@ -266,7 +302,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	return rootCmd
 }
 
-func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string) {
+func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string, browser *bool, noBrowser *bool, desktop *bool, headed *bool, headless *bool, connectBrowser *string, browserProfile *string, isolated *bool, maxAutoWake *int) {
 	cmd.Flags().StringVarP(model, "model", "m", "", "Target LLM model (e.g. gpt-4o, claude-3-5-sonnet)")
 	cmd.Flags().StringArrayVarP(workspaces, "workspace", "w", nil, "Attach workspace directory (repeatable)")
 	cmd.Flags().BoolVarP(yolo, "yolo", "y", false, "Enable YOLO Mode (dangerously skip permission checks)")
@@ -278,6 +314,15 @@ func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *
 	cmd.Flags().Lookup("resume").NoOptDefVal = "latest"
 	cmd.Flags().StringVar(conv, "continue", "", "Alias for --conversation")
 	cmd.Flags().Lookup("continue").NoOptDefVal = "latest"
+	cmd.Flags().BoolVar(browser, "browser", false, "Explicitly enable browser automation tools (auto-enabled by default if npx is installed)")
+	cmd.Flags().BoolVar(noBrowser, "no-browser", false, "Explicitly disable browser automation tools")
+	cmd.Flags().BoolVar(desktop, "desktop", false, "Enable native cross-platform desktop computer use tools")
+	cmd.Flags().BoolVar(headed, "headed", false, "Force browser in headed mode (display browser window)")
+	cmd.Flags().BoolVar(headless, "headless", false, "Force browser in headless mode (invisible background)")
+	cmd.Flags().StringVar(connectBrowser, "connect-browser", "", "Attach to existing browser via CDP URL (e.g. http://localhost:9222)")
+	cmd.Flags().StringVar(browserProfile, "browser-profile", "", "Path to custom browser user data directory (defaults to ~/.divmora/localharness/browser_profile)")
+	cmd.Flags().BoolVar(isolated, "isolated", false, "Run browser in ephemeral isolated mode without persistent profile")
+	cmd.Flags().IntVar(maxAutoWake, "max-auto-wake", 5, "Maximum consecutive auto-wake turns for background tasks/subagents")
 }
 
 func getDefaultDataDir() string {

@@ -254,6 +254,8 @@ func GetToolName(step *pb.StepUpdate) string {
 		return "invoke_subagent"
 	case *pb.StepUpdate_BrowserSubagent:
 		return "browser_subagent"
+	case *pb.StepUpdate_DesktopSubagent:
+		return "desktop_subagent"
 	case *pb.StepUpdate_HostToolCall:
 		if htc := step.GetHostToolCall(); htc != nil {
 			return htc.ToolName
@@ -319,6 +321,9 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 	}
 	if cfg.CodeGraph {
 		registerCodeGraphTools(r)
+	}
+	if cfg.Desktop {
+		registerDesktopTools(r)
 	}
 
 	// Always register ask_question — it's a harmless clarification tool

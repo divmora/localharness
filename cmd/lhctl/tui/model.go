@@ -36,6 +36,7 @@ type Model struct {
 	showHelp          bool
 	showSubagents     bool
 	showTasks         bool
+	showThinking      bool
 	yoloMode          bool
 	modelName         string
 	workspaces        []string
@@ -73,6 +74,8 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 	}
 
 	hist := NewChatHistory()
+	hist.SetWorkspaces(workspaces)
+	hist.SetShowThinking(false)
 	if initialState != nil {
 		hist.LoadFromState(initialState)
 		if len(initialState.Messages) > 0 {
@@ -93,6 +96,7 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 		yoloMode:       yolo,
 		mode:           ModeDefault,
 		status:         "IDLE",
+		showThinking:   false,
 	}
 }
 
@@ -530,6 +534,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Global Shortcuts
 		switch msg.Type {
+		case tea.KeyCtrlO:
+			m.showThinking = !m.showThinking
+			m.history.SetShowThinking(m.showThinking)
+			if m.showThinking {
+				m.history.AddSystemMessage("Thinking expanded (CoT visible). Press Ctrl+O to collapse.")
+			} else {
+				m.history.AddSystemMessage("Thinking collapsed. Press Ctrl+O to expand.")
+			}
+			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+			m.viewport.GotoBottom()
+			return m, nil
+
 		case tea.KeyCtrlC:
 			if m.status == "RUNNING" || m.status == "STREAMING" {
 				if time.Since(m.lastInterrupt) < 2*time.Second {
@@ -796,6 +812,28 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		}
 		return nil
 
+	case "thinking":
+		if len(cmd.Args) > 0 {
+			switch strings.ToLower(cmd.Args[0]) {
+			case "on", "true", "show", "expand":
+				m.showThinking = true
+			case "off", "false", "hide", "collapse":
+				m.showThinking = false
+			default:
+				m.history.AddSystemMessage("Usage: /thinking [on | off]")
+				return nil
+			}
+		} else {
+			m.showThinking = !m.showThinking
+		}
+		m.history.SetShowThinking(m.showThinking)
+		if m.showThinking {
+			m.history.AddSystemMessage("Thinking expanded (CoT visible). Type /thinking or press Ctrl+O to collapse.")
+		} else {
+			m.history.AddSystemMessage("Thinking collapsed. Type /thinking or press Ctrl+O to expand.")
+		}
+		return nil
+
 	case "workspace":
 		if len(cmd.Args) == 0 || cmd.Args[0] == "list" {
 			_ = m.client.SendWorkspaceRequest("list", "", "", "")
@@ -1057,6 +1095,7 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 		}
 		m.workspaces = wsDirs
 		m.completer.SetWorkspaces(wsDirs)
+		m.history.SetWorkspaces(wsDirs)
 		m.history.AddSystemMessage(fmt.Sprintf("📂 %s (Total: %d)", wsResp.Message, len(wsResp.Workspaces)))
 	}
 
@@ -1088,6 +1127,10 @@ func extractActionDetails(step *pb.StepUpdate) (string, string) {
 		return "grep_search", a.GrepSearch.Query
 	case *pb.StepUpdate_FindFile:
 		return "find_file", a.FindFile.Pattern
+	case *pb.StepUpdate_BrowserSubagent:
+		return "browser_subagent", a.BrowserSubagent.Task
+	case *pb.StepUpdate_DesktopSubagent:
+		return "desktop_subagent", a.DesktopSubagent.Task
 	case *pb.StepUpdate_InvokeSubagent:
 		var roles []string
 		for _, sub := range a.InvokeSubagent.Subagents {
@@ -1122,23 +1165,29 @@ func extractActionResult(step *pb.StepUpdate) (string, string, string) {
 	}
 	switch a := step.Action.(type) {
 	case *pb.StepUpdate_WriteToFile:
-		return "write_to_file", a.WriteToFile.DiffBlock, fmt.Sprintf("Created %s", a.WriteToFile.Path)
+		return "write_to_file", a.WriteToFile.DiffBlock, ""
 	case *pb.StepUpdate_ReplaceFileContent:
-		return "replace_file_content", a.ReplaceFileContent.DiffBlock, fmt.Sprintf("Updated %s", a.ReplaceFileContent.Path)
+		return "replace_file_content", a.ReplaceFileContent.DiffBlock, ""
 	case *pb.StepUpdate_RunCommand:
-		out := a.RunCommand.Stdout
-		if out == "" {
-			out = a.RunCommand.Stderr
+		if a.RunCommand.ExitCode == 0 {
+			return "run_command", "", "ok"
 		}
-		return "run_command", "", out
+		return "run_command", "", fmt.Sprintf("exit code %d", a.RunCommand.ExitCode)
 	case *pb.StepUpdate_ViewFile:
-		return "view_file", "", fmt.Sprintf("%d lines read", a.ViewFile.TotalLines)
+		if a.ViewFile.TotalLines > 0 {
+			return "view_file", "", fmt.Sprintf("%d lines", a.ViewFile.TotalLines)
+		}
+		return "view_file", "", "ok"
 	case *pb.StepUpdate_ListDir:
-		return "list_dir", "", fmt.Sprintf("%d items found", len(a.ListDir.Entries))
+		return "list_dir", "", fmt.Sprintf("%d items", len(a.ListDir.Entries))
 	case *pb.StepUpdate_GrepSearch:
-		return "grep_search", "", fmt.Sprintf("%d matches found", a.GrepSearch.TotalMatches)
+		return "grep_search", "", fmt.Sprintf("%d matches", a.GrepSearch.TotalMatches)
 	case *pb.StepUpdate_FindFile:
-		return "find_file", "", fmt.Sprintf("%d files matched", len(a.FindFile.Matches))
+		return "find_file", "", fmt.Sprintf("%d files", len(a.FindFile.Matches))
+	case *pb.StepUpdate_BrowserSubagent:
+		return "browser_subagent", "", a.BrowserSubagent.TaskSummary
+	case *pb.StepUpdate_DesktopSubagent:
+		return "desktop_subagent", "", a.DesktopSubagent.TaskSummary
 	case *pb.StepUpdate_InvokeSubagent:
 		var summaries []string
 		for _, res := range a.InvokeSubagent.LaunchResults {

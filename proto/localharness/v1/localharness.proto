@@ -222,6 +222,7 @@ message StepUpdate {
     ActionSendMessage send_message_action = 52;         // Inter-agent messaging
     ActionBrowserSubagent browser_subagent = 53;        // Spawn browser subagent
     ActionCodeGraph code_graph = 54;                    // Code graph AST and structural queries
+    ActionDesktopSubagent desktop_subagent = 55;        // Spawn desktop computer use subagent
   }
 
   // Error details (when state = STATE_ERROR)
@@ -560,7 +561,26 @@ message ActionBrowserSubagent {
   string recording_name = 4;
   string reused_subagent_id = 5;
   repeated string media_paths = 6;
+  string mode = 7;                    // "auto", "headed", "headless", "connect"
+  string connect_url = 8;             // Optional CDP URL to attach to existing browser
+  string profile_dir = 9;             // Persistent browser profile directory (defaults to ~/.divmora/localharness/browser_profile)
+  bool isolated = 12;                 // Run in ephemeral in-memory profile (opt-out of persistent profile)
   
+  // Result fields (set on STATE_DONE)
+  string conversation_id = 10;
+  string error_message = 11;
+  string recording_path = 13;         // Path to saved session recording / video artifact
+}
+
+// ActionDesktopSubagent spawns a specialized desktop computer use subagent.
+message ActionDesktopSubagent {
+  string task_name = 1;
+  string task = 2;
+  string task_summary = 3;
+  string target_application = 4;      // e.g. "Slack", "VS Code", "Docker Desktop"
+  string reused_subagent_id = 5;
+  repeated string media_paths = 6;
+
   // Result fields (set on STATE_DONE)
   string conversation_id = 10;
   string error_message = 11;
@@ -740,6 +760,12 @@ message HarnessConfig {
 
   // Workspace trust status. If false, restricted mode is applied.
   bool trusted = 29;
+
+  // Custom browser profile directory (defaults to ~/.divmora/localharness/browser_profile)
+  string browser_profile_dir = 30;
+
+  // Force ephemeral in-memory browser profile (disable persistent profile)
+  bool isolated_browser = 31;
 }
 
 // UserRuleConfig is an SDK-injected user rule with inline content.
@@ -875,6 +901,7 @@ message BuiltinToolsConfig {
   bool manage_subagents = 16; // default: false (follows invoke_subagent)
   bool send_message = 17;    // default: false (follows invoke_subagent)
   bool code_graph = 18;       // default: true (AST repository code graph & symbol intelligence)
+  bool desktop = 19;          // default: false (cross-platform desktop automation & computer use)
 }
 
 // ToolConfigs provides per-tool configuration (Phase 2).

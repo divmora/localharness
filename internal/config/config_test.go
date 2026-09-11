@@ -33,11 +33,19 @@ func TestDefaultBuiltinTools(t *testing.T) {
 	if !cfg.Finish {
 		t.Error("Finish should be enabled by default")
 	}
+	if !cfg.Browser {
+		t.Error("Browser should be enabled by default")
+	}
 
 	// RunCommand should be disabled by default for safety
 	if cfg.RunCommand {
 		t.Error("RunCommand should be DISABLED by default")
 	}
+}
+
+func TestHasGuiDisplay(t *testing.T) {
+	// Should return a boolean without panicking
+	_ = HasGuiDisplay()
 }
 
 func TestHarnessVersion(t *testing.T) {

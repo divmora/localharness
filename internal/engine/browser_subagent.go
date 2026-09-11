@@ -14,16 +14,27 @@ import (
 	"github.com/divmora/localharness/internal/util"
 )
 
-const browserSubagentSystemPrompt = `You are a specialized browser automation agent.
+const browserSubagentSystemPrompt = `You are a specialized browser automation agent modeled after Jetski-grade browser automation.
 Your objective is to accomplish the user's task by navigating the web, interacting with pages, and gathering information.
 You have access to browser automation tools via MCP. Use them to navigate, click, type, and extract data.
-Return a clear and concise summary of your actions and findings.`
+
+Capabilities & Best Practices:
+1. Persistent Profiles: You operate with a persistent browser profile by default. Logins, cookies, session storage, and state persist across runs.
+2. Visual Elements & Bounding Boxes: Tools output element bounding boxes [box=x,y,width,height] and visual snapshots. Use these coordinates and landmarks for precise targeting.
+3. Human-in-the-Loop Handoff: If you encounter a CAPTCHA, Cloudflare verification, 2FA/MFA challenge, or manual login requirement:
+   - Do NOT repeatedly fail or loop endlessly.
+   - Use the ask_question tool to notify the user and ask them to complete the verification or sign in in the visible browser window.
+   - Once the user confirms completion, continue your task with the authenticated session intact.
+4. Action Verification: After key navigation or submission steps, verify the page state or snapshot before concluding.
+5. Return a clear and concise summary of your actions, findings, and any saved recording/artifacts.`
 
 // browserSubagentDeclaration returns the FunctionDeclaration for browser_subagent.
 func browserSubagentDeclaration() llm.FunctionDeclaration {
 	return llm.FunctionDeclaration{
-		Name:        "browser_subagent",
-		Description: `Start a browser subagent to perform actions in the browser with the given task description. The subagent has access to tools for both interacting with web page content (clicking, typing, navigating, etc) and controlling the browser window itself (resizing, etc). After the subagent returns, you should read the DOM or capture a screenshot to see what it did.`,
+		Name: "browser_subagent",
+		Description: "Start a specialized browser subagent to interact with web applications, websites, web pages, localhost servers, or SPAs. " +
+			"The subagent has tools to navigate URLs, click elements, fill forms, extract data, take DOM snapshots with bounding boxes, and handle human-in-the-loop auth/CAPTCHA. " +
+			"Always use browser_subagent (NOT desktop_subagent) whenever the task involves a URL, web app, or browser testing.",
 		Parameters: map[string]interface{}{
 			"type":     "object",
 			"required": []string{"TaskName", "Task", "TaskSummary", "RecordingName"},
@@ -55,6 +66,23 @@ func browserSubagentDeclaration() llm.FunctionDeclaration {
 						"type": "string",
 					},
 				},
+				"Mode": map[string]interface{}{
+					"type":        "string",
+					"enum":        []string{"auto", "headed", "headless", "connect"},
+					"description": "Browser execution mode: 'auto' starts headless and escalates to headed if captcha/auth is required; 'headed' displays the browser window; 'headless' runs invisibly; 'connect' attaches to an existing browser via CDP URL.",
+				},
+				"ConnectUrl": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional CDP WebSocket or HTTP URL to attach to an already running browser (e.g. http://localhost:9222). Used when Mode is 'connect'.",
+				},
+				"ProfileDir": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional custom directory path for persistent browser profile. If omitted, uses default ~/.divmora/localharness/browser_profile.",
+				},
+				"Isolated": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, runs in an ephemeral in-memory profile without saving cookies or state across runs. Default is false.",
+				},
 			},
 		},
 	}
@@ -62,11 +90,25 @@ func browserSubagentDeclaration() llm.FunctionDeclaration {
 
 // executeBrowserSubagent handles the browser_subagent tool call.
 func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) error {
+	if !e.hasBrowserCapability() {
+		e.feedToolError(tc, step, "browser capability is not available. Ensure Node.js and npx are installed in PATH, or configure a browser MCP server in mcp_config.json.")
+		return nil
+	}
+
 	taskName, _ := tc.Args["TaskName"].(string)
 	task, _ := tc.Args["Task"].(string)
 	taskSummary, _ := tc.Args["TaskSummary"].(string)
 	recordingName, _ := tc.Args["RecordingName"].(string)
 	reusedSubagentId, _ := tc.Args["ReusedSubagentId"].(string)
+	mode, _ := tc.Args["Mode"].(string)
+	if mode == "" {
+		mode = "auto"
+	}
+	connectUrl, _ := tc.Args["ConnectUrl"].(string)
+
+	profileDir, _ := tc.Args["ProfileDir"].(string)
+	isolated, _ := tc.Args["Isolated"].(bool)
+
 	var mediaPaths []string
 	if mp, ok := tc.Args["MediaPaths"].([]interface{}); ok {
 		for _, v := range mp {
@@ -88,6 +130,17 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 		}
 	}
 
+	task += fmt.Sprintf("\n\nBrowser Mode: %s", mode)
+	if connectUrl != "" {
+		task += fmt.Sprintf("\nCDP Connect URL: %s", connectUrl)
+	}
+	if profileDir != "" {
+		task += fmt.Sprintf("\nBrowser Profile Directory: %s", profileDir)
+	}
+	if isolated {
+		task += "\nBrowser Isolation: Ephemeral (in-memory)"
+	}
+
 	// Populate step action
 	if action := step.GetBrowserSubagent(); action != nil {
 		action.TaskName = taskName
@@ -96,6 +149,10 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 		action.RecordingName = recordingName
 		action.ReusedSubagentId = reusedSubagentId
 		action.MediaPaths = mediaPaths
+		action.Mode = mode
+		action.ConnectUrl = connectUrl
+		action.ProfileDir = profileDir
+		action.Isolated = isolated
 	}
 
 	// Depth check
@@ -186,6 +243,7 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 		HostToolNames:        e.hostToolNames,
 		HostToolDecls:        e.hostToolDecls,
 		PermissionHandler:    e.permissionHandler,
+		QuestionHandler:      e.questionHandler,
 		SubagentsEnabled:     false,
 		ExcludeMCPTools:      false,                                                // Need MCP tools for Playwright
 		ExcludeToolGroups:    map[tools.ToolGroup]bool{tools.ToolGroupWrite: true}, // Typically read-only on filesystem
@@ -201,6 +259,7 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 		YoloMode:             e.yoloMode,
 		Skills:               e.msgCtx.Skills,
 		Plugins:              e.msgCtx.Plugins,
+		NotifySendCh:         e.notifySendCh,
 	})
 	childEngine.conv = childConv
 
@@ -229,6 +288,28 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 
 		resultText := extractFinalResponse(inst.Engine.History())
 
+		// Scan for any recorded videos, traces, or session artifacts
+		var recordingPath string
+		if inst.Engine.brainDir != "" {
+			for _, searchDir := range []string{
+				filepath.Join(inst.Engine.brainDir, "artifacts"),
+				filepath.Join(inst.Engine.brainDir, "scratch"),
+			} {
+				if entries, err := os.ReadDir(searchDir); err == nil {
+					for _, entry := range entries {
+						ext := filepath.Ext(entry.Name())
+						if ext == ".webm" || ext == ".mp4" || ext == ".trace" || ext == ".zip" {
+							recordingPath = filepath.Join(searchDir, entry.Name())
+							break
+						}
+					}
+				}
+				if recordingPath != "" {
+					break
+				}
+			}
+		}
+
 		if childErr != nil {
 			inst.SetState(SubagentStateError, childErr)
 		} else {
@@ -245,14 +326,23 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 			_ = inst.Engine.conv.SaveAll()
 		}
 
-		notifyContent := fmt.Sprintf("Browser subagent completed.\nConversation ID: %s\nArtifact Directory: %s\n\nResult:\n%s",
-			inst.ConversationID, inst.Engine.brainDir, resultText)
+		notifyContent := fmt.Sprintf("Browser subagent completed.\nConversation ID: %s\nArtifact Directory: %s\n",
+			inst.ConversationID, inst.Engine.brainDir)
+		if recordingPath != "" {
+			notifyContent += fmt.Sprintf("Recording: %s\n", recordingPath)
+		}
+		notifyContent += fmt.Sprintf("\nResult:\n%s", resultText)
+
 		if childErr != nil {
-			notifyContent = fmt.Sprintf("Browser subagent failed: %v\nConversation ID: %s\nArtifact Directory: %s\n\nPartial result:\n%s",
-				childErr, inst.ConversationID, inst.Engine.brainDir, resultText)
+			notifyContent = fmt.Sprintf("Browser subagent failed: %v\nConversation ID: %s\nArtifact Directory: %s\n",
+				childErr, inst.ConversationID, inst.Engine.brainDir)
+			if recordingPath != "" {
+				notifyContent += fmt.Sprintf("Recording: %s\n", recordingPath)
+			}
+			notifyContent += fmt.Sprintf("\nPartial result:\n%s", resultText)
 		}
 
-		e.subagentTracker.NotifyParent(tools.SystemMessage{
+		e.notifyParent(tools.SystemMessage{
 			Source:  "browser_subagent_complete",
 			TaskID:  inst.ConversationID,
 			Content: notifyContent,

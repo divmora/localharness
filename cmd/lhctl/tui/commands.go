@@ -64,6 +64,7 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		{"/workspace add <dir>", "Attach a directory with trust verification"},
 		{"/workspace remove <dir>", "Detach a workspace directory"},
 		{"/detach", "Detach TUI while background agents continue running"},
+		{"/thinking [on|off]", "Toggle reasoning and chain-of-thought (Ctrl+O)"},
 		{"/yolo", "Toggle YOLO Mode (bypass all approval queues)"},
 		{"/version", "Display client & daemon version and runtime"},
 		{"/clear", "Clear chat viewport history"},
@@ -75,6 +76,7 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		Desc string
 	}{
 		{"Shift+Tab", "Cycle modes (default → accept-edits → plan)"},
+		{"Ctrl+O", "Toggle reasoning and chain-of-thought visibility"},
 		{"@<file>", "Autocompletion dropdown matching files in workspace"},
 		{"Enter", "Send message / Confirm approval"},
 		{"Ctrl+C", "Interrupt current agent turn / Cancel"},

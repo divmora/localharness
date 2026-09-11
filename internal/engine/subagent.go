@@ -449,6 +449,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			HostToolNames:        e.hostToolNames,
 			HostToolDecls:        e.hostToolDecls,
 			PermissionHandler:    e.permissionHandler,
+			QuestionHandler:      e.questionHandler,
 			SubagentsEnabled:     typeDef.EnableSubagentTools,
 			ExcludeToolGroups:    excludeGroups,
 			ExcludeHostTools:     excludeHostTools,

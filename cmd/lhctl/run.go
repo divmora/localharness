@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -25,30 +26,55 @@ type runFlags struct {
 	prompt             string
 	sessionID          string
 	ephemeral          bool
+	browser            bool
+	noBrowser          bool
+	desktop            bool
+	headed             bool
+	headless           bool
+	connectBrowser     string
+	browserProfile     string
+	isolated           bool
+	maxAutoWake        int
 }
 
 // formatResumeCommand builds the CLI command to resume the given conversation session.
+// Workspaces are persisted in the conversation state (.pb) and restored automatically
+// on resume, so --workspace is intentionally omitted to keep resume commands clean.
 func formatResumeCommand(sessionID string, flags runFlags) string {
 	var parts []string
 	parts = append(parts, "lhctl", "-c", sessionID)
 	if flags.model != "" {
 		parts = append(parts, fmt.Sprintf("--model=%s", flags.model))
 	}
-	wsList := flags.explicitWorkspaces
-	if len(wsList) == 0 {
-		wsList = flags.workspaces
-	}
-	for _, ws := range wsList {
-		parts = append(parts, fmt.Sprintf("--workspace=%s", ws))
-	}
 	if flags.yolo {
 		parts = append(parts, "--yolo")
+	}
+	if flags.noBrowser {
+		parts = append(parts, "--no-browser")
+	}
+	if flags.desktop {
+		parts = append(parts, "--desktop")
+	}
+	if flags.headed {
+		parts = append(parts, "--headed")
+	}
+	if flags.headless {
+		parts = append(parts, "--headless")
+	}
+	if flags.connectBrowser != "" {
+		parts = append(parts, fmt.Sprintf("--connect-browser=%s", flags.connectBrowser))
+	}
+	if flags.browserProfile != "" {
+		parts = append(parts, fmt.Sprintf("--browser-profile=%s", flags.browserProfile))
+	}
+	if flags.isolated {
+		parts = append(parts, "--isolated")
 	}
 	return strings.Join(parts, " ")
 }
 
 func parseRunFlags(args []string) runFlags {
-	f := runFlags{}
+	f := runFlags{maxAutoWake: 5}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -58,6 +84,37 @@ func parseRunFlags(args []string) runFlags {
 			f.detach = true
 		case a == "--ephemeral":
 			f.ephemeral = true
+		case a == "--browser":
+			f.browser = true
+		case a == "--no-browser":
+			f.noBrowser = true
+		case a == "--desktop":
+			f.desktop = true
+		case a == "--headed":
+			f.headed = true
+		case a == "--headless":
+			f.headless = true
+		case a == "--isolated":
+			f.isolated = true
+		case strings.HasPrefix(a, "--browser-profile="):
+			f.browserProfile = strings.TrimPrefix(a, "--browser-profile=")
+		case a == "--browser-profile" && i+1 < len(args):
+			i++
+			f.browserProfile = args[i]
+		case strings.HasPrefix(a, "--connect-browser="):
+			f.connectBrowser = strings.TrimPrefix(a, "--connect-browser=")
+		case a == "--connect-browser" && i+1 < len(args):
+			i++
+			f.connectBrowser = args[i]
+		case strings.HasPrefix(a, "--max-auto-wake="):
+			var n int
+			_, _ = fmt.Sscanf(strings.TrimPrefix(a, "--max-auto-wake="), "%d", &n)
+			f.maxAutoWake = n
+		case a == "--max-auto-wake" && i+1 < len(args):
+			i++
+			var n int
+			_, _ = fmt.Sscanf(args[i], "%d", &n)
+			f.maxAutoWake = n
 		case strings.HasPrefix(a, "--model="):
 			f.model = strings.TrimPrefix(a, "--model=")
 		case a == "-m" && i+1 < len(args):
@@ -138,7 +195,9 @@ func runInteractiveWithOptions(flags runFlags) error {
 		}
 	}
 
-	if len(flags.workspaces) == 0 {
+	// For new sessions without explicit workspaces, default to cwd.
+	// For resumed sessions, workspaces are restored from conversation state.
+	if len(flags.workspaces) == 0 && flags.sessionID == "" {
 		cwd, err := os.Getwd()
 		if err == nil {
 			flags.workspaces = []string{cwd}
@@ -185,10 +244,78 @@ func runInteractiveWithOptions(flags runFlags) error {
 		})
 	}
 
+	maxAutoWake := flags.maxAutoWake
+	if maxAutoWake <= 0 {
+		maxAutoWake = 5
+	}
+
+	// Auto-enable browser capability if npx is available and not explicitly disabled
+	hasNpx := false
+	if _, err := exec.LookPath("npx"); err == nil {
+		hasNpx = true
+	}
+	browserEnabled := !flags.noBrowser && (flags.browser || hasNpx)
+
+	// Auto-decide headed vs headless:
+	// - If user passed --headed: headed
+	// - If user passed --headless: headless
+	// - Otherwise: headed if interactive desktop session with GUI display, headless if detached or no display.
+	isHeaded := flags.headed
+	if !flags.headed && !flags.headless {
+		isHeaded = !flags.detach && config.HasGuiDisplay()
+	}
+
+	var mcpServers []*pb.McpServerConfig
+	if browserEnabled {
+		pwArgs := []string{"-y", "@playwright/mcp@latest"}
+		if !isHeaded && flags.connectBrowser == "" {
+			pwArgs = append(pwArgs, "--headless")
+		}
+		if flags.connectBrowser != "" {
+			pwArgs = append(pwArgs, fmt.Sprintf("--cdp-endpoint=%s", flags.connectBrowser))
+		}
+		if flags.isolated {
+			pwArgs = append(pwArgs, "--isolated")
+		} else if flags.connectBrowser == "" {
+			profileDir := flags.browserProfile
+			if profileDir == "" {
+				profileDir = filepath.Join(dataDir, "browser_profile")
+			}
+			_ = os.MkdirAll(profileDir, 0755)
+			pwArgs = append(pwArgs, fmt.Sprintf("--user-data-dir=%s", profileDir))
+		}
+		pwArgs = append(pwArgs, "--snapshot-boxes", "--caps=vision")
+
+		sessionIDForBrain := flags.sessionID
+		if sessionIDForBrain == "" || sessionIDForBrain == "latest" {
+			sessionIDForBrain = cl.SessionID()
+		}
+		if sessionIDForBrain != "" {
+			sessionArtifactsDir := filepath.Join(dataDir, "brain", sessionIDForBrain, "artifacts")
+			_ = os.MkdirAll(sessionArtifactsDir, 0755)
+			pwArgs = append(pwArgs, "--save-session", fmt.Sprintf("--output-dir=%s", sessionArtifactsDir))
+		}
+
+		mcpServers = append(mcpServers, &pb.McpServerConfig{
+			Name: "playwright",
+			Transport: &pb.McpServerConfig_Stdio{
+				Stdio: &pb.McpStdioTransport{
+					Command: "npx",
+					Args:    pwArgs,
+				},
+			},
+		})
+	}
+
 	harnessCfg := &pb.HarnessConfig{
-		LitellmModel: flags.model,
-		Workspaces:   pbWorkspaces,
-		YoloMode:     flags.yolo,
+		ConversationId:    flags.sessionID,
+		LitellmModel:      flags.model,
+		Workspaces:        pbWorkspaces,
+		YoloMode:          flags.yolo,
+		MaxAutoWakeTurns:  int32(maxAutoWake),
+		McpServers:        mcpServers,
+		BrowserProfileDir: flags.browserProfile,
+		IsolatedBrowser:   flags.isolated,
 		BuiltinTools: &pb.BuiltinToolsConfig{
 			ViewFile:        true,
 			CreateFile:      true,
@@ -206,6 +333,8 @@ func runInteractiveWithOptions(flags runFlags) error {
 			DefineSubagent:  true,
 			ManageSubagents: true,
 			SendMessage:     true,
+			Browser:         browserEnabled,
+			Desktop:         flags.desktop,
 		},
 		PromptModules: &pb.PromptModules{
 			EnableWebDevelopment: true,

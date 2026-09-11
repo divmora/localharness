@@ -60,6 +60,7 @@ type messageInfo struct {
 	ErrorText string `json:"error_text,omitempty"` // Error content when is_error=true
 	IsError   bool   `json:"is_error,omitempty"`   // Whether this step errored
 	Timestamp string `json:"timestamp,omitempty"`  // Step timestamp
+	Content   string `json:"content,omitempty"`    // Message text or tool result content
 }
 
 // inspectResult holds the full inspection result for JSON output.
@@ -198,6 +199,7 @@ func analyzeConversation(state *pb.ConversationState) inspectResult {
 			Size:      size,
 			Cumul:     cumul,
 			Timestamp: msg.Timestamp,
+			Content:   msg.Content,
 		}
 
 		// Extract tool info
@@ -211,6 +213,7 @@ func analyzeConversation(state *pb.ConversationState) inspectResult {
 			result.Breakdown.ToolCallCount++
 		} else if msg.ToolResult != nil {
 			info.ToolName = msg.ToolResult.Name
+			info.Content = msg.ToolResult.Content
 			resultContentLen := len(msg.ToolResult.Content)
 			info.ToolInfo = fmt.Sprintf("← %s result", msg.ToolResult.Name)
 			info.IsError = msg.ToolResult.IsError
@@ -480,6 +483,11 @@ func printStepDetail(r inspectResult, stepN int) {
 		fmt.Printf("\n  Error:\n")
 		// Show full error, wrapping at 80 chars
 		for _, line := range strings.Split(m.ErrorText, "\n") {
+			fmt.Printf("    %s\n", line)
+		}
+	} else if m.Content != "" {
+		fmt.Printf("\n  Content:\n")
+		for _, line := range strings.Split(m.Content, "\n") {
 			fmt.Printf("    %s\n", line)
 		}
 	}

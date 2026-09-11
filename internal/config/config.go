@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/google/uuid"
@@ -110,6 +111,7 @@ func DefaultBuiltinTools() *pb.BuiltinToolsConfig {
 		Finish:     true,
 		WebSearch:  true,
 		WebFetch:   true,
+		Browser:    true, // Enabled by default whenever npx is available
 	}
 }
 
@@ -121,5 +123,17 @@ func EnsureInstallationID(appDataDir string) {
 		_ = os.MkdirAll(appDataDir, 0755)
 		newID := uuid.New().String()
 		_ = os.WriteFile(idPath, []byte(newID), 0644)
+	}
+}
+
+// HasGuiDisplay returns true if a graphical desktop display server is present.
+func HasGuiDisplay() bool {
+	switch runtime.GOOS {
+	case "darwin", "windows":
+		return true
+	case "linux":
+		return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	default:
+		return false
 	}
 }

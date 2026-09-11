@@ -81,12 +81,39 @@ var (
 			BorderForeground(ColorMuted).
 			PaddingLeft(1)
 
+	ThinkingCollapsedStyle = lipgloss.NewStyle().
+				Italic(true).
+				Foreground(ColorMuted)
+
 	ToolCallHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(ColorWarning)
 
 	ToolResultStyle = lipgloss.NewStyle().
 			Foreground(ColorText)
+
+	// Semantic Action Colors & Badges (Find, Read, Search, Write, Run, Browse, Desktop, Agent)
+	ColorActionRead    = lipgloss.Color("#8BE9FD") // Cyan
+	ColorActionWrite   = lipgloss.Color("#50FA7B") // Green
+	ColorActionSearch  = lipgloss.Color("#EE6FF8") // Magenta / Pink
+	ColorActionFind    = lipgloss.Color("#7D56F4") // Purple / Violet
+	ColorActionRun     = lipgloss.Color("#FFB86C") // Yellow / Orange
+	ColorActionBrowse  = lipgloss.Color("#BD93F9") // Lavender
+	ColorActionDesktop = lipgloss.Color("#00B4D8") // Sky Blue
+	ColorActionAgent   = lipgloss.Color("#FF9500") // Deep Orange
+
+	ActionBadgeRead    = lipgloss.NewStyle().Bold(true).Foreground(ColorActionRead)
+	ActionBadgeWrite   = lipgloss.NewStyle().Bold(true).Foreground(ColorActionWrite)
+	ActionBadgeSearch  = lipgloss.NewStyle().Bold(true).Foreground(ColorActionSearch)
+	ActionBadgeFind    = lipgloss.NewStyle().Bold(true).Foreground(ColorActionFind)
+	ActionBadgeRun     = lipgloss.NewStyle().Bold(true).Foreground(ColorActionRun)
+	ActionBadgeBrowse  = lipgloss.NewStyle().Bold(true).Foreground(ColorActionBrowse)
+	ActionBadgeDesktop = lipgloss.NewStyle().Bold(true).Foreground(ColorActionDesktop)
+	ActionBadgeAgent   = lipgloss.NewStyle().Bold(true).Foreground(ColorActionAgent)
+
+	ActionTargetStyle = lipgloss.NewStyle().Bold(true).Foreground(ColorText)
+	ActionMetricStyle = lipgloss.NewStyle().Faint(true).Foreground(ColorMuted)
+	ActionDurStyle    = lipgloss.NewStyle().Faint(true).Foreground(ColorMuted)
 
 	SystemMsgStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)

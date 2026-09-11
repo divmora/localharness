@@ -52,6 +52,15 @@ lhctl attach <session-id>
 | `--model` | `-m` | Target LLM model (e.g. `gpt-4o`, `claude-3-5-sonnet`) | Harness default |
 | `--workspace` | `-w` | Attach workspace directory (repeatable) | Current working directory |
 | `--yolo` | `-y` | Enable YOLO Mode (skip all permission prompts) | `false` |
+| `--browser` | | Explicitly enable browser automation tools (auto-enabled if `npx` installed) | `auto (true if npx found)` |
+| `--no-browser` | | Explicitly disable browser automation tools | `false` |
+| `--browser-profile` | | Path to custom browser user data directory (defaults to persistent `~/.divmora/localharness/browser_profile`) | `~/.divmora/localharness/browser_profile` |
+| `--isolated` | | Run browser in ephemeral in-memory profile without saving cookies/state across runs | `false` |
+| `--desktop` | | Enable native cross-platform desktop computer use tools | `false` |
+| `--headed` | | Force browser in headed mode (display browser window) | `auto (headed on desktop, headless if detached/no display)` |
+| `--headless` | | Force browser in headless mode (invisible background) | `false` |
+| `--connect-browser` | | Attach to existing browser via CDP URL (e.g. `http://localhost:9222`) | `""` |
+| `--max-auto-wake` | | Maximum consecutive auto-wake turns for background tasks/subagents | `5` |
 | `--detach` | `-d` | Launch prompt in background daemon without blocking | `false` |
 | `--prompt` | `-p` | Initial prompt to execute immediately | `""` |
 | `--data-dir` | | Global data directory override | `~/.divmora/localharness/` |
@@ -75,6 +84,7 @@ Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes
 | Shortcut | Action |
 |:---|:---|
 | **`Shift+Tab`** | Cycle operational modes (`DEFAULT` ➔ `ACCEPT-EDITS` ➔ `PLAN`) |
+| **`Ctrl+O`** | Toggle thinking / chain-of-thought visibility (`Thought for Xs` ⮂ full reasoning) |
 | **`/`** | Open instant **Slash Command Autocomplete** menu with description tooltips |
 | **`@`** | Open **Workspace File Autocomplete** matching files across attached workspaces |
 | **`↑` / `↓`** | Navigate autocomplete candidates (with wrap-around) |
@@ -83,6 +93,22 @@ Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes
 | **`Ctrl+D`** | Detach TUI cleanly (agents continue in background daemon) |
 | **`PgUp` / `PgDn`** | Scroll conversation viewport |
 | **`Esc`** | Close modal overlay / dismiss autocomplete menu |
+
+### Clean Stream & Semantic Action Badges
+
+`lhctl` formats model execution and tool actions like modern AI coding agents (AGY, Claude Code), keeping the conversation viewport clean and high-signal:
+
+- **Semantic Action Badges**: Tool invocations collapse into concise single-line updates with color-coded badges and inline metrics:
+  - `● Read <path> (128 lines) · 12ms` — file reads & URL fetches (Cyan)
+  - `● Write <path> · 24ms` with inline unified diff previews (Green)
+  - `● Search <query> (14 matches) · 85ms` — ripgrep & web searches (Magenta)
+  - `● Find <pattern> (5 files) · 18ms` — directory & file discovery (Purple)
+  - `● Run <command> (ok) · 1.2s` — shell command execution (Yellow)
+  - `● Browse <action> · 450ms` — browser navigation & inspection (Lavender)
+  - `● Agent <role> (Spawned: Researcher) · 120ms` — subagent coordination (Deep Orange)
+- **Path Relativity**: All paths inside attached workspaces are displayed as clean workspace-relative paths (e.g. `cmd/lhctl/main.go` instead of `/Users/.../cmd/lhctl/main.go`), and paths in home directory use `~`.
+- **Collapsible Reasoning**: Model chain-of-thought thoughts collapse into `💭 Thought for 1.4s`. Full reasoning can be inspected at any time via **`Ctrl+O`** or `/thinking on|off`.
+- **Zero Raw Dumps**: Raw multi-hundred character stdout and file contents are suppressed from the chat feed, showing only targeted metrics and results.
 
 ---
 

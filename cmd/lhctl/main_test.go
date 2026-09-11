@@ -78,6 +78,11 @@ func TestParseRunFlags(t *testing.T) {
 			wantPrompt:    "Hello",
 			wantWsCount:   1,
 		},
+		{
+			name:        "no-browser and headless flags",
+			args:        []string{"--no-browser", "--headless"},
+			wantWsCount: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -119,22 +124,30 @@ func TestFormatResumeCommand(t *testing.T) {
 			wantCmd:   "lhctl -c 0192a5b6-7c8d-7ef0-9123-456789abcdef",
 		},
 		{
-			name:      "with model, workspace and yolo",
+			name:      "with model and yolo",
 			sessionID: "0192a5b6-7c8d-7ef0-9123-456789abcdef",
 			flags: runFlags{
-				model:              "gpt-4o",
-				explicitWorkspaces: []string{"/Users/dev/myapp"},
-				yolo:               true,
+				model: "gpt-4o",
+				yolo:  true,
 			},
-			wantCmd: "lhctl -c 0192a5b6-7c8d-7ef0-9123-456789abcdef --model=gpt-4o --workspace=/Users/dev/myapp --yolo",
+			wantCmd: "lhctl -c 0192a5b6-7c8d-7ef0-9123-456789abcdef --model=gpt-4o --yolo",
 		},
 		{
-			name:      "with multiple workspaces",
+			name:      "persisted workspaces omitted from resume command",
 			sessionID: "conv-1234",
 			flags: runFlags{
 				explicitWorkspaces: []string{"/dir1", "/dir2"},
 			},
-			wantCmd: "lhctl -c conv-1234 --workspace=/dir1 --workspace=/dir2",
+			wantCmd: "lhctl -c conv-1234",
+		},
+		{
+			name:      "with no-browser and headless",
+			sessionID: "conv-5678",
+			flags: runFlags{
+				noBrowser: true,
+				headless:  true,
+			},
+			wantCmd: "lhctl -c conv-5678 --no-browser --headless",
 		},
 	}
 

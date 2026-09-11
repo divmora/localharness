@@ -35,6 +35,7 @@ var AvailableSlashCommands = []SlashCommandDef{
 	{"/subagents", "View subagent hierarchy & live transcript"},
 	{"/tasks", "View background tasks, running commands & timers"},
 	{"/workspace", "Manage workspaces (list, add, remove)"},
+	{"/thinking", "Toggle reasoning & chain-of-thought visibility [Ctrl+O]"},
 	{"/yolo", "Toggle YOLO Mode (skip all permission prompts)"},
 	{"/status", "Display daemon state, tokens & subagent metrics"},
 	{"/compact", "Compact conversation context history"},
