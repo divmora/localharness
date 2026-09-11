@@ -536,3 +536,107 @@ func TestModel_RenderConsoleHistory(t *testing.T) {
 		t.Errorf("expected assistant response in console history output: %s", consoleOut)
 	}
 }
+
+func TestChatHistory_RenderItem(t *testing.T) {
+	h := NewChatHistory()
+	h.SetWorkspaces([]string{"/workspace"})
+
+	// User message
+	userItem := ChatItem{
+		Type:    ChatItemUser,
+		Content: "Fix bug in auth.go",
+	}
+	renderedUser := h.RenderItem(userItem, 80)
+	if !strings.Contains(renderedUser, "You:") || !strings.Contains(renderedUser, "Fix bug in auth.go") {
+		t.Errorf("unexpected rendered user item: %s", renderedUser)
+	}
+
+	// Tool call done
+	toolItem := ChatItem{
+		Type:           ChatItemToolCall,
+		ToolName:       "view_file",
+		SemanticAction: ActionRead,
+		Target:         "/workspace/src/auth.go",
+		Summary:        "42 lines",
+		Duration:       25 * time.Millisecond,
+	}
+	renderedTool := h.RenderItem(toolItem, 80)
+	if !strings.Contains(renderedTool, "Read") || !strings.Contains(renderedTool, "src/auth.go") || !strings.Contains(renderedTool, "42 lines") {
+		t.Errorf("unexpected rendered tool item: %s", renderedTool)
+	}
+
+	// Assistant response
+	assistantItem := ChatItem{
+		Type:    ChatItemAssistant,
+		Content: "I have fixed the issue.",
+	}
+	renderedAsst := h.RenderItem(assistantItem, 80)
+	if !strings.Contains(renderedAsst, "Assistant:") || !strings.Contains(renderedAsst, "I have fixed the issue.") {
+		t.Errorf("unexpected rendered assistant item: %s", renderedAsst)
+	}
+}
+
+func TestChatHistory_FormatInitialHistory(t *testing.T) {
+	h := NewChatHistory()
+	h.AddUserMessage("Initial question")
+	h.AddSystemMessage("Session resumed")
+
+	formatted := h.FormatInitialHistory(80)
+	if !strings.Contains(formatted, "Initial question") || !strings.Contains(formatted, "Session resumed") {
+		t.Errorf("unexpected formatted initial history: %s", formatted)
+	}
+}
+
+func TestModel_DynamicDockView(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// 1. Idle dock view: contains textarea prompt and status bar
+	idleView := m.View()
+	if !strings.Contains(idleView, "❯") {
+		t.Errorf("expected prompt in idle view: %s", idleView)
+	}
+	if !strings.Contains(idleView, "IDLE") {
+		t.Errorf("expected IDLE status in idle view: %s", idleView)
+	}
+
+	// 2. Running tool dock view: contains live tool spinner line
+	m.history.StartToolCall("view_file", `{"path": "main.go"}`)
+	m.status = "RUNNING"
+	runningView := m.View()
+	if !strings.Contains(runningView, "Reading") || !strings.Contains(runningView, "main.go") {
+		t.Errorf("expected in-flight reading badge in running view: %s", runningView)
+	}
+
+	// 3. Approval active in dock: contains confirmation options
+	m.approval = &ActiveApproval{
+		RequestID:   "req-1",
+		ToolName:    "run_command",
+		Description: "make test",
+	}
+	approvalView := m.View()
+	if !strings.Contains(approvalView, "Tool Approval Required") || !strings.Contains(approvalView, "[y] Allow") {
+		t.Errorf("expected approval card in dock view: %s", approvalView)
+	}
+}
+
+func TestModel_SlashCommandsEmitCmd(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// Test that /help, /tasks, /subagents, /status return a tea.Cmd for scrollback printing
+	for _, cmdName := range []string{"help", "tasks", "subagents", "status", "context", "version"} {
+		cmd, isCmd := ParseCommand("/" + cmdName)
+		if !isCmd {
+			t.Fatalf("failed to parse command %s", cmdName)
+		}
+		teaCmd := m.handleSlashCommand(cmd)
+		if teaCmd == nil {
+			t.Errorf("expected non-nil tea.Cmd for /%s, got nil", cmdName)
+		}
+	}
+}

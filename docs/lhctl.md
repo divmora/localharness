@@ -94,13 +94,17 @@ Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes
 | **`Tab` / `Enter`** | Accept autocomplete selection / Send prompt / Confirm approval |
 | **`Ctrl+C`** | Interrupt/pause running turn (press twice within 2s to exit) |
 | **`Ctrl+D`** | Detach TUI cleanly (agents continue in background daemon) |
-| **`PgUp` / `PgDn`** | Scroll conversation viewport |
-| **`Esc`** | Close modal overlay / dismiss autocomplete menu |
+| **Mouse / Trackpad** | Native terminal scrolling, two-finger gesture, mousewheel, and cross-screen selection |
+| **`Esc`** | Dismiss active autocomplete dropdown or cancel question / review |
 
-### Clean Stream & Semantic Action Badges
+### AGY-Style Inline Terminal & Native Scrollback
 
-`lhctl` formats model execution and tool actions like modern AI coding agents (AGY, Claude Code), keeping the conversation viewport clean and high-signal:
+`lhctl` operates directly in your standard terminal buffer without trapping your session in a detached alternate screen (`WithAltScreen`):
 
+- **Native Terminal Scrollback**: User prompts, semantic action badges, diff snippets, thought summaries, and assistant markdown responses are committed directly to your terminal emulator's native scrollback (`tea.Println`).
+- **Continuous Scrolling & Search**: Scroll thousands of lines with your trackpad or mouse wheel at any time, use native terminal search (`Cmd+F` / `Ctrl+F`), and copy text across screens with click-and-drag.
+- **Dynamic Bottom Dock**: The active TUI view remains compact (typically 2 to 6 lines at the bottom of the screen), rendering only the active in-flight tool spinner, streaming preview, interactive approval or question cards, autocomplete popups, and the prompt textarea with status indicator.
+- **Non-Blocking Reports**: Commands like `/help`, `/tasks`, `/subagents`, `/context`, and `/status` print formatted reports directly into the terminal scrollback, allowing you to reference past outputs while typing your next prompt.
 - **Semantic Action Badges**: Tool invocations collapse into concise single-line updates with color-coded badges and inline metrics:
   - `● Read <path> (128 lines) · 12ms` — file reads & URL fetches (Cyan)
   - `● Write <path> · 24ms` with inline unified diff previews (Green)

@@ -284,14 +284,34 @@ func (h *ChatHistory) LoadFromState(state *pb.ConversationState) {
 	}
 }
 
-// AddUserMessage appends a user prompt.
-func (h *ChatHistory) AddUserMessage(content string) {
+// ActiveToolItem returns the currently running tool call item, if any.
+func (h *ChatHistory) ActiveToolItem() *ChatItem {
+	return h.activeToolItem
+}
+
+// ToolStartTime returns the start timestamp of the currently running tool.
+func (h *ChatHistory) ToolStartTime() time.Time {
+	return h.toolStartTime
+}
+
+// LastItem returns a pointer to the most recent chat item, if any.
+func (h *ChatHistory) LastItem() *ChatItem {
+	if len(h.items) == 0 {
+		return nil
+	}
+	return &h.items[len(h.items)-1]
+}
+
+// AddUserMessage appends a user prompt and returns the created item.
+func (h *ChatHistory) AddUserMessage(content string) ChatItem {
 	h.FlushStreaming()
-	h.items = append(h.items, ChatItem{
+	item := ChatItem{
 		Type:      ChatItemUser,
 		Content:   content,
 		Timestamp: time.Now(),
-	})
+	}
+	h.items = append(h.items, item)
+	return item
 }
 
 // AppendStreamingText adds a text chunk during LLM generation.
@@ -307,31 +327,37 @@ func (h *ChatHistory) AppendThinkingText(delta string) {
 	h.thinkingText.WriteString(delta)
 }
 
-// FlushStreaming commits any active streaming or thinking buffer into chat items.
-func (h *ChatHistory) FlushStreaming() {
+// FlushStreaming commits any active streaming or thinking buffer into chat items and returns newly created items.
+func (h *ChatHistory) FlushStreaming() []ChatItem {
+	var created []ChatItem
 	if h.thinkingText.Len() > 0 {
 		dur := time.Since(h.thinkingStartTime)
-		h.items = append(h.items, ChatItem{
+		item := ChatItem{
 			Type:      ChatItemThinking,
 			Content:   h.thinkingText.String(),
 			Duration:  dur,
 			Timestamp: time.Now(),
-		})
+		}
+		h.items = append(h.items, item)
+		created = append(created, item)
 		h.thinkingText.Reset()
 	}
 	if h.streamingText.Len() > 0 {
-		h.items = append(h.items, ChatItem{
+		item := ChatItem{
 			Type:      ChatItemAssistant,
 			Content:   h.streamingText.String(),
 			Timestamp: time.Now(),
-		})
+		}
+		h.items = append(h.items, item)
+		created = append(created, item)
 		h.streamingText.Reset()
 	}
+	return created
 }
 
-// StartToolCall registers an active tool execution.
-func (h *ChatHistory) StartToolCall(name, args string) {
-	h.FlushStreaming()
+// StartToolCall registers an active tool execution and returns any flushed streaming items.
+func (h *ChatHistory) StartToolCall(name, args string) []ChatItem {
+	flushed := h.FlushStreaming()
 	action := inferSemanticAction(name)
 	target := extractTargetFromArgs(name, args)
 	item := ChatItem{
@@ -346,10 +372,11 @@ func (h *ChatHistory) StartToolCall(name, args string) {
 	h.items = append(h.items, item)
 	h.activeToolItem = &h.items[len(h.items)-1]
 	h.toolStartTime = time.Now()
+	return flushed
 }
 
-// FinishToolCall marks the active tool execution as completed.
-func (h *ChatHistory) FinishToolCall(name string, result string, isError bool, diff string) {
+// FinishToolCall marks the active tool execution as completed and returns the finished item.
+func (h *ChatHistory) FinishToolCall(name string, result string, isError bool, diff string) *ChatItem {
 	dur := time.Since(h.toolStartTime)
 	if h.activeToolItem != nil && h.activeToolItem.ToolName == name {
 		h.activeToolItem.IsActive = false
@@ -360,13 +387,14 @@ func (h *ChatHistory) FinishToolCall(name string, result string, isError bool, d
 		if isError {
 			h.activeToolItem.Content = result
 		}
+		res := h.activeToolItem
 		h.activeToolItem = nil
-		return
+		return res
 	}
 
 	action := inferSemanticAction(name)
 	target := extractTargetFromArgs(name, "")
-	h.items = append(h.items, ChatItem{
+	item := ChatItem{
 		Type:           ChatItemToolCall,
 		ToolName:       name,
 		SemanticAction: action,
@@ -377,28 +405,34 @@ func (h *ChatHistory) FinishToolCall(name string, result string, isError bool, d
 		DiffBlock:      diff,
 		Content:        result,
 		Timestamp:      time.Now(),
-	})
+	}
+	h.items = append(h.items, item)
+	return &item
 }
 
-// AddSystemMessage appends an informational system notification.
-func (h *ChatHistory) AddSystemMessage(content string) {
+// AddSystemMessage appends an informational system notification and returns the item.
+func (h *ChatHistory) AddSystemMessage(content string) ChatItem {
 	h.FlushStreaming()
-	h.items = append(h.items, ChatItem{
+	item := ChatItem{
 		Type:      ChatItemSystem,
 		Content:   content,
 		Timestamp: time.Now(),
-	})
+	}
+	h.items = append(h.items, item)
+	return item
 }
 
-// AddSideQuestion appends a side inquiry and response without disrupting the main trajectory.
-func (h *ChatHistory) AddSideQuestion(question, answer string) {
+// AddSideQuestion appends a side inquiry and response without disrupting the main trajectory and returns the item.
+func (h *ChatHistory) AddSideQuestion(question, answer string) ChatItem {
 	h.FlushStreaming()
-	h.items = append(h.items, ChatItem{
+	item := ChatItem{
 		Type:      ChatItemSideQuestion,
 		ToolName:  question,
 		Content:   answer,
 		Timestamp: time.Now(),
-	})
+	}
+	h.items = append(h.items, item)
+	return item
 }
 
 // Clear flushes all history.
@@ -419,26 +453,8 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 	var sb strings.Builder
 
 	for _, item := range h.items {
-		switch item.Type {
-		case ChatItemUser:
-			sb.WriteString("\n" + UserMsgStyle.Render("🧑 You:") + "\n" + wrapString(item.Content, contentWidth) + "\n")
-
-		case ChatItemAssistant:
-			sb.WriteString("\n" + AssistantMsgStyle.Render("🤖 Assistant:") + "\n" + wrapString(item.Content, contentWidth) + "\n")
-
-		case ChatItemThinking:
-			if h.showThinking {
-				sb.WriteString("\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+item.Content) + "\n")
-			} else {
-				thoughtDur := item.Duration
-				durStr := ""
-				if thoughtDur > 0 {
-					durStr = fmt.Sprintf(" for %s", thoughtDur.Round(100*time.Millisecond).String())
-				}
-				sb.WriteString("  " + ThinkingCollapsedStyle.Render(fmt.Sprintf("💭 Thought%s", durStr)) + "\n")
-			}
-
-		case ChatItemToolCall:
+		if item.IsActive {
+			dur := time.Since(h.toolStartTime).Round(100 * time.Millisecond)
 			action := item.SemanticAction
 			if action == ActionUnknown {
 				action = inferSemanticAction(item.ToolName)
@@ -453,113 +469,23 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 				target = target[:maxTargetLen-3] + "..."
 			}
 
-			if item.IsActive {
-				dur := time.Since(h.toolStartTime).Round(100 * time.Millisecond)
-				spinnerView := spin.View()
-				verb := action.Verb()
-				if action == ActionUnknown {
-					verb = "Running " + item.ToolName
-				}
-				line := fmt.Sprintf("  %s %s %s [%s]",
-					spinnerView,
-					action.BadgeStyle().Render(verb),
-					ActionTargetStyle.Render(target),
-					lipgloss.NewStyle().Foreground(ColorWarning).Render(dur.String()),
-				)
-				sb.WriteString(line + "\n")
-			} else {
-				if item.IsError {
-					durStr := ""
-					if item.Duration > 0 {
-						durStr = fmt.Sprintf(" [%s]", item.Duration.Round(10*time.Millisecond).String())
-					}
-					line := fmt.Sprintf("  %s %s %s%s",
-						lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("✗"),
-						lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Failed: "+action.String()),
-						ActionTargetStyle.Render(target),
-						ActionDurStyle.Render(durStr),
-					)
-					sb.WriteString(line + "\n")
-					if item.Content != "" {
-						errStr := strings.TrimSpace(item.Content)
-						if len(errStr) > 400 {
-							errStr = errStr[:400] + "..."
-						}
-						sb.WriteString("    " + ErrorMsgStyle.Render(wrapString(errStr, contentWidth-6)) + "\n")
-					}
-				} else {
-					summary := item.Summary
-					if summary != "" {
-						// Filter out raw dumps or overly long text from summary badge
-						if len(summary) > 60 || strings.Contains(summary, "\n") {
-							summary = ""
-						} else {
-							summary = "(" + summary + ")"
-						}
-					}
-					verb := action.DoneVerb()
-					if action == ActionUnknown {
-						verb = item.ToolName
-					}
-					durStr := ""
-					if item.Duration > 0 {
-						durStr = "· " + item.Duration.Round(10*time.Millisecond).String()
-					}
-
-					var line string
-					if summary != "" {
-						line = fmt.Sprintf("  %s %s %s %s %s",
-							action.BadgeStyle().Render("●"),
-							action.BadgeStyle().Render(verb),
-							ActionTargetStyle.Render(target),
-							ActionMetricStyle.Render(summary),
-							ActionDurStyle.Render(durStr),
-						)
-					} else {
-						line = fmt.Sprintf("  %s %s %s %s",
-							action.BadgeStyle().Render("●"),
-							action.BadgeStyle().Render(verb),
-							ActionTargetStyle.Render(target),
-							ActionDurStyle.Render(durStr),
-						)
-					}
-					sb.WriteString(strings.TrimRight(line, " ") + "\n")
-
-					if item.DiffBlock != "" {
-						sb.WriteString(renderDiffSnippet(item.DiffBlock, contentWidth) + "\n")
-					}
-				}
+			spinnerView := spin.View()
+			verb := action.Verb()
+			if action == ActionUnknown {
+				verb = "Running " + item.ToolName
 			}
-
-		case ChatItemToolResult:
-			if item.DiffBlock != "" {
-				sb.WriteString(renderDiffSnippet(item.DiffBlock, contentWidth) + "\n")
-			} else if item.Content != "" {
-				res := strings.TrimSpace(item.Content)
-				if len(res) > 200 {
-					res = res[:200] + "..."
-				}
-				wrapped := wrapString(res, contentWidth-4)
-				sb.WriteString("    " + lipgloss.NewStyle().Foreground(ColorMuted).Render(wrapped) + "\n")
+			line := fmt.Sprintf("  %s %s %s [%s]",
+				spinnerView,
+				action.BadgeStyle().Render(verb),
+				ActionTargetStyle.Render(target),
+				lipgloss.NewStyle().Foreground(ColorWarning).Render(dur.String()),
+			)
+			sb.WriteString(line + "\n")
+		} else {
+			rendered := h.RenderItem(item, width)
+			if rendered != "" {
+				sb.WriteString(rendered)
 			}
-
-		case ChatItemError:
-			wrapped := wrapString("Error: "+item.Content, contentWidth-4)
-			sb.WriteString("    " + ErrorMsgStyle.Render(wrapped) + "\n")
-
-		case ChatItemSystem:
-			wrapped := wrapString("ℹ️  "+item.Content, contentWidth)
-			sb.WriteString("\n" + SystemMsgStyle.Render(wrapped) + "\n")
-
-		case ChatItemSideQuestion:
-			sideBox := lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ColorHighlight).
-				Padding(0, 1).
-				Width(contentWidth)
-			title := lipgloss.NewStyle().Bold(true).Foreground(ColorHighlight).Render("💬 Side Question (/btw): ") + item.ToolName
-			body := wrapString(item.Content, contentWidth-4)
-			sb.WriteString("\n" + sideBox.Render(title+"\n\n"+body) + "\n")
 		}
 	}
 
@@ -577,6 +503,155 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 	}
 
 	return sb.String()
+}
+
+// RenderItem formats a single completed chat item for inline terminal output.
+func (h *ChatHistory) RenderItem(item ChatItem, width int) string {
+	contentWidth := width - 4
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
+	switch item.Type {
+	case ChatItemUser:
+		return "\n" + UserMsgStyle.Render("🧑 You:") + "\n" + wrapString(item.Content, contentWidth) + "\n"
+
+	case ChatItemAssistant:
+		return "\n" + AssistantMsgStyle.Render("🤖 Assistant:") + "\n" + wrapString(item.Content, contentWidth) + "\n"
+
+	case ChatItemThinking:
+		if h.showThinking {
+			return "\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+item.Content) + "\n"
+		}
+		thoughtDur := item.Duration
+		durStr := ""
+		if thoughtDur > 0 {
+			durStr = fmt.Sprintf(" for %s", thoughtDur.Round(100*time.Millisecond).String())
+		}
+		return "  " + ThinkingCollapsedStyle.Render(fmt.Sprintf("💭 Thought%s", durStr)) + "\n"
+
+	case ChatItemToolCall:
+		action := item.SemanticAction
+		if action == ActionUnknown {
+			action = inferSemanticAction(item.ToolName)
+		}
+		target := item.Target
+		if target == "" {
+			target = extractTargetFromArgs(item.ToolName, item.ToolArgs)
+		}
+		target = formatRelativePath(target, h.workspaces)
+		maxTargetLen := max(15, contentWidth-35)
+		if len(target) > maxTargetLen {
+			target = target[:maxTargetLen-3] + "..."
+		}
+
+		if item.IsError {
+			durStr := ""
+			if item.Duration > 0 {
+				durStr = fmt.Sprintf(" [%s]", item.Duration.Round(10*time.Millisecond).String())
+			}
+			line := fmt.Sprintf("  %s %s %s%s",
+				lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("✗"),
+				lipgloss.NewStyle().Bold(true).Foreground(ColorError).Render("Failed: "+action.String()),
+				ActionTargetStyle.Render(target),
+				ActionDurStyle.Render(durStr),
+			)
+			out := line + "\n"
+			if item.Content != "" {
+				errStr := strings.TrimSpace(item.Content)
+				if len(errStr) > 400 {
+					errStr = errStr[:400] + "..."
+				}
+				out += "    " + ErrorMsgStyle.Render(wrapString(errStr, contentWidth-6)) + "\n"
+			}
+			return out
+		}
+
+		summary := item.Summary
+		if summary != "" {
+			if len(summary) > 60 || strings.Contains(summary, "\n") {
+				summary = ""
+			} else {
+				summary = "(" + summary + ")"
+			}
+		}
+		verb := action.DoneVerb()
+		if action == ActionUnknown {
+			verb = item.ToolName
+		}
+		durStr := ""
+		if item.Duration > 0 {
+			durStr = "· " + item.Duration.Round(10*time.Millisecond).String()
+		}
+
+		var line string
+		if summary != "" {
+			line = fmt.Sprintf("  %s %s %s %s %s",
+				action.BadgeStyle().Render("●"),
+				action.BadgeStyle().Render(verb),
+				ActionTargetStyle.Render(target),
+				ActionMetricStyle.Render(summary),
+				ActionDurStyle.Render(durStr),
+			)
+		} else {
+			line = fmt.Sprintf("  %s %s %s %s",
+				action.BadgeStyle().Render("●"),
+				action.BadgeStyle().Render(verb),
+				ActionTargetStyle.Render(target),
+				ActionDurStyle.Render(durStr),
+			)
+		}
+		out := strings.TrimRight(line, " ") + "\n"
+		if item.DiffBlock != "" {
+			out += renderDiffSnippet(item.DiffBlock, contentWidth) + "\n"
+		}
+		return out
+
+	case ChatItemToolResult:
+		if item.DiffBlock != "" {
+			return renderDiffSnippet(item.DiffBlock, contentWidth) + "\n"
+		} else if item.Content != "" {
+			res := strings.TrimSpace(item.Content)
+			if len(res) > 200 {
+				res = res[:200] + "..."
+			}
+			wrapped := wrapString(res, contentWidth-4)
+			return "    " + lipgloss.NewStyle().Foreground(ColorMuted).Render(wrapped) + "\n"
+		}
+		return ""
+
+	case ChatItemError:
+		wrapped := wrapString("Error: "+item.Content, contentWidth-4)
+		return "    " + ErrorMsgStyle.Render(wrapped) + "\n"
+
+	case ChatItemSystem:
+		wrapped := wrapString("ℹ️  "+item.Content, contentWidth)
+		return "\n" + SystemMsgStyle.Render(wrapped) + "\n"
+
+	case ChatItemSideQuestion:
+		sideBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorHighlight).
+			Padding(0, 1).
+			Width(contentWidth)
+		title := lipgloss.NewStyle().Bold(true).Foreground(ColorHighlight).Render("💬 Side Question (/btw): ") + item.ToolName
+		body := wrapString(item.Content, contentWidth-4)
+		return "\n" + sideBox.Render(title+"\n\n"+body) + "\n"
+	}
+
+	return ""
+}
+
+// FormatInitialHistory formats all pre-existing chat items for emission into terminal scrollback on startup.
+func (h *ChatHistory) FormatInitialHistory(width int) string {
+	var sb strings.Builder
+	for _, item := range h.items {
+		rendered := strings.TrimSpace(h.RenderItem(item, width))
+		if rendered != "" {
+			sb.WriteString(rendered + "\n")
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func wrapString(text string, width int) string {

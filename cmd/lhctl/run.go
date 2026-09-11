@@ -361,18 +361,10 @@ func runInteractiveWithOptions(flags runFlags) error {
 
 	p := tea.NewProgram(
 		tui.InitialModelWithHistory(cl, flags.workspaces, flags.yolo, initialState),
-		tea.WithAltScreen(),
 	)
 
-	finalModel, err := p.Run()
-	if err != nil {
+	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("running TUI: %w", err)
-	}
-
-	if m, ok := finalModel.(tui.Model); ok {
-		if consoleHistory := m.RenderConsoleHistory(); consoleHistory != "" {
-			fmt.Println(consoleHistory)
-		}
 	}
 
 	sessionID := cl.SessionID()
@@ -422,19 +414,11 @@ func runAttach(dataDir string, sessionID string, args []string) {
 
 	p := tea.NewProgram(
 		tui.InitialModelWithHistory(cl, workspaces, false, initialState),
-		tea.WithAltScreen(),
 	)
 
-	finalModel, err := p.Run()
-	if err != nil {
+	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
 		os.Exit(1)
-	}
-
-	if m, ok := finalModel.(tui.Model); ok {
-		if consoleHistory := m.RenderConsoleHistory(); consoleHistory != "" {
-			fmt.Println(consoleHistory)
-		}
 	}
 
 	sessID := cl.SessionID()

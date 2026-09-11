@@ -9,7 +9,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/term"
@@ -23,7 +22,6 @@ import (
 // Model is the main Bubbletea TUI application model.
 type Model struct {
 	client            *client.Client
-	viewport          viewport.Model
 	textarea          textarea.Model
 	spinner           spinner.Model
 	history           *ChatHistory
@@ -35,9 +33,6 @@ type Model struct {
 	approval          *ActiveApproval
 	question          *ActiveQuestion
 	artifactReview    *ActiveArtifactReview
-	showHelp          bool
-	showSubagents     bool
-	showTasks         bool
 	showThinking      bool
 	yoloMode          bool
 	modelName         string
@@ -116,17 +111,25 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 		mode:           ModeDefault,
 		status:         "IDLE",
 		showThinking:   false,
+		ready:          true,
 	}
 }
 
 // Init initializes Bubbletea subscriptions.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		textarea.Blink,
 		m.spinner.Tick,
 		listenForEvents(m.client),
 		listenForErrors(m.client),
-	)
+	}
+	if len(m.history.items) > 0 {
+		initial := m.history.FormatInitialHistory(m.getWidth())
+		if initial != "" {
+			cmds = append(cmds, tea.Println(initial))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func listenForEvents(c *client.Client) tea.Cmd {
@@ -159,7 +162,6 @@ func listenForErrors(c *client.Client) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		tiCmd tea.Cmd
-		vpCmd tea.Cmd
 		spCmd tea.Cmd
 		cmds  []tea.Cmd
 	)
@@ -169,13 +171,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.updateDimensions()
+		return m, nil
 
 	case spinner.TickMsg:
 		m.spinner, spCmd = m.spinner.Update(msg)
 		cmds = append(cmds, spCmd)
-		if m.status == "RUNNING" || m.status == "STREAMING" {
-			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-		}
+		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		// Inline Approval Handling
@@ -197,87 +198,83 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			switch msg.String() {
 			case "y", "Y", "enter":
+				var sysMsg string
 				if hasCompound && len(approvedSubs) < len(m.approval.SubCommands) {
 					// Partial approval
 					if len(approvedSubs) == 0 {
 						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "all sub-commands denied by user in TUI", pb.PermissionResponse_SCOPE_ONCE, nil, deniedSubs)
-						m.history.AddSystemMessage(fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel))
+						sysMsg = fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel)
 					} else {
 						reason := fmt.Sprintf("User approved sub-commands: [%s], but denied: [%s]. Approved sub-commands have been granted permission; please execute approved commands individually if needed.", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
 						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, reason, pb.PermissionResponse_SCOPE_ONCE, approvedSubs, deniedSubs)
-						m.history.AddSystemMessage(fmt.Sprintf("✓ Partial approval: Allowed once [%s] | Denied [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", ")))
+						sysMsg = fmt.Sprintf("✓ Partial approval: Allowed once [%s] | Denied [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
 					}
 				} else {
 					_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_ONCE, approvedSubs, nil)
-					m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed once: %s", targetLabel))
+					sysMsg = fmt.Sprintf("✓ Allowed once: %s", targetLabel)
 				}
+				item := m.history.AddSystemMessage(sysMsg)
 				m.approval = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 			case "c", "C", "a", "A":
+				var sysMsg string
 				if hasCompound && len(approvedSubs) < len(m.approval.SubCommands) {
 					// Partial approval for conversation
 					if len(approvedSubs) == 0 {
 						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "all sub-commands denied by user in TUI", pb.PermissionResponse_SCOPE_CONVERSATION, nil, deniedSubs)
-						m.history.AddSystemMessage(fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel))
+						sysMsg = fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel)
 					} else {
 						reason := fmt.Sprintf("User approved sub-commands for conversation: [%s], but denied: [%s]. Approved sub-commands have been granted conversation permission; please execute approved commands individually if needed.", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
 						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, reason, pb.PermissionResponse_SCOPE_CONVERSATION, approvedSubs, deniedSubs)
-						m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed for conversation: [%s] | Denied: [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", ")))
+						sysMsg = fmt.Sprintf("✓ Allowed for conversation: [%s] | Denied: [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
 					}
 				} else {
 					_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_CONVERSATION, approvedSubs, nil)
-					m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed for this conversation: %s", targetLabel))
+					sysMsg = fmt.Sprintf("✓ Allowed for this conversation: %s", targetLabel)
 				}
+				item := m.history.AddSystemMessage(sysMsg)
 				m.approval = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 			case "g", "G":
+				var sysMsg string
 				if hasCompound && len(approvedSubs) < len(m.approval.SubCommands) {
 					// Partial approval globally
 					if len(approvedSubs) == 0 {
 						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "all sub-commands denied by user in TUI", pb.PermissionResponse_SCOPE_GLOBAL, nil, deniedSubs)
-						m.history.AddSystemMessage(fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel))
+						sysMsg = fmt.Sprintf("✗ Denied all sub-commands: %s", targetLabel)
 					} else {
 						reason := fmt.Sprintf("User approved sub-commands globally: [%s], but denied: [%s]. Approved sub-commands have been permanently allowed; please execute approved commands individually if needed.", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
 						_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, reason, pb.PermissionResponse_SCOPE_GLOBAL, approvedSubs, deniedSubs)
-						m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed globally: [%s] | Denied: [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", ")))
+						sysMsg = fmt.Sprintf("✓ Allowed globally: [%s] | Denied: [%s]", strings.Join(approvedSubs, ", "), strings.Join(deniedSubs, ", "))
 					}
 				} else {
 					_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_GLOBAL, approvedSubs, nil)
-					m.history.AddSystemMessage(fmt.Sprintf("✓ Allowed globally in ~/.divmora/config/settings.json: %s", targetLabel))
+					sysMsg = fmt.Sprintf("✓ Allowed globally in ~/.divmora/config/settings.json: %s", targetLabel)
 				}
+				item := m.history.AddSystemMessage(sysMsg)
 				m.approval = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 			case "n", "N", "esc":
 				_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, false, "denied by user in TUI", pb.PermissionResponse_SCOPE_ONCE, nil, m.approval.SubCommands)
-				m.history.AddSystemMessage(fmt.Sprintf("✗ Denied: %s", targetLabel))
+				item := m.history.AddSystemMessage(fmt.Sprintf("✗ Denied: %s", targetLabel))
 				m.approval = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 			case "yolo":
 				m.yoloMode = true
 				_ = m.client.SendSetYoloMode(true)
 				_ = m.client.SendPermissionResponseWithSubcommands(m.approval.RequestID, true, "", pb.PermissionResponse_SCOPE_ONCE, approvedSubs, nil)
-				m.history.AddSystemMessage("YOLO Mode ENABLED: All tool actions will auto-execute without prompts.")
+				item := m.history.AddSystemMessage("YOLO Mode ENABLED: All tool actions will auto-execute without prompts.")
 				m.approval = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 			return m, nil
 		}
@@ -329,42 +326,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				curSummary := m.question.CurrentAnswerSummary()
 				if m.question.HasNext() {
-					// Advance to next question and log current answer in chat history
+					var item ChatItem
 					if len(m.question.Questions) > 1 {
-						m.history.AddSystemMessage(fmt.Sprintf("✓ [%d/%d] %s", m.question.CurrentQuestion+1, len(m.question.Questions), curSummary))
+						item = m.history.AddSystemMessage(fmt.Sprintf("✓ [%d/%d] %s", m.question.CurrentQuestion+1, len(m.question.Questions), curSummary))
 					}
 					m.question.NextQuestion()
-					m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-					m.viewport.GotoBottom()
+					if item.Content != "" {
+						return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
+					}
 					return m, nil
 				}
 
 				// Final question answered - submit all answers
+				var sysMsg string
 				if len(m.question.Questions) > 1 {
-					m.history.AddSystemMessage(fmt.Sprintf("✓ [%d/%d] %s", m.question.CurrentQuestion+1, len(m.question.Questions), curSummary))
+					sysMsg = fmt.Sprintf("✓ [%d/%d] %s", m.question.CurrentQuestion+1, len(m.question.Questions), curSummary)
 				} else {
-					m.history.AddSystemMessage(fmt.Sprintf("✓ Answered: %s", curSummary))
+					sysMsg = fmt.Sprintf("✓ Answered: %s", curSummary)
 				}
+				item := m.history.AddSystemMessage(sysMsg)
 
 				answers := m.question.BuildAnswers()
 				_ = m.client.SendQuestionResponse(m.question.RequestID, answers, false)
 				m.question = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 			case "s", "S", "esc":
 				_ = m.client.SendQuestionResponse(m.question.RequestID, nil, true)
-				m.history.AddSystemMessage("↷ Skipped question")
+				item := m.history.AddSystemMessage("↷ Skipped question")
 				m.question = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 			default:
-				// Number key 1-9 to select/toggle option directly for active question
 				if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
 					optIdx := int(msg.String()[0] - '1')
 					m.question.ToggleOption(optIdx)
@@ -383,18 +378,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if feedback == "" {
 						feedback = "Proceed"
 					}
-					m.history.AddUserMessage(feedback)
-					m.history.AddSystemMessage(fmt.Sprintf("✓ Feedback submitted for %s", m.artifactReview.Filename))
+					uItem := m.history.AddUserMessage(feedback)
+					sItem := m.history.AddSystemMessage(fmt.Sprintf("✓ Feedback submitted for %s", m.artifactReview.Filename))
+					var extraItem ChatItem
 					if m.mode == ModePlan {
 						m.mode = ModeAcceptEdits
-						m.history.AddSystemMessage("Plan approved — switched mode to ACCEPT-EDITS.")
+						extraItem = m.history.AddSystemMessage("Plan approved — switched mode to ACCEPT-EDITS.")
 					}
 					_ = m.client.SendUserMessage(feedback, nil, nil)
 					m.artifactReview = nil
 					m.status = "RUNNING"
-					m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-					m.viewport.GotoBottom()
-					return m, nil
+					var printCmds []tea.Cmd
+					printCmds = append(printCmds, tea.Println(m.history.RenderItem(uItem, m.getWidth())))
+					printCmds = append(printCmds, tea.Println(m.history.RenderItem(sItem, m.getWidth())))
+					if extraItem.Content != "" {
+						printCmds = append(printCmds, tea.Println(m.history.RenderItem(extraItem, m.getWidth())))
+					}
+					return m, tea.Batch(printCmds...)
 				case "esc":
 					m.artifactReview.CancelFeedback()
 					return m, nil
@@ -408,18 +408,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "enter", "p", "P":
 				proceedMsg := "Proceed with the plan."
-				m.history.AddUserMessage(proceedMsg)
-				m.history.AddSystemMessage(fmt.Sprintf("✓ Approved artifact: %s", m.artifactReview.Filename))
+				uItem := m.history.AddUserMessage(proceedMsg)
+				sItem := m.history.AddSystemMessage(fmt.Sprintf("✓ Approved artifact: %s", m.artifactReview.Filename))
+				var extraItem ChatItem
 				if m.mode == ModePlan {
 					m.mode = ModeAcceptEdits
-					m.history.AddSystemMessage("Plan approved — switched mode to ACCEPT-EDITS.")
+					extraItem = m.history.AddSystemMessage("Plan approved — switched mode to ACCEPT-EDITS.")
 				}
 				_ = m.client.SendUserMessage(proceedMsg, nil, nil)
 				m.artifactReview = nil
 				m.status = "RUNNING"
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				var printCmds []tea.Cmd
+				printCmds = append(printCmds, tea.Println(m.history.RenderItem(uItem, m.getWidth())))
+				printCmds = append(printCmds, tea.Println(m.history.RenderItem(sItem, m.getWidth())))
+				if extraItem.Content != "" {
+					printCmds = append(printCmds, tea.Println(m.history.RenderItem(extraItem, m.getWidth())))
+				}
+				return m, tea.Batch(printCmds...)
 			case "f", "F", "e", "E":
 				m.artifactReview.StartFeedback()
 				return m, nil
@@ -427,57 +432,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.artifactReview.ToggleView()
 				return m, nil
 			case "esc", "q", "Q":
-				m.history.AddSystemMessage(fmt.Sprintf("↷ Dismissed review for %s", m.artifactReview.Filename))
+				item := m.history.AddSystemMessage(fmt.Sprintf("↷ Dismissed review for %s", m.artifactReview.Filename))
 				m.artifactReview = nil
 				m.status = "IDLE"
-				return m, nil
-			}
-			return m, nil
-		}
-
-		if m.showSubagents {
-			switch msg.String() {
-			case "up", "k":
-				m.subagents.NavigateUp()
-			case "down", "j":
-				m.subagents.NavigateDown()
-			case "enter":
-				if m.subagents.IsDrillDown() {
-					m.subagents.ExitDrillDown()
-				} else {
-					m.subagents.SelectDrillDown()
-				}
-			case "esc", "q":
-				if m.subagents.IsDrillDown() {
-					m.subagents.ExitDrillDown()
-				} else {
-					m.showSubagents = false
-				}
-			}
-			return m, nil
-		}
-
-		if m.showTasks {
-			switch msg.String() {
-			case "up":
-				m.tasks.NavigateUp()
-			case "down":
-				m.tasks.NavigateDown()
-			case "k", "K":
-				if sel := m.tasks.SelectedTask(); sel != nil && sel.Status == "RUNNING" {
-					_ = m.client.SendUserMessage(fmt.Sprintf("manage_task kill %s", sel.TaskID), nil, nil)
-					sel.Status = "KILLED"
-					m.history.AddSystemMessage(fmt.Sprintf("Sent kill request for task %s", sel.TaskID))
-				}
-			case "esc", "q", "enter":
-				m.showTasks = false
-			}
-			return m, nil
-		}
-
-		if m.showHelp {
-			if msg.String() == "esc" || msg.String() == "q" || msg.String() == "enter" {
-				m.showHelp = false
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 			return m, nil
 		}
@@ -531,17 +489,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Shift+Tab Mode Cycling (default -> accept-edits -> plan -> default)
 		if msg.Type == tea.KeyShiftTab || msg.String() == "shift+tab" || msg.String() == "backtab" {
 			m.mode = m.mode.Next()
+			var item ChatItem
 			switch m.mode {
 			case ModeDefault:
-				m.history.AddSystemMessage("Mode: DEFAULT (Safe mode — prompts for file edits and shell commands)")
+				item = m.history.AddSystemMessage("Mode: DEFAULT (Safe mode — prompts for file edits and shell commands)")
 			case ModeAcceptEdits:
-				m.history.AddSystemMessage("Mode: ACCEPT-EDITS (Auto-approves file edits; shell commands require confirmation)")
+				item = m.history.AddSystemMessage("Mode: ACCEPT-EDITS (Auto-approves file edits; shell commands require confirmation)")
 			case ModePlan:
-				m.history.AddSystemMessage("Mode: PLAN (Plan-before-act mode — enforces research & implementation_plan.md before code changes)")
+				item = m.history.AddSystemMessage("Mode: PLAN (Plan-before-act mode — enforces research & implementation_plan.md before code changes)")
 			}
-			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-			m.viewport.GotoBottom()
-			return m, nil
+			return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 
 		// Global Shortcuts
@@ -549,26 +506,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlO:
 			m.showThinking = !m.showThinking
 			m.history.SetShowThinking(m.showThinking)
+			var item ChatItem
 			if m.showThinking {
-				m.history.AddSystemMessage("Thinking expanded (CoT visible). Press Ctrl+O to collapse.")
+				item = m.history.AddSystemMessage("Thinking expanded (CoT visible). Press Ctrl+O to collapse.")
 			} else {
-				m.history.AddSystemMessage("Thinking collapsed. Press Ctrl+O to expand.")
+				item = m.history.AddSystemMessage("Thinking collapsed. Press Ctrl+O to expand.")
 			}
-			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-			m.viewport.GotoBottom()
-			return m, nil
+			return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 		case tea.KeyCtrlY:
 			toCopy := m.history.LastAssistantResponse()
 			if toCopy == "" {
-				m.history.AddSystemMessage("No assistant response found to copy.")
-			} else {
-				_ = CopyToClipboard(toCopy)
-				m.history.AddSystemMessage(fmt.Sprintf("✓ Copied last response to clipboard (%d characters)", len(toCopy)))
+				item := m.history.AddSystemMessage("No assistant response found to copy.")
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
-			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-			m.viewport.GotoBottom()
-			return m, nil
+			_ = CopyToClipboard(toCopy)
+			item := m.history.AddSystemMessage(fmt.Sprintf("✓ Copied last response to clipboard (%d characters)", len(toCopy)))
+			return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 		case tea.KeyCtrlV:
 			clip, err := PasteFromClipboard()
@@ -595,10 +549,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.client.SendInterrupt()
 				m.lastInterrupt = time.Now()
 				m.status = "IDLE"
-				m.history.AddSystemMessage("Turn interrupted. Press Ctrl+C again to exit.")
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
-				return m, nil
+				item := m.history.AddSystemMessage("Turn interrupted. Press Ctrl+C again to exit.")
+				return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 			m.quitting = true
 			if m.client != nil {
@@ -633,12 +585,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if cmd, isCmd := ParseCommand(input); isCmd {
 				teaCmd := m.handleSlashCommand(cmd)
-				m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-				m.viewport.GotoBottom()
 				return m, teaCmd
 			}
 
-			m.history.AddUserMessage(input)
+			item := m.history.AddUserMessage(input)
 			m.status = "RUNNING"
 
 			promptToSend := input
@@ -648,31 +598,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.client != nil {
 				_ = m.client.SendUserMessage(promptToSend, nil, nil)
 			}
-			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-			m.viewport.GotoBottom()
-			return m, nil
+			return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 
 	case ServerEventMsg:
-		m.handleServerEvent(msg.Msg)
-		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-		m.viewport.GotoBottom()
+		evtCmd := m.handleServerEvent(msg.Msg)
+		if evtCmd != nil {
+			cmds = append(cmds, evtCmd)
+		}
 		cmds = append(cmds, listenForEvents(m.client))
+		return m, tea.Batch(cmds...)
 
 	case SideQuestionResultMsg:
-		m.history.AddSideQuestion(msg.Question, msg.Answer)
-		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-		m.viewport.GotoBottom()
-		return m, nil
+		item := m.history.AddSideQuestion(msg.Question, msg.Answer)
+		return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case WSErrorMsg:
 		if m.quitting {
 			return m, tea.Quit
 		}
-		m.history.AddSystemMessage(fmt.Sprintf("Server disconnected: %v", msg.Err))
+		item := m.history.AddSystemMessage(fmt.Sprintf("Server disconnected: %v", msg.Err))
 		m.status = "IDLE"
-		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-		m.viewport.GotoBottom()
+		return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 	}
 
 	// Update text input and check for @ autocomplete trigger
@@ -738,17 +685,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	m.viewport, vpCmd = m.viewport.Update(msg)
-	cmds = append(cmds, vpCmd)
-
 	return m, tea.Batch(cmds...)
 }
 
 func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 	switch cmd.Name {
 	case "help":
-		m.showHelp = true
-		return nil
+		rendered := RenderHelpViewWithCustom(m.getWidth(), m.customCommands)
+		return tea.Println("\n" + rendered)
 
 	case "new", "reset":
 		m.history.Clear()
@@ -757,8 +701,8 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		m.completionTokens = 0
 		m.totalTokens = 0
 		m.status = "IDLE"
-		m.history.AddSystemMessage(fmt.Sprintf("✨ Started a new session in workspace: %s", strings.Join(m.workspaces, ", ")))
-		return nil
+		item := m.history.AddSystemMessage(fmt.Sprintf("✨ Started a new session in workspace: %s", strings.Join(m.workspaces, ", ")))
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "mode":
 		if len(cmd.Args) > 0 {
@@ -770,97 +714,115 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			case "plan", "planning":
 				m.mode = ModePlan
 			default:
-				m.history.AddSystemMessage("Usage: /mode [default | accept-edits | plan]")
-				return nil
+				item := m.history.AddSystemMessage("Usage: /mode [default | accept-edits | plan]")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 		} else {
 			m.mode = m.mode.Next()
 		}
+		var item ChatItem
 		switch m.mode {
 		case ModeDefault:
-			m.history.AddSystemMessage("Mode switched to: DEFAULT (Safe mode — prompts for file edits and shell execution)")
+			item = m.history.AddSystemMessage("Mode switched to: DEFAULT (Safe mode — prompts for file edits and shell execution)")
 		case ModeAcceptEdits:
-			m.history.AddSystemMessage("Mode switched to: ACCEPT-EDITS (Auto-approves file edits; shell commands require confirmation)")
+			item = m.history.AddSystemMessage("Mode switched to: ACCEPT-EDITS (Auto-approves file edits; shell commands require confirmation)")
 		case ModePlan:
-			m.history.AddSystemMessage("Mode switched to: PLAN (Plan-before-act mode — requires research & implementation_plan.md before code changes)")
+			item = m.history.AddSystemMessage("Mode switched to: PLAN (Plan-before-act mode — requires research & implementation_plan.md before code changes)")
 		}
-		return nil
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "plan":
 		goal := strings.Join(cmd.Args, " ")
 		var prompt string
+		var item ChatItem
 		if goal != "" {
 			prompt = fmt.Sprintf("Please create a comprehensive implementation plan for: %s.\n\nFirst, research the codebase using read tools, then create implementation_plan.md in the brain directory before modifying any code.", goal)
-			m.history.AddUserMessage("/plan " + goal)
+			item = m.history.AddUserMessage("/plan " + goal)
 		} else {
 			prompt = "Please create a comprehensive implementation plan for the current task. First, research the codebase, then create implementation_plan.md in the brain directory before modifying any code."
-			m.history.AddUserMessage("/plan")
+			item = m.history.AddUserMessage("/plan")
 		}
 		m.status = "RUNNING"
-		_ = m.client.SendUserMessage(prompt, nil, nil)
-		return nil
+		if m.client != nil {
+			_ = m.client.SendUserMessage(prompt, nil, nil)
+		}
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "teamwork", "team", "teamwork-preview":
 		goal := strings.Join(cmd.Args, " ")
 		var prompt string
+		var item ChatItem
 		if goal != "" {
 			prompt = fmt.Sprintf("Please coordinate a team of autonomous specialized subagents to accomplish: %s.\n\nDefine any specialized subagent types needed (using define_subagent), launch parallel subagents (using invoke_subagent) with clear focused prompts, and coordinate their structured Handoff Briefings (original goal, files touched, decisions, and tests) until the goal is fully achieved.", goal)
-			m.history.AddUserMessage("/teamwork " + goal)
+			item = m.history.AddUserMessage("/teamwork " + goal)
 		} else {
 			prompt = "Please analyze the current task and coordinate a team of autonomous specialized subagents to work on it. Define any specialized subagent types needed (using define_subagent), launch parallel subagents (using invoke_subagent) with clear focused prompts, and coordinate their structured Handoff Briefings until completion."
-			m.history.AddUserMessage("/teamwork")
+			item = m.history.AddUserMessage("/teamwork")
 		}
 		m.status = "RUNNING"
-		_ = m.client.SendUserMessage(prompt, nil, nil)
-		return nil
+		if m.client != nil {
+			_ = m.client.SendUserMessage(prompt, nil, nil)
+		}
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "pause", "interrupt":
+		var item ChatItem
 		if m.status == "RUNNING" || m.status == "STREAMING" {
-			_ = m.client.SendInterrupt()
+			if m.client != nil {
+				_ = m.client.SendInterrupt()
+			}
 			m.status = "IDLE"
-			m.history.AddSystemMessage("Turn interrupted. Use /resume to continue.")
+			item = m.history.AddSystemMessage("Turn interrupted. Use /resume to continue.")
 		} else {
-			m.history.AddSystemMessage("Agent is not currently running a turn.")
+			item = m.history.AddSystemMessage("Agent is not currently running a turn.")
 		}
-		return nil
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "resume":
 		msg := strings.Join(cmd.Args, " ")
-		_ = m.client.SendResume(msg)
-		m.status = "RUNNING"
-		if msg != "" {
-			m.history.AddUserMessage("/resume " + msg)
-		} else {
-			m.history.AddSystemMessage("Resumed agent execution.")
+		if m.client != nil {
+			_ = m.client.SendResume(msg)
 		}
-		return nil
+		m.status = "RUNNING"
+		var item ChatItem
+		if msg != "" {
+			item = m.history.AddUserMessage("/resume " + msg)
+		} else {
+			item = m.history.AddSystemMessage("Resumed agent execution.")
+		}
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "subagents":
-		m.showSubagents = true
-		return nil
+		rendered := m.subagents.Render(m.getWidth(), 24)
+		return tea.Println("\n" + rendered)
 
 	case "tasks", "ps":
 		if len(cmd.Args) > 0 && cmd.Args[0] == "list" {
-			m.history.AddSystemMessage(fmt.Sprintf("⚙️ Background Tasks: %d total (%d running). Use /tasks to open interactive dashboard.", m.tasks.TotalCount(), m.tasks.RunningCount()))
-			return nil
+			item := m.history.AddSystemMessage(fmt.Sprintf("⚙️ Background Tasks: %d total (%d running).", m.tasks.TotalCount(), m.tasks.RunningCount()))
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 		if len(cmd.Args) >= 2 && cmd.Args[0] == "kill" {
-			_ = m.client.SendUserMessage(fmt.Sprintf("manage_task kill %s", cmd.Args[1]), nil, nil)
-			m.history.AddSystemMessage(fmt.Sprintf("Sent kill request for task %s", cmd.Args[1]))
-			return nil
+			if m.client != nil {
+				_ = m.client.SendUserMessage(fmt.Sprintf("manage_task kill %s", cmd.Args[1]), nil, nil)
+			}
+			item := m.history.AddSystemMessage(fmt.Sprintf("Sent kill request for task %s", cmd.Args[1]))
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
-		m.showTasks = true
-		return nil
+		rendered := m.tasks.Render(m.getWidth(), 24)
+		return tea.Println("\n" + rendered)
 
 	case "yolo":
 		m.yoloMode = !m.yoloMode
-		_ = m.client.SendSetYoloMode(m.yoloMode)
-		if m.yoloMode {
-			m.history.AddSystemMessage("YOLO Mode ENABLED: All tool actions will auto-execute without prompts.")
-		} else {
-			m.history.AddSystemMessage("YOLO Mode DISABLED: Safe mode active with approval prompts.")
+		if m.client != nil {
+			_ = m.client.SendSetYoloMode(m.yoloMode)
 		}
-		return nil
+		var item ChatItem
+		if m.yoloMode {
+			item = m.history.AddSystemMessage("YOLO Mode ENABLED: All tool actions will auto-execute without prompts.")
+		} else {
+			item = m.history.AddSystemMessage("YOLO Mode DISABLED: Safe mode active with approval prompts.")
+		}
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "thinking":
 		if len(cmd.Args) > 0 {
@@ -870,36 +832,46 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			case "off", "false", "hide", "collapse":
 				m.showThinking = false
 			default:
-				m.history.AddSystemMessage("Usage: /thinking [on | off]")
-				return nil
+				item := m.history.AddSystemMessage("Usage: /thinking [on | off]")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 		} else {
 			m.showThinking = !m.showThinking
 		}
 		m.history.SetShowThinking(m.showThinking)
+		var item ChatItem
 		if m.showThinking {
-			m.history.AddSystemMessage("Thinking expanded (CoT visible). Type /thinking or press Ctrl+O to collapse.")
+			item = m.history.AddSystemMessage("Thinking expanded (CoT visible). Type /thinking or press Ctrl+O to collapse.")
 		} else {
-			m.history.AddSystemMessage("Thinking collapsed. Type /thinking or press Ctrl+O to expand.")
+			item = m.history.AddSystemMessage("Thinking collapsed. Type /thinking or press Ctrl+O to expand.")
 		}
-		return nil
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "workspace":
 		if len(cmd.Args) == 0 || cmd.Args[0] == "list" {
-			_ = m.client.SendWorkspaceRequest("list", "", "", "")
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("list", "", "", "")
+			}
 		} else if len(cmd.Args) >= 2 && cmd.Args[0] == "add" {
-			_ = m.client.SendWorkspaceRequest("add", cmd.Args[1], "", "")
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("add", cmd.Args[1], "", "")
+			}
 		} else if len(cmd.Args) >= 2 && cmd.Args[0] == "remove" {
-			_ = m.client.SendWorkspaceRequest("remove", cmd.Args[1], "", "")
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("remove", cmd.Args[1], "", "")
+			}
 		} else {
-			m.history.AddSystemMessage("Usage: /workspace [list | add <path> | remove <path>]")
+			item := m.history.AddSystemMessage("Usage: /workspace [list | add <path> | remove <path>]")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 		return nil
 
 	case "compact":
-		m.history.AddSystemMessage("Compacting conversation context...")
-		_ = m.client.SendUserMessage("[Compact Context]", nil, []string{"Please compact previous messages and summarize progress."})
-		return nil
+		item := m.history.AddSystemMessage("Compacting conversation context...")
+		if m.client != nil {
+			_ = m.client.SendUserMessage("[Compact Context]", nil, []string{"Please compact previous messages and summarize progress."})
+		}
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "context":
 		sessionID := ""
@@ -914,33 +886,33 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			Workspaces:       m.workspaces,
 			SessionID:        sessionID,
 		}
-		rendered := RenderContextView(ctxInfo, m.width)
-		m.history.AddSystemMessage(rendered)
-		return nil
+		rendered := RenderContextView(ctxInfo, m.getWidth())
+		return tea.Println("\n" + rendered)
 
 	case "btw":
 		if len(cmd.Args) == 0 {
-			m.history.AddSystemMessage("Usage: /btw <question> (Ask a side question without interrupting current task)")
-			return nil
+			item := m.history.AddSystemMessage("Usage: /btw <question> (Ask a side question without interrupting current task)")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 		sideQ := strings.Join(cmd.Args, " ")
 		m.history.AddSideQuestion(sideQ, "Analyzing side question...")
 		return AskSideQuestionCmd(sideQ, m.history, m.modelName)
 
 	case "model":
+		var item ChatItem
 		if len(cmd.Args) > 0 {
 			m.modelName = cmd.Args[0]
-			m.history.AddSystemMessage(fmt.Sprintf("Switched model target to: %s", m.modelName))
+			item = m.history.AddSystemMessage(fmt.Sprintf("Switched model target to: %s", m.modelName))
 		} else {
-			m.history.AddSystemMessage(fmt.Sprintf("Current Model: %s", m.modelName))
+			item = m.history.AddSystemMessage(fmt.Sprintf("Current Model: %s", m.modelName))
 		}
-		return nil
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "status":
 		statusMsg := fmt.Sprintf("Session Status: %s | YOLO: %v | Workspaces: %d | Subagents: %d active | Tokens: %d",
 			m.status, m.yoloMode, len(m.workspaces), m.subagents.RunningCount(), m.totalTokens)
-		m.history.AddSystemMessage(statusMsg)
-		return nil
+		item := m.history.AddSystemMessage(statusMsg)
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "version":
 		ver := config.HarnessVersion
@@ -957,19 +929,23 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			daemonStr = fmt.Sprintf("running (PID %d, Port %d, %s)", info.PID, info.Port, dVer)
 		}
 		versionMsg := fmt.Sprintf("lhctl version %s (%s/%s, %s) | Daemon: %s", ver, runtime.GOOS, runtime.GOARCH, runtime.Version(), daemonStr)
-		m.history.AddSystemMessage(versionMsg)
-		return nil
+		item := m.history.AddSystemMessage(versionMsg)
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "clear":
 		m.history.Clear()
-		return nil
+		return tea.ClearScreen
 
 	case "detach":
-		_ = m.client.Close()
+		if m.client != nil {
+			_ = m.client.Close()
+		}
 		return tea.Quit
 
 	case "exit", "quit":
-		_ = m.client.Close()
+		if m.client != nil {
+			_ = m.client.Close()
+		}
 		return tea.Quit
 
 	default:
@@ -981,25 +957,30 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 				if len(cmd.Args) > 0 {
 					userDisplay += " " + strings.Join(cmd.Args, " ")
 				}
-				m.history.AddUserMessage(userDisplay)
+				item := m.history.AddUserMessage(userDisplay)
 				m.status = "RUNNING"
-				_ = m.client.SendUserMessage(prompt, nil, nil)
-				return nil
+				if m.client != nil {
+					_ = m.client.SendUserMessage(prompt, nil, nil)
+				}
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 		}
-		m.history.AddSystemMessage(fmt.Sprintf("Unknown command '/%s'. Type /help for available commands.", cmd.Name))
+		item := m.history.AddSystemMessage(fmt.Sprintf("Unknown command '/%s'. Type /help for available commands.", cmd.Name))
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 	}
-	return nil
 }
 
-func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
+func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) tea.Cmd {
 	if srvMsg == nil {
-		return
+		return nil
 	}
 
+	var printCmds []tea.Cmd
+
 	if srvMsg.GetInitResponse() != nil {
-		m.history.AddSystemMessage(fmt.Sprintf("Connected to LocalHarness session %s (v%s)",
+		item := m.history.AddSystemMessage(fmt.Sprintf("Connected to LocalHarness session %s (v%s)",
 			srvMsg.GetInitResponse().ConversationId, srvMsg.GetInitResponse().HarnessVersion))
+		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
 
 	if step := srvMsg.GetStepUpdate(); step != nil {
@@ -1019,7 +1000,7 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 			if step.ThinkingDelta != "" {
 				m.history.AppendThinkingText(step.ThinkingDelta)
 			}
-			return
+			return nil
 		}
 
 		// Handle Permission Prompt (WAITING)
@@ -1027,11 +1008,11 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 			pr := step.GetPermissionRequest()
 			if m.yoloMode {
 				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
-				return
+				return nil
 			}
 			if m.mode == ModeAcceptEdits && (pr.ToolName == "write_to_file" || pr.ToolName == "replace_file_content" || pr.ToolName == "multi_replace_file_content") {
 				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
-				return
+				return nil
 			}
 			m.status = "WAITING"
 			m.approval = &ActiveApproval{
@@ -1042,21 +1023,24 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 				ArgsJSON:    pr.ArgsJson,
 			}
 			m.approval.InitSubcommands()
-			return
+			return nil
 		}
 
 		// Handle User Question (WAITING)
 		if step.State == pb.StepUpdate_STATE_WAITING && step.GetUserQuestion() != nil {
 			m.status = "WAITING"
 			m.question = NewActiveQuestion(step.GetUserQuestion())
-			return
+			return nil
 		}
 
 		// Handle active tool execution
 		if step.State == pb.StepUpdate_STATE_ACTIVE && step.Action != nil {
 			m.status = "RUNNING"
 			name, args := extractActionDetails(step)
-			m.history.StartToolCall(name, args)
+			flushed := m.history.StartToolCall(name, args)
+			for _, it := range flushed {
+				printCmds = append(printCmds, tea.Println(m.history.RenderItem(it, m.getWidth())))
+			}
 
 			// Track background tasks
 			if rc := step.GetRunCommand(); rc != nil && rc.TaskId != "" {
@@ -1077,14 +1061,20 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 					IsSchedule: true,
 				})
 			}
-			return
+			if len(printCmds) > 0 {
+				return tea.Batch(printCmds...)
+			}
+			return nil
 		}
 
 		// Handle tool execution finished
 		if step.State == pb.StepUpdate_STATE_DONE || step.State == pb.StepUpdate_STATE_ERROR {
 			isErr := step.State == pb.StepUpdate_STATE_ERROR
 			name, diff, res := extractActionResult(step)
-			m.history.FinishToolCall(name, res, isErr, diff)
+			doneItem := m.history.FinishToolCall(name, res, isErr, diff)
+			if doneItem != nil {
+				printCmds = append(printCmds, tea.Println(m.history.RenderItem(*doneItem, m.getWidth())))
+			}
 
 			// Surface interactive review card when an artifact requesting feedback is written/updated
 			if !isErr {
@@ -1114,7 +1104,10 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 			if mt := step.GetManageTask(); mt != nil && len(mt.Tasks) > 0 {
 				m.tasks.UpdateFromProto(mt.Tasks)
 			}
-			return
+			if len(printCmds) > 0 {
+				return tea.Batch(printCmds...)
+			}
+			return nil
 		}
 	}
 
@@ -1132,7 +1125,10 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 
 		if traj.State == pb.TrajectoryState_TRAJ_IDLE {
 			m.status = "IDLE"
-			m.history.FlushStreaming()
+			flushed := m.history.FlushStreaming()
+			for _, it := range flushed {
+				printCmds = append(printCmds, tea.Println(m.history.RenderItem(it, m.getWidth())))
+			}
 		} else if traj.State == pb.TrajectoryState_TRAJ_RUNNING {
 			m.status = "RUNNING"
 		}
@@ -1146,16 +1142,24 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) {
 		m.workspaces = wsDirs
 		m.completer.SetWorkspaces(wsDirs)
 		m.history.SetWorkspaces(wsDirs)
-		m.history.AddSystemMessage(fmt.Sprintf("📂 %s (Total: %d)", wsResp.Message, len(wsResp.Workspaces)))
+		item := m.history.AddSystemMessage(fmt.Sprintf("📂 %s (Total: %d)", wsResp.Message, len(wsResp.Workspaces)))
+		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
 
 	if rc := srvMsg.GetReplayComplete(); rc != nil {
-		m.history.AddSystemMessage(fmt.Sprintf("🔄 Replayed %d historical events from buffer", rc.EventCount))
+		item := m.history.AddSystemMessage(fmt.Sprintf("🔄 Replayed %d historical events from buffer", rc.EventCount))
+		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
 
 	if errEv := srvMsg.GetError(); errEv != nil {
-		m.history.AddSystemMessage(fmt.Sprintf("❌ Error [%s]: %s", errEv.Code, errEv.Message))
+		item := m.history.AddSystemMessage(fmt.Sprintf("❌ Error [%s]: %s", errEv.Code, errEv.Message))
+		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
+
+	if len(printCmds) > 0 {
+		return tea.Batch(printCmds...)
+	}
+	return nil
 }
 
 func extractActionDetails(step *pb.StepUpdate) (string, string) {
@@ -1256,24 +1260,79 @@ func extractActionResult(step *pb.StepUpdate) (string, string, string) {
 	}
 }
 
-// View renders the TUI interface.
+// View renders the dynamic inline dock at the bottom of the terminal.
 func (m Model) View() string {
 	if m.quitting {
 		return ""
 	}
-	if !m.ready {
-		return "Initializing LocalHarness TUI..."
+	w := m.getWidth()
+
+	var sections []string
+
+	// 1. In-flight action line (live tool or LLM streaming indicator)
+	if activeItem := m.history.ActiveToolItem(); activeItem != nil {
+		dur := time.Since(m.history.ToolStartTime()).Round(100 * time.Millisecond)
+		action := activeItem.SemanticAction
+		if action == ActionUnknown {
+			action = inferSemanticAction(activeItem.ToolName)
+		}
+		target := activeItem.Target
+		if target == "" {
+			target = extractTargetFromArgs(activeItem.ToolName, activeItem.ToolArgs)
+		}
+		target = formatRelativePath(target, m.workspaces)
+		maxTargetLen := max(15, w-35)
+		if len(target) > maxTargetLen {
+			target = target[:maxTargetLen-3] + "..."
+		}
+		verb := action.Verb()
+		if action == ActionUnknown {
+			verb = "Running " + activeItem.ToolName
+		}
+		line := fmt.Sprintf("  %s %s %s [%s]",
+			m.spinner.View(),
+			action.BadgeStyle().Render(verb),
+			ActionTargetStyle.Render(target),
+			lipgloss.NewStyle().Foreground(ColorWarning).Render(dur.String()),
+		)
+		sections = append(sections, line)
+	} else if m.status == "STREAMING" {
+		if m.history.thinkingText.Len() > 0 {
+			dur := time.Since(m.history.thinkingStartTime).Round(100 * time.Millisecond)
+			sections = append(sections, "  "+m.spinner.View()+" "+ThinkingCollapsedStyle.Render(fmt.Sprintf("Thinking... [%s]", dur.String())))
+		} else if m.history.streamingText.Len() > 0 {
+			sections = append(sections, "  "+m.spinner.View()+" "+lipgloss.NewStyle().Foreground(ColorHighlight).Render("Generating response..."))
+		}
 	}
 
-	var overlay string
-	if m.showSubagents {
-		overlay = m.subagents.Render(m.width, m.height)
-	} else if m.showTasks {
-		overlay = m.tasks.Render(m.width, m.height)
-	} else if m.showHelp {
-		overlay = RenderHelpViewWithCustom(m.width, m.customCommands)
+	// 2. Interactive modals or textarea input
+	if m.approval != nil {
+		sections = append(sections, RenderApprovalInline(m.approval, w))
+	} else if m.question != nil {
+		sections = append(sections, RenderQuestionInline(m.question, w))
+	} else if m.artifactReview != nil {
+		sections = append(sections, RenderArtifactReviewInline(m.artifactReview, w))
+	} else {
+		if m.autocompleteState.Active {
+			sections = append(sections, RenderAutocomplete(&m.autocompleteState, w))
+		}
+
+		inputLine := lipgloss.NewStyle().Padding(0, 1).Render(m.textarea.View())
+		if m.textarea.LineCount() > 1 {
+			hint := lipgloss.NewStyle().Faint(true).Render(
+				fmt.Sprintf(" [%d lines • Enter to submit, Alt+Enter for newline]", m.textarea.LineCount()),
+			)
+			inputLine = inputLine + "\n" + lipgloss.NewStyle().Padding(0, 1).Render(hint)
+		}
+		sections = append(sections, inputLine)
+
+		activityStrip := RenderActiveBackgroundStrip(m.tasks, m.subagents, w)
+		if activityStrip != "" {
+			sections = append(sections, activityStrip)
+		}
 	}
 
+	// 3. Bottom status bar
 	statusBar := RenderStatusBar(StatusBarState{
 		Status:           m.status,
 		Mode:             m.mode,
@@ -1286,48 +1345,21 @@ func (m Model) View() string {
 		RunningTasks:     m.tasks.RunningCount(),
 		YoloMode:         m.yoloMode,
 		WorkspaceCount:   len(m.workspaces),
-	}, m.width)
+	}, w)
+	sections = append(sections, statusBar)
 
-	var bottomInteraction string
-	if m.approval != nil {
-		bottomInteraction = RenderApprovalInline(m.approval, m.width)
-	} else if m.question != nil {
-		bottomInteraction = RenderQuestionInline(m.question, m.width)
-	} else if m.artifactReview != nil {
-		bottomInteraction = RenderArtifactReviewInline(m.artifactReview, m.width)
-	} else {
-		autocompleteView := ""
-		if m.autocompleteState.Active {
-			autocompleteView = RenderAutocomplete(&m.autocompleteState, m.width) + "\n"
-		}
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
 
-		inputLine := lipgloss.NewStyle().Padding(0, 1).Render(m.textarea.View())
-		if m.textarea.LineCount() > 1 {
-			hint := lipgloss.NewStyle().Faint(true).Render(
-				fmt.Sprintf(" [%d lines • Enter to submit, Alt+Enter for newline]", m.textarea.LineCount()),
-			)
-			inputLine = inputLine + "\n" + lipgloss.NewStyle().Padding(0, 1).Render(hint)
-		}
-		activityStrip := RenderActiveBackgroundStrip(m.tasks, m.subagents, m.width)
-		if activityStrip != "" {
-			inputLine = inputLine + "\n" + activityStrip
-		}
-		bottomInteraction = autocompleteView + inputLine
+// getWidth returns the terminal width or detects it from stdout if not yet set by window size message.
+func (m Model) getWidth() int {
+	if m.width > 0 {
+		return m.width
 	}
-
-	mainView := lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.viewport.View(),
-		bottomInteraction,
-		statusBar,
-	)
-
-	if overlay != "" {
-		// Place modal overlay in the center for /help and /subagents
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
+	if tWidth, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tWidth > 0 {
+		return tWidth
 	}
-
-	return mainView
+	return 100
 }
 
 // cursorPos calculates the byte offset in m.textarea.Value() where the cursor is currently located.
@@ -1355,25 +1387,13 @@ func (m *Model) cursorPos() int {
 	return len(string(runes[:runePos]))
 }
 
-// updateDimensions recalculates viewport and textarea dimensions to fit current window size.
+// updateDimensions recalculates textarea dimensions to fit current window size.
 func (m *Model) updateDimensions() {
-	headerHeight := 2
-	inputHeight := m.textarea.Height()
-	footerHeight := 2 + inputHeight
-	vpHeight := m.height - headerHeight - footerHeight
-	if vpHeight < 4 {
-		vpHeight = 4
+	m.ready = true
+	w := m.getWidth()
+	if w > 6 {
+		m.textarea.SetWidth(w - 6)
 	}
-
-	if !m.ready {
-		m.viewport = viewport.New(m.width, vpHeight)
-		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-		m.ready = true
-	} else {
-		m.viewport.Width = m.width
-		m.viewport.Height = vpHeight
-	}
-	m.textarea.SetWidth(m.width - 6)
 }
 
 // updateInputDimensions dynamically expands or contracts the textarea height based on line count.
@@ -1382,7 +1402,6 @@ func (m *Model) updateInputDimensions() {
 	h := min(max(1, lines), 6)
 	if h != m.textarea.Height() {
 		m.textarea.SetHeight(h)
-		m.updateDimensions()
 	}
 }
 
@@ -1395,13 +1414,5 @@ func (m Model) RenderConsoleHistory() string {
 	if len(m.history.items) == 0 {
 		return ""
 	}
-	w := m.width
-	if w <= 0 {
-		if tWidth, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tWidth > 0 {
-			w = tWidth
-		} else {
-			w = 100
-		}
-	}
-	return strings.TrimSpace(m.history.RenderView(spinner.Model{}, w))
+	return strings.TrimSpace(m.history.RenderView(spinner.Model{}, m.getWidth()))
 }
