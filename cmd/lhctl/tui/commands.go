@@ -77,6 +77,9 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 	}{
 		{"Shift+Tab", "Cycle modes (default → accept-edits → plan)"},
 		{"Ctrl+O", "Toggle reasoning and chain-of-thought visibility"},
+		{"Ctrl+Y", "Copy last assistant response to clipboard"},
+		{"Ctrl+V", "Paste text from clipboard into prompt"},
+		{"Alt+Enter", "Insert newline in prompt (multiline mode)"},
 		{"@<file>", "Autocompletion dropdown matching files in workspace"},
 		{"Enter", "Send message / Confirm approval"},
 		{"Ctrl+C", "Interrupt current agent turn / Cancel"},

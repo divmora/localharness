@@ -2,27 +2,29 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/divmora/localharness/cmd/lhctl/client"
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/daemon"
-	"runtime"
 )
 
 // Model is the main Bubbletea TUI application model.
 type Model struct {
 	client            *client.Client
 	viewport          viewport.Model
-	textInput         textinput.Model
+	textarea          textarea.Model
 	spinner           spinner.Model
 	history           *ChatHistory
 	subagents         *SubagentViewManager
@@ -59,11 +61,28 @@ func InitialModel(c *client.Client, workspaces []string, yolo bool) Model {
 
 // InitialModelWithHistory creates the TUI model with optional preloaded history.
 func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, initialState *pb.ConversationState) Model {
-	ta := textinput.New()
+	ta := textarea.New()
 	ta.Placeholder = "Ask a question, issue a command, @file, or /help..."
 	ta.Focus()
-	ta.CharLimit = 4096
-	ta.Width = 80
+	ta.CharLimit = 16384
+	ta.Prompt = "❯ "
+	ta.SetPromptFunc(2, func(lineIdx int) string {
+		if lineIdx == 0 {
+			return "❯ "
+		}
+		return "  "
+	})
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(ColorHighlight).Bold(true)
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle().Foreground(ColorMuted)
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
+	ta.BlurredStyle.EndOfBuffer = lipgloss.NewStyle()
+	ta.EndOfBufferCharacter = ' '
+	ta.ShowLineNumbers = false
+	ta.KeyMap.InsertNewline.Unbind()
+	ta.SetHeight(1)
+	ta.SetWidth(80)
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -85,7 +104,7 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 
 	return Model{
 		client:         c,
-		textInput:      ta,
+		textarea:       ta,
 		spinner:        s,
 		history:        hist,
 		subagents:      NewSubagentViewManager(),
@@ -103,7 +122,7 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 // Init initializes Bubbletea subscriptions.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		textinput.Blink,
+		textarea.Blink,
 		m.spinner.Tick,
 		listenForEvents(m.client),
 		listenForErrors(m.client),
@@ -149,22 +168,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		headerHeight := 2
-		footerHeight := 3
-		vpHeight := msg.Height - headerHeight - footerHeight
-		if vpHeight < 4 {
-			vpHeight = 4
-		}
-
-		if !m.ready {
-			m.viewport = viewport.New(msg.Width, vpHeight)
-			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
-			m.ready = true
-		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = vpHeight
-		}
-		m.textInput.Width = msg.Width - 6
+		m.updateDimensions()
 
 	case spinner.TickMsg:
 		m.spinner, spCmd = m.spinner.Update(msg)
@@ -498,22 +502,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tab", "enter":
 				if len(m.autocompleteState.Candidates) > 0 {
 					selected := m.autocompleteState.Candidates[m.autocompleteState.SelectedIndex]
-					val := m.textInput.Value()
+					val := m.textarea.Value()
 					if m.autocompleteState.Type == AutocompleteSlashCommand {
-						m.textInput.SetValue(selected.Value + " ")
-						m.textInput.SetCursor(len(m.textInput.Value()))
+						m.textarea.SetValue(selected.Value + " ")
+						m.textarea.CursorEnd()
 					} else {
 						prefix := val[:m.autocompleteState.CursorPos]
-						m.textInput.SetValue(prefix + "@" + selected.Value + " ")
-						m.textInput.SetCursor(len(m.textInput.Value()))
+						m.textarea.SetValue(prefix + "@" + selected.Value + " ")
+						m.textarea.CursorEnd()
 					}
 					m.autocompleteState.Active = false
+					m.updateInputDimensions()
 				}
 				return m, nil
 			case "esc":
 				m.autocompleteState.Active = false
 				return m, nil
 			}
+		}
+
+		// Bracketed paste handling: terminal sends pasted block in a single KeyMsg with Paste=true
+		if msg.Paste {
+			m.textarea.InsertString(string(msg.Runes))
+			m.updateInputDimensions()
+			return m, nil
 		}
 
 		// Shift+Tab Mode Cycling (default -> accept-edits -> plan -> default)
@@ -544,6 +556,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
 			m.viewport.GotoBottom()
+			return m, nil
+
+		case tea.KeyCtrlY:
+			toCopy := m.history.LastAssistantResponse()
+			if toCopy == "" {
+				m.history.AddSystemMessage("No assistant response found to copy.")
+			} else {
+				_ = CopyToClipboard(toCopy)
+				m.history.AddSystemMessage(fmt.Sprintf("✓ Copied last response to clipboard (%d characters)", len(toCopy)))
+			}
+			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+			m.viewport.GotoBottom()
+			return m, nil
+
+		case tea.KeyCtrlV:
+			clip, err := PasteFromClipboard()
+			if err == nil && clip != "" {
+				m.textarea.InsertString(clip)
+				m.updateInputDimensions()
+				return m, nil
+			}
+
+		case tea.KeyCtrlJ:
+			m.textarea.InsertRune('\n')
+			m.updateInputDimensions()
 			return m, nil
 
 		case tea.KeyCtrlC:
@@ -577,13 +614,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case tea.KeyEnter:
-			input := strings.TrimSpace(m.textInput.Value())
+			// Alt+Enter / Option+Enter manually inserts a newline into the prompt
+			if msg.Alt {
+				m.textarea.InsertRune('\n')
+				m.updateInputDimensions()
+				return m, nil
+			}
+
+			input := strings.TrimSpace(m.textarea.Value())
 			if input == "" {
 				return m, nil
 			}
 
-			m.textInput.Reset()
+			m.textarea.Reset()
+			m.textarea.SetHeight(1)
 			m.autocompleteState.Active = false
+			m.updateDimensions()
 
 			if cmd, isCmd := ParseCommand(input); isCmd {
 				teaCmd := m.handleSlashCommand(cmd)
@@ -599,7 +645,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode == ModePlan && !strings.HasPrefix(strings.ToLower(input), "/plan") {
 				promptToSend = fmt.Sprintf("%s\n\n[Mode: PLAN] Please research the codebase using read tools and write implementation_plan.md in the brain directory before making any code modifications.", input)
 			}
-			_ = m.client.SendUserMessage(promptToSend, nil, nil)
+			if m.client != nil {
+				_ = m.client.SendUserMessage(promptToSend, nil, nil)
+			}
 			m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
 			m.viewport.GotoBottom()
 			return m, nil
@@ -628,10 +676,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Update text input and check for @ autocomplete trigger
-	m.textInput, tiCmd = m.textInput.Update(msg)
+	m.textarea, tiCmd = m.textarea.Update(msg)
 	cmds = append(cmds, tiCmd)
+	m.updateInputDimensions()
 
-	slashQ, isSlash := DetectSlashCommandQuery(m.textInput.Value(), m.textInput.Position())
+	pos := m.cursorPos()
+	slashQ, isSlash := DetectSlashCommandQuery(m.textarea.Value(), pos)
 	if isSlash {
 		matches := MatchAllSlashCommands(slashQ, m.customCommands)
 		if len(matches) > 0 {
@@ -654,7 +704,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autocompleteState.Active = false
 		}
 	} else {
-		query, startPos, found := DetectFileQuery(m.textInput.Value(), m.textInput.Position())
+		query, startPos, found := DetectFileQuery(m.textarea.Value(), pos)
 		if found {
 			matches := m.completer.Match(query, 8)
 			if len(matches) > 0 {
@@ -1251,9 +1301,13 @@ func (m Model) View() string {
 			autocompleteView = RenderAutocomplete(&m.autocompleteState, m.width) + "\n"
 		}
 
-		inputLine := lipgloss.NewStyle().Padding(0, 1).Render(
-			lipgloss.NewStyle().Foreground(ColorHighlight).Bold(true).Render("❯ ") + m.textInput.View(),
-		)
+		inputLine := lipgloss.NewStyle().Padding(0, 1).Render(m.textarea.View())
+		if m.textarea.LineCount() > 1 {
+			hint := lipgloss.NewStyle().Faint(true).Render(
+				fmt.Sprintf(" [%d lines • Enter to submit, Alt+Enter for newline]", m.textarea.LineCount()),
+			)
+			inputLine = inputLine + "\n" + lipgloss.NewStyle().Padding(0, 1).Render(hint)
+		}
 		activityStrip := RenderActiveBackgroundStrip(m.tasks, m.subagents, m.width)
 		if activityStrip != "" {
 			inputLine = inputLine + "\n" + activityStrip
@@ -1274,4 +1328,80 @@ func (m Model) View() string {
 	}
 
 	return mainView
+}
+
+// cursorPos calculates the byte offset in m.textarea.Value() where the cursor is currently located.
+func (m *Model) cursorPos() int {
+	val := m.textarea.Value()
+	line := m.textarea.Line()
+	col := m.textarea.LineInfo().ColumnOffset
+	lines := strings.Split(val, "\n")
+	runePos := 0
+	for i := 0; i < line && i < len(lines); i++ {
+		runePos += len([]rune(lines[i])) + 1
+	}
+	if line < len(lines) {
+		lineRunes := []rune(lines[line])
+		if col > len(lineRunes) {
+			col = len(lineRunes)
+		}
+		runePos += col
+	}
+
+	runes := []rune(val)
+	if runePos > len(runes) {
+		runePos = len(runes)
+	}
+	return len(string(runes[:runePos]))
+}
+
+// updateDimensions recalculates viewport and textarea dimensions to fit current window size.
+func (m *Model) updateDimensions() {
+	headerHeight := 2
+	inputHeight := m.textarea.Height()
+	footerHeight := 2 + inputHeight
+	vpHeight := m.height - headerHeight - footerHeight
+	if vpHeight < 4 {
+		vpHeight = 4
+	}
+
+	if !m.ready {
+		m.viewport = viewport.New(m.width, vpHeight)
+		m.viewport.SetContent(m.history.RenderView(m.spinner, m.width))
+		m.ready = true
+	} else {
+		m.viewport.Width = m.width
+		m.viewport.Height = vpHeight
+	}
+	m.textarea.SetWidth(m.width - 6)
+}
+
+// updateInputDimensions dynamically expands or contracts the textarea height based on line count.
+func (m *Model) updateInputDimensions() {
+	lines := m.textarea.LineCount()
+	h := min(max(1, lines), 6)
+	if h != m.textarea.Height() {
+		m.textarea.SetHeight(h)
+		m.updateDimensions()
+	}
+}
+
+// RenderConsoleHistory renders the conversation history for display in the terminal console upon exit.
+func (m Model) RenderConsoleHistory() string {
+	if m.history == nil {
+		return ""
+	}
+	m.history.FlushStreaming()
+	if len(m.history.items) == 0 {
+		return ""
+	}
+	w := m.width
+	if w <= 0 {
+		if tWidth, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tWidth > 0 {
+			w = tWidth
+		} else {
+			w = 100
+		}
+	}
+	return strings.TrimSpace(m.history.RenderView(spinner.Model{}, w))
 }

@@ -85,6 +85,9 @@ Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes
 |:---|:---|
 | **`Shift+Tab`** | Cycle operational modes (`DEFAULT` ➔ `ACCEPT-EDITS` ➔ `PLAN`) |
 | **`Ctrl+O`** | Toggle thinking / chain-of-thought visibility (`Thought for Xs` ⮂ full reasoning) |
+| **`Ctrl+Y`** | Copy last assistant response to clipboard (OSC 52 & system clipboard) |
+| **`Ctrl+V`** | Paste clipboard content directly into prompt |
+| **`Alt+Enter`** | Insert a newline into prompt without sending (multiline prompt mode) |
 | **`/`** | Open instant **Slash Command Autocomplete** menu with description tooltips |
 | **`@`** | Open **Workspace File Autocomplete** matching files across attached workspaces |
 | **`↑` / `↓`** | Navigate autocomplete candidates (with wrap-around) |
@@ -171,6 +174,23 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/detach` | Detach TUI while agent runs in background |
 | `/clear` | Clear the chat history viewport |
 | `/exit`, `/quit` | Exit the TUI session |
+
+---
+
+## Clipboard & Multiline Input
+
+`lhctl` provides native clipboard integration and multiline editing:
+
+- **Native Terminal Copy & Mouse Selection**: Mouse cell motion hijacking is disabled, allowing native mouse click-and-drag text selection and standard clipboard copy (`Cmd+C` on macOS, right-click copy, or `Ctrl+Shift+C` on Linux).
+- **One-Click Response Copying (`Ctrl+Y`)**:
+  - Press **`Ctrl+Y`** to copy the assistant's last response to the clipboard.
+  - Copies to both OS system clipboard (via `pbcopy`, `xclip`, `wl-copy`) and remote terminal clipboard via **OSC 52** (works seamlessly over SSH and inside tmux).
+- **Robust Multiline Paste**:
+  - Pasting multiline code or prompts (via `Cmd+V`, `Ctrl+V`, or terminal paste) preserves all newlines and indentation.
+  - **No premature message splitting**: `lhctl` uses standard ANSI Bracketed Paste, ensuring pasted newlines are preserved in the input box as a single multiline prompt instead of sending multiple messages.
+  - The prompt box dynamically auto-expands up to 6 lines to show multiline input.
+  - **Normal Enter to Submit**: Pressing **`Enter`** submits the prompt normally as a single turn (no modifier keys like Command+Enter needed).
+  - Press **`Alt+Enter`** (Option+Enter) or **`Ctrl+J`** to manually insert newlines while composing.
 
 ---
 

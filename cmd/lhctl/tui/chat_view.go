@@ -676,3 +676,68 @@ func renderDiffSnippet(diff string, width int) string {
 	}
 	return sb.String()
 }
+
+// LastAssistantResponse returns the content of the most recent assistant message.
+func (h *ChatHistory) LastAssistantResponse() string {
+	for i := len(h.items) - 1; i >= 0; i-- {
+		if h.items[i].Type == ChatItemAssistant && strings.TrimSpace(h.items[i].Content) != "" {
+			return strings.TrimSpace(h.items[i].Content)
+		}
+	}
+	return ""
+}
+
+// LastCodeBlock returns the content of the most recent markdown fenced code block from assistant messages.
+func (h *ChatHistory) LastCodeBlock() string {
+	for i := len(h.items) - 1; i >= 0; i-- {
+		if h.items[i].Type == ChatItemAssistant {
+			code := extractLastCodeBlock(h.items[i].Content)
+			if code != "" {
+				return code
+			}
+		}
+	}
+	return ""
+}
+
+// FullTranscript returns a clean plaintext transcript of the conversation history.
+func (h *ChatHistory) FullTranscript() string {
+	var sb strings.Builder
+	for _, item := range h.items {
+		switch item.Type {
+		case ChatItemUser:
+			sb.WriteString(fmt.Sprintf("User: %s\n\n", item.Content))
+		case ChatItemAssistant:
+			sb.WriteString(fmt.Sprintf("Assistant: %s\n\n", item.Content))
+		case ChatItemToolCall:
+			if item.Target != "" {
+				sb.WriteString(fmt.Sprintf("[%s] %s\n\n", item.ToolName, item.Target))
+			} else {
+				sb.WriteString(fmt.Sprintf("[%s]\n\n", item.ToolName))
+			}
+		case ChatItemSystem:
+			sb.WriteString(fmt.Sprintf("System: %s\n\n", item.Content))
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// extractLastCodeBlock extracts the last fenced code block (```...```) from content.
+func extractLastCodeBlock(content string) string {
+	parts := strings.Split(content, "```")
+	if len(parts) < 3 {
+		return ""
+	}
+	// Parts with odd index are between ``` and ```
+	for i := len(parts) - 2; i >= 1; i -= 2 {
+		block := parts[i]
+		if newlineIdx := strings.Index(block, "\n"); newlineIdx != -1 {
+			block = block[newlineIdx+1:]
+		}
+		trimmed := strings.TrimRight(block, "\r\n")
+		if strings.TrimSpace(trimmed) != "" {
+			return trimmed
+		}
+	}
+	return ""
+}

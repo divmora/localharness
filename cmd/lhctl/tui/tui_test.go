@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
@@ -335,5 +337,202 @@ func TestChatHistory_LoadFromState(t *testing.T) {
 	rendered := h.RenderView(s, 80)
 	if !strings.Contains(rendered, "Refactor the database queries") {
 		t.Errorf("expected rendered view to contain user message: %s", rendered)
+	}
+}
+
+func TestChatHistory_CopyHelpers(t *testing.T) {
+	h := NewChatHistory()
+
+	// Initial empty check
+	if resp := h.LastAssistantResponse(); resp != "" {
+		t.Errorf("expected empty response initially, got %q", resp)
+	}
+	if code := h.LastCodeBlock(); code != "" {
+		t.Errorf("expected empty code block initially, got %q", code)
+	}
+
+	h.AddUserMessage("How do I write hello world in Go?")
+	h.items = append(h.items, ChatItem{
+		Type:      ChatItemAssistant,
+		Content:   "Here is how you write hello world in Go:\n\n```go\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, world!\")\n}\n```\n\nRun it with `go run main.go`.",
+		Timestamp: time.Now(),
+	})
+
+	wantResp := "Here is how you write hello world in Go:\n\n```go\npackage main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, world!\")\n}\n```\n\nRun it with `go run main.go`."
+	if got := h.LastAssistantResponse(); got != wantResp {
+		t.Errorf("LastAssistantResponse = %q, want %q", got, wantResp)
+	}
+
+	wantCode := "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"Hello, world!\")\n}"
+	if got := h.LastCodeBlock(); got != wantCode {
+		t.Errorf("LastCodeBlock = %q, want %q", got, wantCode)
+	}
+
+	transcript := h.FullTranscript()
+	if !strings.Contains(transcript, "User: How do I write hello world in Go?") {
+		t.Errorf("expected user message in transcript: %s", transcript)
+	}
+	if !strings.Contains(transcript, "Assistant: Here is how you write hello world") {
+		t.Errorf("expected assistant response in transcript: %s", transcript)
+	}
+}
+
+func TestModel_BracketedPaste(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// Simulate bracketed paste event
+	pastedContent := "def hello():\n    print('world')\n    return True"
+	pasteMsg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(pastedContent),
+		Paste: true,
+	})
+
+	updatedM, _ := m.Update(pasteMsg)
+	model := updatedM.(Model)
+
+	// Pasted content should be in the textarea intact with newlines
+	if model.textarea.Value() != pastedContent {
+		t.Errorf("textarea value = %q, want %q", model.textarea.Value(), pastedContent)
+	}
+	// Height should expand to show multiple lines
+	if model.textarea.Height() < 3 {
+		t.Errorf("expected textarea height >= 3, got %d", model.textarea.Height())
+	}
+	// Status should NOT be running because paste did NOT submit the message
+	if model.status != "IDLE" {
+		t.Errorf("expected status IDLE, got %s", model.status)
+	}
+}
+
+func TestModel_EnterSubmitsImmediately(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// Type a prompt
+	for _, r := range "hello world" {
+		updatedM, _ := m.Update(tea.KeyMsg(tea.Key{Type: tea.KeyRunes, Runes: []rune{r}}))
+		m = updatedM.(Model)
+	}
+
+	// Pressing Enter must immediately submit the message normally
+	enterMsg := tea.KeyMsg(tea.Key{Type: tea.KeyEnter})
+	updatedM, _ := m.Update(enterMsg)
+	m = updatedM.(Model)
+
+	if m.status != "RUNNING" {
+		t.Errorf("expected status RUNNING after Enter, got %s", m.status)
+	}
+	if m.textarea.Value() != "" {
+		t.Errorf("expected textarea to be reset, got %q", m.textarea.Value())
+	}
+	if m.textarea.Height() != 1 {
+		t.Errorf("expected textarea height reset to 1, got %d", m.textarea.Height())
+	}
+}
+
+func TestModel_AltEnter(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	m.textarea.SetValue("line 1")
+
+	// Alt+Enter pressed
+	altEnterMsg := tea.KeyMsg(tea.Key{Type: tea.KeyEnter, Alt: true})
+	updatedM, _ := m.Update(altEnterMsg)
+	m = updatedM.(Model)
+
+	// Should insert newline, NOT submit
+	if m.textarea.Value() != "line 1\n" {
+		t.Errorf("expected textarea value 'line 1\\n', got %q", m.textarea.Value())
+	}
+	if m.status != "IDLE" {
+		t.Errorf("expected status IDLE, got %s", m.status)
+	}
+}
+
+func TestModel_CursorPos(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	m.textarea.SetValue("hello world")
+	m.textarea.CursorEnd()
+	pos := m.cursorPos()
+	if pos != len("hello world") {
+		t.Errorf("cursorPos = %d, want %d", pos, len("hello world"))
+	}
+
+	m.textarea.SetValue("abc\ndef")
+	m.textarea.CursorEnd()
+	pos2 := m.cursorPos()
+	if pos2 != len("abc\ndef") {
+		t.Errorf("cursorPos = %d, want %d", pos2, len("abc\ndef"))
+	}
+}
+
+func TestModel_KeyCtrlY_Copy(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// 1. Press Ctrl+Y when history is empty
+	newM, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = newM.(Model)
+	rendered := m.history.RenderView(m.spinner, 80)
+	if !strings.Contains(rendered, "No assistant response found to copy") {
+		t.Errorf("expected empty warning in chat: %s", rendered)
+	}
+
+	// 2. Add assistant message
+	m.history.items = append(m.history.items, ChatItem{
+		Type:      ChatItemAssistant,
+		Content:   "Here is the assistant answer.",
+		Timestamp: time.Now(),
+	})
+
+	// Press Ctrl+Y with response
+	newM, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	m = newM.(Model)
+	rendered = m.history.RenderView(m.spinner, 80)
+	if !strings.Contains(rendered, "Copied last response to clipboard") {
+		t.Errorf("expected copied last response message in chat: %s", rendered)
+	}
+}
+
+func TestModel_RenderConsoleHistory(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// 1. Empty history should return empty string
+	if out := m.RenderConsoleHistory(); out != "" {
+		t.Errorf("expected empty console history for fresh session, got %q", out)
+	}
+
+	// 2. Add user message and assistant message
+	m.history.AddUserMessage("What is Go?")
+	m.history.items = append(m.history.items, ChatItem{
+		Type:      ChatItemAssistant,
+		Content:   "Go is an open source programming language.",
+		Timestamp: time.Now(),
+	})
+
+	consoleOut := m.RenderConsoleHistory()
+	if !strings.Contains(consoleOut, "What is Go?") {
+		t.Errorf("expected user prompt in console history output: %s", consoleOut)
+	}
+	if !strings.Contains(consoleOut, "Go is an open source programming language.") {
+		t.Errorf("expected assistant response in console history output: %s", consoleOut)
 	}
 }

@@ -77,8 +77,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Terminal User Interface (`lhctl` TUI) & Desktop GUI
 
-- [ ] **Multi-Line Auto-Expanding Textarea**
-  - Replace single-line `textinput` with `bubbles/textarea`, supporting auto-expanding height, Shift+Enter for newlines, multi-line pastes, and code block formatting.
 - [ ] **Collapsible Streaming Tool Execution Cards**
   - Interactive foldable tool blocks with live spinner indicators, execution duration timers, and collapsible stdout/stderr stream viewers.
 - [ ] **Rich Syntax-Highlighted Markdown & Inline Diffs**
