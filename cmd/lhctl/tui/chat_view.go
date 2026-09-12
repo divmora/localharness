@@ -484,7 +484,7 @@ func (h *ChatHistory) RenderView(spin spinner.Model, width int) string {
 		} else {
 			rendered := h.RenderItem(item, width)
 			if rendered != "" {
-				sb.WriteString(rendered)
+				sb.WriteString(rendered + "\n")
 			}
 		}
 	}
@@ -514,21 +514,21 @@ func (h *ChatHistory) RenderItem(item ChatItem, width int) string {
 
 	switch item.Type {
 	case ChatItemUser:
-		return "\n" + UserMsgStyle.Render("🧑 You:") + "\n" + wrapString(item.Content, contentWidth) + "\n"
+		return "\n" + UserMsgStyle.Render("🧑 You:") + "\n" + wrapString(item.Content, contentWidth)
 
 	case ChatItemAssistant:
-		return "\n" + AssistantMsgStyle.Render("🤖 Assistant:") + "\n" + wrapString(item.Content, contentWidth) + "\n"
+		return "\n" + AssistantMsgStyle.Render("🤖 Assistant:") + "\n" + wrapString(item.Content, contentWidth)
 
 	case ChatItemThinking:
 		if h.showThinking {
-			return "\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+item.Content) + "\n"
+			return "\n" + ThinkingStyle.Width(contentWidth).Render("💭 Thinking:\n"+item.Content)
 		}
 		thoughtDur := item.Duration
 		durStr := ""
 		if thoughtDur > 0 {
 			durStr = fmt.Sprintf(" for %s", thoughtDur.Round(100*time.Millisecond).String())
 		}
-		return "  " + ThinkingCollapsedStyle.Render(fmt.Sprintf("💭 Thought%s", durStr)) + "\n"
+		return "  " + ThinkingCollapsedStyle.Render(fmt.Sprintf("💭 Thought%s", durStr))
 
 	case ChatItemToolCall:
 		action := item.SemanticAction
@@ -556,15 +556,14 @@ func (h *ChatHistory) RenderItem(item ChatItem, width int) string {
 				ActionTargetStyle.Render(target),
 				ActionDurStyle.Render(durStr),
 			)
-			out := line + "\n"
 			if item.Content != "" {
 				errStr := strings.TrimSpace(item.Content)
 				if len(errStr) > 400 {
 					errStr = errStr[:400] + "..."
 				}
-				out += "    " + ErrorMsgStyle.Render(wrapString(errStr, contentWidth-6)) + "\n"
+				line += "\n    " + ErrorMsgStyle.Render(wrapString(errStr, contentWidth-6))
 			}
-			return out
+			return line
 		}
 
 		summary := item.Summary
@@ -601,32 +600,35 @@ func (h *ChatHistory) RenderItem(item ChatItem, width int) string {
 				ActionDurStyle.Render(durStr),
 			)
 		}
-		out := strings.TrimRight(line, " ") + "\n"
+		out := strings.TrimRight(line, " ")
 		if item.DiffBlock != "" {
-			out += renderDiffSnippet(item.DiffBlock, contentWidth) + "\n"
+			diff := renderDiffSnippet(item.DiffBlock, contentWidth)
+			if diff != "" {
+				out += "\n" + diff
+			}
 		}
 		return out
 
 	case ChatItemToolResult:
 		if item.DiffBlock != "" {
-			return renderDiffSnippet(item.DiffBlock, contentWidth) + "\n"
+			return renderDiffSnippet(item.DiffBlock, contentWidth)
 		} else if item.Content != "" {
 			res := strings.TrimSpace(item.Content)
 			if len(res) > 200 {
 				res = res[:200] + "..."
 			}
 			wrapped := wrapString(res, contentWidth-4)
-			return "    " + lipgloss.NewStyle().Foreground(ColorMuted).Render(wrapped) + "\n"
+			return "    " + lipgloss.NewStyle().Foreground(ColorMuted).Render(wrapped)
 		}
 		return ""
 
 	case ChatItemError:
 		wrapped := wrapString("Error: "+item.Content, contentWidth-4)
-		return "    " + ErrorMsgStyle.Render(wrapped) + "\n"
+		return "    " + ErrorMsgStyle.Render(wrapped)
 
 	case ChatItemSystem:
 		wrapped := wrapString("ℹ️  "+item.Content, contentWidth)
-		return "\n" + SystemMsgStyle.Render(wrapped) + "\n"
+		return SystemMsgStyle.Render(wrapped)
 
 	case ChatItemSideQuestion:
 		sideBox := lipgloss.NewStyle().
@@ -636,7 +638,7 @@ func (h *ChatHistory) RenderItem(item ChatItem, width int) string {
 			Width(contentWidth)
 		title := lipgloss.NewStyle().Bold(true).Foreground(ColorHighlight).Render("💬 Side Question (/btw): ") + item.ToolName
 		body := wrapString(item.Content, contentWidth-4)
-		return "\n" + sideBox.Render(title+"\n\n"+body) + "\n"
+		return "\n" + sideBox.Render(title+"\n\n"+body)
 	}
 
 	return ""
@@ -646,12 +648,12 @@ func (h *ChatHistory) RenderItem(item ChatItem, width int) string {
 func (h *ChatHistory) FormatInitialHistory(width int) string {
 	var sb strings.Builder
 	for _, item := range h.items {
-		rendered := strings.TrimSpace(h.RenderItem(item, width))
+		rendered := h.RenderItem(item, width)
 		if rendered != "" {
 			sb.WriteString(rendered + "\n")
 		}
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	return strings.TrimSpace(sb.String())
 }
 
 func wrapString(text string, width int) string {
@@ -749,7 +751,7 @@ func renderDiffSnippet(diff string, width int) string {
 			sb.WriteString("    " + lipgloss.NewStyle().Faint(true).Render(l) + "\n")
 		}
 	}
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // LastAssistantResponse returns the content of the most recent assistant message.
