@@ -44,6 +44,7 @@ type StatusBarState struct {
 	RunningTasks     int
 	YoloMode         bool
 	WorkspaceCount   int
+	AutoSpeak        bool
 }
 
 // RenderStatusBar formats and renders the full-width status bar.
@@ -82,6 +83,11 @@ func RenderStatusBar(state StatusBarState, width int) string {
 		leftParts = append(leftParts, BadgeYolo.Render())
 	}
 
+	// Voice auto-speak badge
+	if state.AutoSpeak {
+		leftParts = append(leftParts, lipgloss.NewStyle().Foreground(ColorHighlight).Render("🔊 Voice"))
+	}
+
 	// Subagent badge
 	if state.RunningSubagents > 0 {
 		subBadge := fmt.Sprintf("🤖 Subagents: %d running", state.RunningSubagents)
@@ -109,7 +115,7 @@ func RenderStatusBar(state StatusBarState, width int) string {
 	leftFormatted := strings.Join(leftParts, "  ")
 
 	// Right shortcuts
-	rightText := "Shift+Tab Mode │ ^D Detach │ ^C Stop │ /help"
+	rightText := "F5 Dictate │ Shift+Tab Mode │ ^D Detach │ /help"
 	rightFormatted := lipgloss.NewStyle().Foreground(ColorMuted).Render(rightText)
 
 	leftLen := lipgloss.Width(leftFormatted)

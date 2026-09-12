@@ -51,6 +51,8 @@ lhctl attach <session-id>
 | `--resume` | | Alias for `--conversation` | |
 | `--model` | `-m` | Target LLM model (e.g. `gpt-4o`, `claude-3-5-sonnet`) | Harness default |
 | `--workspace` | `-w` | Attach workspace directory (repeatable) | Current working directory |
+| `--add-dir` | | Attach workspace directory (repeatable, alias for `--workspace`) | Current working directory |
+| `--voice` | | Enable automatic text-to-speech spoken responses (`autoSpeak: true`) | `false` |
 | `--yolo` | `-y` | Enable YOLO Mode (skip all permission prompts) | `false` |
 | `--browser` | | Explicitly enable browser automation tools (auto-enabled if `npx` installed) | `auto (true if npx found)` |
 | `--no-browser` | | Explicitly disable browser automation tools | `false` |
@@ -83,6 +85,7 @@ Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes
 
 | Shortcut | Action |
 |:---|:---|
+| **`F5`** / **`Ctrl+R`** | Toggle voice dictation (record from microphone directly into prompt, Enter/F5 to transcribe, Esc to cancel) |
 | **`Shift+Tab`** | Cycle operational modes (`DEFAULT` ➔ `ACCEPT-EDITS` ➔ `PLAN`) |
 | **`Ctrl+O`** | Toggle thinking / chain-of-thought visibility (`Thought for Xs` ⮂ full reasoning) |
 | **`Ctrl+Y`** | Copy last assistant response to clipboard (OSC 52 & system clipboard) |
@@ -95,7 +98,7 @@ Press **`Shift+Tab`** (or type `/mode`) to cycle through the 3 operational modes
 | **`Ctrl+C`** | Interrupt/pause running turn (press twice within 2s to exit) |
 | **`Ctrl+D`** | Detach TUI cleanly (agents continue in background daemon) |
 | **Mouse / Trackpad** | Native terminal scrolling, two-finger gesture, mousewheel, and cross-screen selection |
-| **`Esc`** | Dismiss active autocomplete dropdown or cancel question / review |
+| **`Esc`** | Dismiss autocomplete dropdown, cancel question/review, or halt active speech/recording |
 
 ### AGY-Style Inline Terminal & Native Scrollback
 
@@ -171,13 +174,55 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/status` | Show daemon status, active subagents, running tasks, and token counters |
 | `/subagents` | View subagent hierarchy & drill down into subagent transcripts |
 | `/tasks`, `/ps` | View running background tasks, shell commands, timers, and live output |
+| `/add-dir <path>` | Add directory to workspace with path expansion (`~`) and validation (aliases: `/dir add`, `/add_dir`) |
+| `/remove-dir <path>` | Remove directory from workspace (aliases: `/dir remove`, `/remove_dir`, `/rm-dir`) |
+| `/dirs` | List all attached workspaces (alias: `/workspaces`) |
+| `/dir` | Manage workspace directories (`list`, `add <path>`, `remove <path>`) |
 | `/workspace list` | List all attached workspace roots |
 | `/workspace add <dir>` | Dynamically attach a workspace directory with trust check |
 | `/workspace remove <dir>` | Detach a workspace directory |
+| `/voice [start|stop|auto]` | Toggle voice dictation recording or toggle auto-spoken response playback |
+| `/speak [auto|stop|<text>]` | Speak assistant response aloud with native TTS (or toggle auto-speech) |
 | `/yolo` | Toggle YOLO Mode on/off (bypass all approval queues) |
 | `/detach` | Detach TUI while agent runs in background |
 | `/clear` | Clear the chat history viewport |
 | `/exit`, `/quit` | Exit the TUI session |
+
+---
+
+## Voice Dictation & Spoken Responses (TTS)
+
+`lhctl` matches Google Antigravity (`agy`)'s voice interaction model, offering both Speech-to-Text (STT) prompt dictation and Text-to-Speech (TTS) response playback:
+
+### 1. F5 / Ctrl+R Voice Dictation
+- **One-Touch Toggle**: Press **`F5`** or **`Ctrl+R`** to begin recording your microphone audio.
+- **Dynamic Dock Status**: During recording, the dock displays the live recording duration:
+  ```
+  🎙️ Recording audio for 0:04... [f5 / Enter to transcribe • Esc to cancel]
+  ```
+- **Transcribe to Prompt**: Press **`F5`** or **`Enter`** to stop recording. The dock switches to:
+  ```
+  ⠋ Finishing up... (Transcribing audio)
+  ```
+  Upon completion, the transcribed text is dropped directly into your textarea prompt buffer, ready for submission or editing.
+- **Cancel**: Press **`Esc`** while recording to cancel cleanly without transcribing.
+- **Graceful Detection**: If no speech is detected, `lhctl` reports `No speech detected.` without clobbering your existing prompt.
+
+### 2. Supported Transcription Engines
+1. **Cloud Whisper API (LiteLLM / OpenAI)**: Reads from `~/.divmora/config/litellm.json` or `OPENAI_API_KEY` / `GROQ_API_KEY`. Fast, accurate, and multi-lingual.
+2. **Native macOS Offline Recognition (`SFSpeechRecognizer`)**: On macOS, utilizes Apple's built-in offline speech framework when cloud API keys are absent.
+3. **Local Whisper CLI**: Automatically detects and uses local `whisper` CLI if installed on the host.
+
+### 3. Spoken Responses (Text-to-Speech)
+- **On-Demand Speech**: Type `/speak` to have your OS read the assistant's last response aloud.
+- **Custom Text**: Type `/speak <message>` to speak arbitrary text aloud.
+- **Auto-Spoken Responses**: Type `/speak auto` (or `/voice auto` or pass `--voice` flag at startup) to toggle automatic speech synthesis for every completed agent turn.
+- **Instant Halt**: Press **`Esc`** or type `/speak stop` at any time to immediately silence audio output.
+- **Markdown-Clean Audio**: Markdown code blocks, inline backticks, URLs, headers, and bullet tokens are automatically filtered before speech synthesis, ensuring clear and natural audio playback.
+- **Native Cross-Platform TTS**:
+  - **macOS**: Native `/usr/bin/say`
+  - **Linux**: `spd-say` or `espeak`
+  - **Windows**: PowerShell `System.Speech.Synthesis.SpeechSynthesizer`
 
 ---
 

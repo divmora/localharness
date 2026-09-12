@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -47,6 +48,20 @@ type Model struct {
 	ready             bool
 	quitting          bool
 	lastInterrupt     time.Time
+	voice             *VoiceManager
+	isTranscribing    bool
+}
+
+// SetAutoSpeak sets the voice auto-speak preference.
+func (m *Model) SetAutoSpeak(enabled bool) {
+	if m.voice != nil {
+		m.voice.SetAutoSpeak(enabled)
+	}
+}
+
+// VoiceManager returns the active voice manager instance.
+func (m *Model) VoiceManager() *VoiceManager {
+	return m.voice
 }
 
 // InitialModel creates the TUI model.
@@ -97,6 +112,8 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 		}
 	}
 
+	vm := NewVoiceManager()
+
 	return Model{
 		client:         c,
 		textarea:       ta,
@@ -112,6 +129,7 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 		status:         "IDLE",
 		showThinking:   false,
 		ready:          true,
+		voice:          vm,
 	}
 }
 
@@ -179,6 +197,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
+		// Active audio recording handling: Enter/F5/Ctrl+R transcribes, Esc/Ctrl+C cancels
+		if m.voice != nil && m.voice.IsRecording() {
+			switch msg.Type {
+			case tea.KeyEnter, tea.KeyF5:
+				m.isTranscribing = true
+				return m, m.voice.TranscribeCmd()
+			case tea.KeyCtrlC, tea.KeyEsc:
+				m.voice.CancelRecording()
+				return m, nil
+			case tea.KeyCtrlR:
+				m.isTranscribing = true
+				return m, m.voice.TranscribeCmd()
+			}
+			if msg.String() == "f5" || msg.String() == "enter" {
+				m.isTranscribing = true
+				return m, m.voice.TranscribeCmd()
+			}
+			if msg.String() == "esc" {
+				m.voice.CancelRecording()
+				return m, nil
+			}
+			return m, nil
+		}
+
+		// Active audio transcribing handling: dismiss on Esc/Ctrl+C
+		if m.isTranscribing {
+			if msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyEsc || msg.String() == "esc" {
+				m.isTranscribing = false
+			}
+			return m, nil
+		}
+
+		// Active TTS playback stop on Esc
+		if m.voice != nil && m.voice.IsSpeaking() && (msg.Type == tea.KeyEsc || msg.String() == "esc") {
+			m.voice.StopSpeaking()
+			return m, nil
+		}
+
+		// F5 or Ctrl+R toggles voice dictation
+		if msg.Type == tea.KeyF5 || msg.String() == "f5" || msg.Type == tea.KeyCtrlR || msg.String() == "ctrl+r" {
+			if m.voice != nil {
+				if m.voice.IsSpeaking() {
+					m.voice.StopSpeaking()
+				}
+				if err := m.voice.StartRecording(); err != nil {
+					item := m.history.AddSystemMessage(fmt.Sprintf("⚠️ Failed to start microphone: %v", err))
+					return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
+				}
+			}
+			return m, nil
+		}
+
 		// Inline Approval Handling
 		if m.approval != nil {
 			targetLabel := m.approval.DisplayTarget()
@@ -613,6 +683,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		item := m.history.AddSideQuestion(msg.Question, msg.Answer)
 		return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
+	case VoiceTranscriptionMsg:
+		m.isTranscribing = false
+		if msg.Err != nil || strings.TrimSpace(msg.Text) == "" {
+			item := m.history.AddSystemMessage("No speech detected.")
+			return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		cur := strings.TrimSpace(m.textarea.Value())
+		if cur == "" {
+			m.textarea.SetValue(msg.Text)
+		} else {
+			m.textarea.SetValue(cur + " " + msg.Text)
+		}
+		m.textarea.CursorEnd()
+		m.updateInputDimensions()
+		return m, nil
+
 	case WSErrorMsg:
 		if m.quitting {
 			return m, tea.Quit
@@ -853,18 +939,179 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 				_ = m.client.SendWorkspaceRequest("list", "", "", "")
 			}
 		} else if len(cmd.Args) >= 2 && cmd.Args[0] == "add" {
-			if m.client != nil {
-				_ = m.client.SendWorkspaceRequest("add", cmd.Args[1], "", "")
+			target := expandPath(cmd.Args[1])
+			if fi, err := os.Stat(target); err != nil || !fi.IsDir() {
+				item := m.history.AddSystemMessage(fmt.Sprintf("Directory not found: %s", target))
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
-		} else if len(cmd.Args) >= 2 && cmd.Args[0] == "remove" {
 			if m.client != nil {
-				_ = m.client.SendWorkspaceRequest("remove", cmd.Args[1], "", "")
+				_ = m.client.SendWorkspaceRequest("add", target, "", "")
+			}
+		} else if len(cmd.Args) >= 2 && (cmd.Args[0] == "remove" || cmd.Args[0] == "rm") {
+			target := expandPath(cmd.Args[1])
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("remove", target, "", "")
 			}
 		} else {
 			item := m.history.AddSystemMessage("Usage: /workspace [list | add <path> | remove <path>]")
 			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 		return nil
+
+	case "add-dir", "add_dir":
+		if len(cmd.Args) == 0 {
+			item := m.history.AddSystemMessage("Usage: /add-dir <path>")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		target := expandPath(cmd.Args[0])
+		if fi, err := os.Stat(target); err != nil {
+			item := m.history.AddSystemMessage(fmt.Sprintf("Directory not found: %s", target))
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		} else if !fi.IsDir() {
+			item := m.history.AddSystemMessage(fmt.Sprintf("Path is not a directory: %s", target))
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		if m.client != nil {
+			_ = m.client.SendWorkspaceRequest("add", target, "", "")
+		}
+		return nil
+
+	case "remove-dir", "remove_dir", "rm-dir":
+		if len(cmd.Args) == 0 {
+			item := m.history.AddSystemMessage("Usage: /remove-dir <path>")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		target := expandPath(cmd.Args[0])
+		if m.client != nil {
+			_ = m.client.SendWorkspaceRequest("remove", target, "", "")
+		}
+		return nil
+
+	case "dirs", "workspaces":
+		if m.client != nil {
+			_ = m.client.SendWorkspaceRequest("list", "", "", "")
+		}
+		return nil
+
+	case "dir":
+		if len(cmd.Args) == 0 || cmd.Args[0] == "list" {
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("list", "", "", "")
+			}
+			return nil
+		}
+		if cmd.Args[0] == "add" && len(cmd.Args) >= 2 {
+			target := expandPath(cmd.Args[1])
+			if fi, err := os.Stat(target); err != nil || !fi.IsDir() {
+				item := m.history.AddSystemMessage(fmt.Sprintf("Directory not found: %s", target))
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("add", target, "", "")
+			}
+			return nil
+		}
+		if (cmd.Args[0] == "remove" || cmd.Args[0] == "rm") && len(cmd.Args) >= 2 {
+			target := expandPath(cmd.Args[1])
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("remove", target, "", "")
+			}
+			return nil
+		}
+		target := expandPath(cmd.Args[0])
+		if fi, err := os.Stat(target); err == nil && fi.IsDir() {
+			if m.client != nil {
+				_ = m.client.SendWorkspaceRequest("add", target, "", "")
+			}
+			return nil
+		}
+		item := m.history.AddSystemMessage("Usage: /dir [list | add <path> | remove <path>]")
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
+
+	case "voice":
+		if len(cmd.Args) > 0 {
+			switch strings.ToLower(cmd.Args[0]) {
+			case "auto", "toggle":
+				enabled := m.voice.ToggleAutoSpeak()
+				var item ChatItem
+				if enabled {
+					item = m.history.AddSystemMessage("🔊 Voice: Auto-spoken responses ENABLED.")
+				} else {
+					item = m.history.AddSystemMessage("🔇 Voice: Auto-spoken responses DISABLED.")
+				}
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			case "on", "start", "rec", "record":
+				if m.voice.IsRecording() {
+					item := m.history.AddSystemMessage("Already recording audio. Press f5 or Enter when done.")
+					return tea.Println(m.history.RenderItem(item, m.getWidth()))
+				}
+				if err := m.voice.StartRecording(); err != nil {
+					item := m.history.AddSystemMessage(fmt.Sprintf("⚠️ Failed to start recording: %v", err))
+					return tea.Println(m.history.RenderItem(item, m.getWidth()))
+				}
+				return nil
+			case "off", "stop":
+				if m.voice.IsRecording() {
+					m.isTranscribing = true
+					return m.voice.TranscribeCmd()
+				}
+				if m.voice.IsSpeaking() {
+					m.voice.StopSpeaking()
+					item := m.history.AddSystemMessage("Voice playback stopped.")
+					return tea.Println(m.history.RenderItem(item, m.getWidth()))
+				}
+				item := m.history.AddSystemMessage("Voice is idle.")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			default:
+				item := m.history.AddSystemMessage("Usage: /voice [start | stop | auto] (or press F5 / Ctrl+R to dictate)")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+		}
+		if m.voice.IsRecording() {
+			m.isTranscribing = true
+			return m.voice.TranscribeCmd()
+		}
+		if err := m.voice.StartRecording(); err != nil {
+			item := m.history.AddSystemMessage(fmt.Sprintf("⚠️ Failed to start recording: %v", err))
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		return nil
+
+	case "speak":
+		if len(cmd.Args) > 0 {
+			sub := strings.ToLower(cmd.Args[0])
+			if sub == "stop" || sub == "off" {
+				m.voice.StopSpeaking()
+				item := m.history.AddSystemMessage("Speech stopped.")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+			if sub == "auto" || sub == "toggle" {
+				enabled := m.voice.ToggleAutoSpeak()
+				var item ChatItem
+				if enabled {
+					item = m.history.AddSystemMessage("🔊 Auto-speak ENABLED: Assistant responses will be spoken aloud.")
+				} else {
+					item = m.history.AddSystemMessage("🔇 Auto-speak DISABLED.")
+				}
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+			textToSpeak := strings.Join(cmd.Args, " ")
+			_ = m.voice.Speak(textToSpeak)
+			return nil
+		}
+		if m.voice.IsSpeaking() {
+			m.voice.StopSpeaking()
+			item := m.history.AddSystemMessage("Speech stopped.")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		last := m.history.LastAssistantResponse()
+		if last == "" {
+			item := m.history.AddSystemMessage("No assistant response found to speak.")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		_ = m.voice.Speak(last)
+		item := m.history.AddSystemMessage("🔊 Speaking response aloud... (Press Esc or /speak stop to halt)")
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "compact":
 		item := m.history.AddSystemMessage("Compacting conversation context...")
@@ -1129,6 +1376,12 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) tea.Cmd {
 			for _, it := range flushed {
 				printCmds = append(printCmds, tea.Println(m.history.RenderItem(it, m.getWidth())))
 			}
+			if m.voice != nil && m.voice.AutoSpeakEnabled() {
+				lastResp := m.history.LastAssistantResponse()
+				if lastResp != "" {
+					_ = m.voice.Speak(lastResp)
+				}
+			}
 		} else if traj.State == pb.TrajectoryState_TRAJ_RUNNING {
 			m.status = "RUNNING"
 		}
@@ -1142,7 +1395,19 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) tea.Cmd {
 		m.workspaces = wsDirs
 		m.completer.SetWorkspaces(wsDirs)
 		m.history.SetWorkspaces(wsDirs)
-		item := m.history.AddSystemMessage(fmt.Sprintf("📂 %s (Total: %d)", wsResp.Message, len(wsResp.Workspaces)))
+		m.customCommands = NewCustomCommandManager(wsDirs)
+
+		var dirLines []string
+		for i, ws := range wsResp.Workspaces {
+			dirLines = append(dirLines, fmt.Sprintf("   %d. %s", i+1, ws.Directory))
+		}
+		var msgText string
+		if len(dirLines) > 0 {
+			msgText = fmt.Sprintf("📂 %s (Total: %d):\n%s", wsResp.Message, len(wsResp.Workspaces), strings.Join(dirLines, "\n"))
+		} else {
+			msgText = fmt.Sprintf("📂 %s (Total: 0)", wsResp.Message)
+		}
+		item := m.history.AddSystemMessage(msgText)
 		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
 
@@ -1326,10 +1591,32 @@ func (m Model) View() string {
 		}
 		sections = append(sections, inputLine)
 
+		if m.voice != nil && m.voice.IsRecording() {
+			dur := m.voice.RecordingDuration()
+			mins := int(dur.Minutes())
+			secs := int(dur.Seconds()) % 60
+			durStr := fmt.Sprintf("%d:%02d", mins, secs)
+
+			micIcon := lipgloss.NewStyle().Foreground(ColorError).Bold(true).Render(fmt.Sprintf("🎙️ Recording audio for %s...", durStr))
+			voiceHint := lipgloss.NewStyle().Faint(true).Render(" [f5 / Enter to transcribe • Esc to cancel]")
+			voiceStrip := lipgloss.NewStyle().Padding(0, 1).Render(micIcon + voiceHint)
+			sections = append(sections, voiceStrip)
+		} else if m.isTranscribing {
+			transcribeStrip := lipgloss.NewStyle().Padding(0, 1).Render(
+				m.spinner.View() + " " + lipgloss.NewStyle().Foreground(ColorHighlight).Render("Finishing up... (Transcribing audio)"),
+			)
+			sections = append(sections, transcribeStrip)
+		}
+
 		activityStrip := RenderActiveBackgroundStrip(m.tasks, m.subagents, w)
 		if activityStrip != "" {
 			sections = append(sections, activityStrip)
 		}
+	}
+
+	autoSpeak := false
+	if m.voice != nil {
+		autoSpeak = m.voice.AutoSpeakEnabled()
 	}
 
 	// 3. Bottom status bar
@@ -1345,6 +1632,7 @@ func (m Model) View() string {
 		RunningTasks:     m.tasks.RunningCount(),
 		YoloMode:         m.yoloMode,
 		WorkspaceCount:   len(m.workspaces),
+		AutoSpeak:        autoSpeak,
 	}, w)
 	sections = append(sections, statusBar)
 
@@ -1415,4 +1703,23 @@ func (m Model) RenderConsoleHistory() string {
 		return ""
 	}
 	return strings.TrimSpace(m.history.RenderView(spinner.Model{}, m.getWidth()))
+}
+
+// expandPath resolves leading ~ and returns the absolute path.
+func expandPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	} else if strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	abs, err := filepath.Abs(p)
+	if err == nil {
+		return abs
+	}
+	return p
 }

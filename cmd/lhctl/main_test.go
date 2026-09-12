@@ -83,6 +83,16 @@ func TestParseRunFlags(t *testing.T) {
 			args:        []string{"--no-browser", "--headless"},
 			wantWsCount: 0,
 		},
+		{
+			name:        "add-dir and voice flags",
+			args:        []string{"--add-dir", "/tmp/repo", "--voice"},
+			wantWsCount: 1,
+		},
+		{
+			name:        "add-dir with equals and voice auto",
+			args:        []string{"--add-dir=/tmp/repo2", "--voice=auto"},
+			wantWsCount: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -148,6 +158,14 @@ func TestFormatResumeCommand(t *testing.T) {
 				headless:  true,
 			},
 			wantCmd: "lhctl -c conv-5678 --no-browser --headless",
+		},
+		{
+			name:      "with voice flag",
+			sessionID: "conv-voice",
+			flags: runFlags{
+				voice: true,
+			},
+			wantCmd: "lhctl -c conv-voice --voice",
 		},
 	}
 

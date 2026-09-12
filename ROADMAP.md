@@ -109,10 +109,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 7. Voice & Realtime Audio Interaction
 
-- [ ] **Push-to-Talk Voice Dictation in `lhctl` TUI (`Ctrl+V`)**
-  - Microphone input with push-to-talk or voice activity detection (VAD) in the terminal, transcribing spoken user instructions directly into the prompt buffer via local Whisper (`whisper.cpp`) or cloud STT APIs (OpenAI Whisper, Deepgram, Gemini Audio).
-- [ ] **Text-to-Speech Spoken Responses & Notification Chimes**
-  - Configurable audio output for agent responses, status announcements, and permission alerts using native OS synthesizers (macOS `say`, Linux `spd-say`/`espeak`, Windows SAPI) or cloud TTS (ElevenLabs, OpenAI TTS, Cartesia).
 - [ ] **Full-Duplex Realtime Voice Agent Mode (`lhctl voice` / Live API)**
   - Bidirectional low-latency audio streaming via WebRTC / WebSocket connecting directly to Gemini 2.0 Flash Multimodal Live API or OpenAI Realtime API for natural, hands-free conversational pair-programming with interruption handling.
 - [ ] **Wake-Word & Ambient Background Voice Trigger**

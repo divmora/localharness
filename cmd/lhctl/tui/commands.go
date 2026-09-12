@@ -60,9 +60,14 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		{"/status", "Display daemon state, tokens & subagent metrics"},
 		{"/subagents", "View subagent hierarchy & drill-down transcript"},
 		{"/tasks", "View background tasks, running commands & timers"},
+		{"/add-dir <path>", "Add directory to workspace (alias: /dir add)"},
+		{"/remove-dir <path>", "Remove directory from workspace (alias: /rm-dir)"},
+		{"/dirs", "List all attached workspaces (alias: /workspaces)"},
 		{"/workspace list", "List all currently attached workspaces"},
 		{"/workspace add <dir>", "Attach a directory with trust verification"},
 		{"/workspace remove <dir>", "Detach a workspace directory"},
+		{"/voice [on|off]", "Toggle voice dictation (or press F5 / Ctrl+R)"},
+		{"/speak [auto|stop]", "Speak assistant response aloud or toggle auto-TTS"},
 		{"/detach", "Detach TUI while background agents continue running"},
 		{"/thinking [on|off]", "Toggle reasoning and chain-of-thought (Ctrl+O)"},
 		{"/yolo", "Toggle YOLO Mode (bypass all approval queues)"},
@@ -75,6 +80,7 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		Key  string
 		Desc string
 	}{
+		{"F5 / Ctrl+R", "Toggle voice dictation (microphone to prompt)"},
 		{"Shift+Tab", "Cycle modes (default → accept-edits → plan)"},
 		{"Ctrl+O", "Toggle reasoning and chain-of-thought visibility"},
 		{"Ctrl+Y", "Copy last assistant response to clipboard"},

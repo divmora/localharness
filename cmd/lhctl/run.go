@@ -35,6 +35,7 @@ type runFlags struct {
 	browserProfile     string
 	isolated           bool
 	maxAutoWake        int
+	voice              bool
 }
 
 // formatResumeCommand builds the CLI command to resume the given conversation session.
@@ -69,6 +70,9 @@ func formatResumeCommand(sessionID string, flags runFlags) string {
 	}
 	if flags.isolated {
 		parts = append(parts, "--isolated")
+	}
+	if flags.voice {
+		parts = append(parts, "--voice")
 	}
 	return strings.Join(parts, " ")
 }
@@ -124,10 +128,19 @@ func parseRunFlags(args []string) runFlags {
 			ws := strings.TrimPrefix(a, "--workspace=")
 			f.workspaces = append(f.workspaces, ws)
 			f.explicitWorkspaces = append(f.explicitWorkspaces, ws)
-		case a == "-w" && i+1 < len(args):
+		case strings.HasPrefix(a, "--add-dir="):
+			ws := strings.TrimPrefix(a, "--add-dir=")
+			f.workspaces = append(f.workspaces, ws)
+			f.explicitWorkspaces = append(f.explicitWorkspaces, ws)
+		case (a == "-w" || a == "--add-dir") && i+1 < len(args):
 			i++
 			f.workspaces = append(f.workspaces, args[i])
 			f.explicitWorkspaces = append(f.explicitWorkspaces, args[i])
+		case a == "--voice":
+			f.voice = true
+		case strings.HasPrefix(a, "--voice="):
+			val := strings.ToLower(strings.TrimPrefix(a, "--voice="))
+			f.voice = (val == "true" || val == "1" || val == "auto" || val == "on")
 		case strings.HasPrefix(a, "--prompt="):
 			f.prompt = strings.TrimPrefix(a, "--prompt=")
 		case a == "-p" && i+1 < len(args):
@@ -359,9 +372,11 @@ func runInteractiveWithOptions(flags runFlags) error {
 		return nil
 	}
 
-	p := tea.NewProgram(
-		tui.InitialModelWithHistory(cl, flags.workspaces, flags.yolo, initialState),
-	)
+	m := tui.InitialModelWithHistory(cl, flags.workspaces, flags.yolo, initialState)
+	if flags.voice {
+		m.SetAutoSpeak(true)
+	}
+	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("running TUI: %w", err)

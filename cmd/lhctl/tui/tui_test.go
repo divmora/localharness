@@ -640,3 +640,150 @@ func TestModel_SlashCommandsEmitCmd(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanTextForTTS(t *testing.T) {
+	input := "Check out [README](https://example.com) for **details** and `config.go`.\n\n# Instructions\n\n```go\nfunc main() {}\n```\n- Step 1: run tests."
+	got := CleanTextForTTS(input)
+
+	if strings.Contains(got, "```") || strings.Contains(got, "func main()") {
+		t.Errorf("expected code block to be omitted, got %q", got)
+	}
+	if strings.Contains(got, "https://example.com") {
+		t.Errorf("expected URL to be stripped, got %q", got)
+	}
+	if strings.Contains(got, "**") || strings.Contains(got, "`") || strings.Contains(got, "#") {
+		t.Errorf("expected markdown tokens to be stripped, got %q", got)
+	}
+	if !strings.Contains(got, "README") || !strings.Contains(got, "details") || !strings.Contains(got, "config.go") {
+		t.Errorf("expected text content preserved, got %q", got)
+	}
+}
+
+func TestVoiceManager_AutoSpeak(t *testing.T) {
+	vm := NewVoiceManager()
+	if vm.AutoSpeakEnabled() {
+		t.Errorf("expected AutoSpeak to be false initially")
+	}
+	vm.SetAutoSpeak(true)
+	if !vm.AutoSpeakEnabled() {
+		t.Errorf("expected AutoSpeak to be true after SetAutoSpeak(true)")
+	}
+	toggled := vm.ToggleAutoSpeak()
+	if toggled || vm.AutoSpeakEnabled() {
+		t.Errorf("expected AutoSpeak to be false after toggle")
+	}
+}
+
+func TestExpandPath(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+
+	if got := expandPath("~"); got != home {
+		t.Errorf("expandPath(~) = %q, want %q", got, home)
+	}
+
+	wantSub := filepath.Join(home, "projects")
+	if got := expandPath("~/projects"); got != wantSub {
+		t.Errorf("expandPath(~/projects) = %q, want %q", got, wantSub)
+	}
+
+	curDir, _ := os.Getwd()
+	if got := expandPath("."); got != curDir {
+		t.Errorf("expandPath(.) = %q, want %q", got, curDir)
+	}
+}
+
+func TestModel_VoiceTranscriptionMsg(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.isTranscribing = true
+
+	// 1. Success message: text inserted into prompt textarea
+	newM, cmd := m.Update(VoiceTranscriptionMsg{Text: "create a new function in parser.go"})
+	mod := newM.(Model)
+	if cmd != nil {
+		t.Errorf("expected nil cmd for successful transcription, got %v", cmd)
+	}
+	if mod.isTranscribing {
+		t.Errorf("expected isTranscribing to be false")
+	}
+	if got := mod.textarea.Value(); got != "create a new function in parser.go" {
+		t.Errorf("textarea value = %q, want %q", got, "create a new function in parser.go")
+	}
+
+	// 2. Empty speech message: prints system message
+	newM2, cmd2 := mod.Update(VoiceTranscriptionMsg{Text: ""})
+	mod2 := newM2.(Model)
+	if cmd2 == nil {
+		t.Errorf("expected print cmd for no speech detected")
+	}
+	if mod2.history.items[len(mod2.history.items)-1].Content != "No speech detected." {
+		t.Errorf("expected No speech detected system message, got: %s", mod2.history.items[len(mod2.history.items)-1].Content)
+	}
+}
+
+func TestModel_VoiceDockRendering(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// Transcribing indicator in dock
+	m.isTranscribing = true
+	v := m.View()
+	if !strings.Contains(v, "Finishing up... (Transcribing audio)") {
+		t.Errorf("expected transcribing dock strip, got: %s", v)
+	}
+}
+
+func TestModel_VoiceAndDirectoryCommands(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// 1. /voice auto toggle
+	cmd, _ := ParseCommand("/voice auto")
+	teaCmd := m.handleSlashCommand(cmd)
+	if teaCmd == nil {
+		t.Errorf("expected tea.Cmd for /voice auto")
+	}
+	if !m.voice.AutoSpeakEnabled() {
+		t.Errorf("expected AutoSpeak to be enabled after /voice auto")
+	}
+
+	// 2. /speak auto toggle
+	cmdSpeak, _ := ParseCommand("/speak auto")
+	teaCmd2 := m.handleSlashCommand(cmdSpeak)
+	if teaCmd2 == nil {
+		t.Errorf("expected tea.Cmd for /speak auto")
+	}
+	if m.voice.AutoSpeakEnabled() {
+		t.Errorf("expected AutoSpeak to be toggled off after /speak auto")
+	}
+
+	// 3. /add-dir without args
+	cmdAddEmpty, _ := ParseCommand("/add-dir")
+	teaCmd3 := m.handleSlashCommand(cmdAddEmpty)
+	if teaCmd3 == nil {
+		t.Errorf("expected tea.Cmd for empty /add-dir")
+	}
+	lastItem := m.history.items[len(m.history.items)-1]
+	if !strings.Contains(lastItem.Content, "Usage: /add-dir") {
+		t.Errorf("expected usage message, got: %s", lastItem.Content)
+	}
+
+	// 4. /remove-dir without args
+	cmdRmEmpty, _ := ParseCommand("/remove-dir")
+	teaCmd4 := m.handleSlashCommand(cmdRmEmpty)
+	if teaCmd4 == nil {
+		t.Errorf("expected tea.Cmd for empty /remove-dir")
+	}
+	lastItem2 := m.history.items[len(m.history.items)-1]
+	if !strings.Contains(lastItem2.Content, "Usage: /remove-dir") {
+		t.Errorf("expected usage message, got: %s", lastItem2.Content)
+	}
+}
