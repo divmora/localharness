@@ -9,5 +9,5 @@ plugins:
     out: gen/go
     opt: paths=source_relative
   - remote: buf.build/bufbuild/es
-    out: gui/src/gen
+    out: gen/ts
     opt: target=ts
