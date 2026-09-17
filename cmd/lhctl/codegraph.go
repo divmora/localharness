@@ -23,7 +23,7 @@ func newCodeGraphCommand() *cobra.Command {
 		Use:     "codegraph",
 		Aliases: []string{"cg", "graph"},
 		Short:   "Repository AST code graph indexing and semantic structural queries",
-		Long: `codegraph manages the AST-level code graph stored in DuckDB.
+		Long: `codegraph manages the AST-level code graph stored in embedded SQLite.
 It indexes symbols, call hierarchies, interfaces, and dependencies across git branches.`,
 	}
 
@@ -34,7 +34,7 @@ It indexes symbols, call hierarchies, interfaces, and dependencies across git br
 	// Subcommand: index
 	indexCmd := &cobra.Command{
 		Use:   "index",
-		Short: "Index or incrementally synchronize workspace code graph into DuckDB",
+		Short: "Index or incrementally synchronize workspace code graph into SQLite",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mgr, projectID, wsPath, err := resolveCodeGraphContext(workspaceFlag)
 			if err != nil {
@@ -200,7 +200,7 @@ It indexes symbols, call hierarchies, interfaces, and dependencies across git br
 	// Subcommand: status
 	statusCmd := &cobra.Command{
 		Use:   "status",
-		Short: "Display code graph status, DuckDB database location, and branch counts",
+		Short: "Display code graph status, database location, and branch counts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, projectID, wsPath, err := resolveStoreContext(workspaceFlag)
 			if err != nil {

@@ -191,6 +191,92 @@ func TestStore_ContentAddressedAndBranches(t *testing.T) {
 	}
 }
 
+func TestStore_LegacyJSONMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "codegraph.duckdb")
+
+	legacyJSON := `{
+  "version": "1.0",
+  "active_branch": "feature/migration",
+  "branches": {
+    "feature/migration": {
+      "name": "feature/migration",
+      "head_commit": "abc1234",
+      "updated_at": "2026-09-01T12:00:00Z"
+    }
+  },
+  "manifests": {
+    "feature/migration": {
+      "legacy.go": "legacy-blob-hash"
+    }
+  },
+  "nodes": {
+    "legacy-blob-hash": [
+      {
+        "symbol_id": "pkg/legacy:MigrateMe",
+        "blob_hash": "legacy-blob-hash",
+        "kind": "function",
+        "name": "MigrateMe",
+        "file_path": "legacy.go",
+        "start_line": 10,
+        "end_line": 20,
+        "signature": "func MigrateMe() error",
+        "docstring": "MigrateMe performs legacy data migration.",
+        "exported": true
+      }
+    ]
+  },
+  "edges": {
+    "legacy-blob-hash": [
+      {
+        "blob_hash": "legacy-blob-hash",
+        "source_symbol": "pkg/legacy:MigrateMe",
+        "target_symbol": "pkg/db:Exec",
+        "relation": "calls",
+        "file_path": "legacy.go",
+        "line": 15
+      }
+    ]
+  }
+}`
+
+	if err := os.WriteFile(dbPath, []byte(legacyJSON), 0644); err != nil {
+		t.Fatalf("write legacy json failed: %v", err)
+	}
+
+	store := NewStore(dbPath)
+	if err := store.Load(); err != nil {
+		t.Fatalf("store.Load failed on legacy json: %v", err)
+	}
+	defer store.Close()
+
+	if store.ActiveBranch() != "feature/migration" {
+		t.Errorf("expected active branch 'feature/migration', got %s", store.ActiveBranch())
+	}
+
+	nodes := store.GetBranchNodes("feature/migration")
+	if len(nodes) != 1 || nodes[0].Name != "MigrateMe" {
+		t.Fatalf("expected 1 node MigrateMe, got %+v", nodes)
+	}
+
+	edges := store.GetBranchEdges("feature/migration")
+	if len(edges) != 1 || edges[0].TargetSymbol != "pkg/db:Exec" {
+		t.Fatalf("expected 1 edge to pkg/db:Exec, got %+v", edges)
+	}
+
+	// Verify old json backup was created
+	bakPath := dbPath + ".json.bak"
+	if _, err := os.Stat(bakPath); err != nil {
+		t.Errorf("expected backup file %s to exist", bakPath)
+	}
+
+	// Verify database is now a valid SQLite database
+	var count int
+	if err := store.db.QueryRow("SELECT count(*) FROM nodes").Scan(&count); err != nil || count != 1 {
+		t.Errorf("expected 1 node in SQLite table, got count=%d, err=%v", count, err)
+	}
+}
+
 func TestStore_CallHierarchyAndImpact(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "codegraph.duckdb")

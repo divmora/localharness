@@ -1,6 +1,8 @@
 package codegraph
 
 import (
+	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,24 +11,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // Store manages the code graph for a single project across all branches.
-// It stores AST nodes and edges indexed by content blob hash (de-duplicated),
-// and branch manifests mapping (branch, file_path) -> blob_hash.
+// It stores AST nodes and edges in an embedded SQLite database indexed by content blob hash,
+// with branch manifests mapping (branch, file_path) -> blob_hash.
 type Store struct {
 	mu           sync.RWMutex
-	dbPath       string // e.g. ~/.divmora/localharness/knowledge/<project-uuid>/codegraph.duckdb
+	dbPath       string
 	activeBranch string
+	db           *sql.DB
 
-	branches  map[string]*Branch           // keyed by branch_name
-	manifests map[string]map[string]string // [branch_name][file_path] -> blob_hash
-	nodes     map[string][]Node            // keyed by blob_hash
-	edges     map[string][]Edge            // keyed by blob_hash
-
-	// In-memory caches per branch
-	ftsIndexes   map[string]*FTSIndex    // [branch_name] -> cached FTS index
-	branchGraphs map[string]*branchGraph // [branch_name] -> indexed nodes and edges
+	// In-memory caches per branch for hot queries and FTS
+	ftsIndexes   map[string]*FTSIndex
+	branchGraphs map[string]*branchGraph
 }
 
 // branchGraph indexes nodes and edges for O(1) lookups on a branch.
@@ -121,7 +121,7 @@ func buildBranchGraph(nodes []Node, edges []Edge) *branchGraph {
 	return bg
 }
 
-// diskSnapshot is the persisted JSON structure inside codegraph.duckdb
+// diskSnapshot is the legacy JSON structure for backward-compatible migration.
 type diskSnapshot struct {
 	Version      string                       `json:"version"`
 	ActiveBranch string                       `json:"active_branch"`
@@ -132,105 +132,268 @@ type diskSnapshot struct {
 	SavedAt      time.Time                    `json:"saved_at"`
 }
 
-// NewStore creates a new Store backed by the specified DuckDB file path.
+// NewStore creates a new Store backed by the specified SQLite database path.
 func NewStore(dbPath string) *Store {
 	return &Store{
 		dbPath:       dbPath,
 		activeBranch: "main",
-		branches:     make(map[string]*Branch),
-		manifests:    make(map[string]map[string]string),
-		nodes:        make(map[string][]Node),
-		edges:        make(map[string][]Edge),
 		ftsIndexes:   make(map[string]*FTSIndex),
 		branchGraphs: make(map[string]*branchGraph),
 	}
 }
 
-// DBPath returns the underlying file path of the database.
+// DBPath returns the underlying database file path.
 func (s *Store) DBPath() string {
 	return s.dbPath
 }
 
-// Load reads the stored graph state from disk.
+// Close closes the underlying SQLite database connection.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db != nil {
+		err := s.db.Close()
+		s.db = nil
+		return err
+	}
+	return nil
+}
+
+// initSchema initializes the SQLite tables, indexes, and pragmas.
+func (s *Store) initSchema() error {
+	pragmas := []string{
+		"PRAGMA journal_mode = WAL;",
+		"PRAGMA synchronous = NORMAL;",
+		"PRAGMA foreign_keys = ON;",
+		"PRAGMA busy_timeout = 5000;",
+	}
+	for _, p := range pragmas {
+		if _, err := s.db.Exec(p); err != nil {
+			return fmt.Errorf("codegraph set pragma %q: %w", p, err)
+		}
+	}
+
+	schema := `
+	CREATE TABLE IF NOT EXISTS metadata (
+		key TEXT PRIMARY KEY,
+		value TEXT
+	);
+
+	CREATE TABLE IF NOT EXISTS branches (
+		name TEXT PRIMARY KEY,
+		head_commit TEXT,
+		updated_at TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS file_manifest (
+		branch_name TEXT,
+		file_path TEXT,
+		blob_hash TEXT NOT NULL,
+		updated_at TIMESTAMP,
+		PRIMARY KEY (branch_name, file_path)
+	);
+	CREATE INDEX IF NOT EXISTS idx_manifest_blob ON file_manifest(blob_hash);
+	CREATE INDEX IF NOT EXISTS idx_manifest_branch ON file_manifest(branch_name);
+
+	CREATE TABLE IF NOT EXISTS nodes (
+		blob_hash TEXT NOT NULL,
+		symbol_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		name TEXT NOT NULL,
+		file_path TEXT NOT NULL,
+		start_line INTEGER NOT NULL,
+		end_line INTEGER NOT NULL,
+		signature TEXT,
+		docstring TEXT,
+		exported BOOLEAN NOT NULL DEFAULT 0,
+		PRIMARY KEY (blob_hash, symbol_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
+	CREATE INDEX IF NOT EXISTS idx_nodes_symbol_id ON nodes(symbol_id);
+	CREATE INDEX IF NOT EXISTS idx_nodes_file_path ON nodes(file_path);
+
+	CREATE TABLE IF NOT EXISTS edges (
+		blob_hash TEXT NOT NULL,
+		source_symbol TEXT NOT NULL,
+		target_symbol TEXT NOT NULL,
+		relation TEXT NOT NULL,
+		file_path TEXT NOT NULL,
+		line INTEGER NOT NULL,
+		PRIMARY KEY (blob_hash, source_symbol, target_symbol, relation, line)
+	);
+	CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_symbol, relation);
+	CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_symbol, relation);
+	CREATE INDEX IF NOT EXISTS idx_edges_blob ON edges(blob_hash);
+
+	CREATE VIRTUAL TABLE IF NOT EXISTS fts_nodes USING fts5(
+		blob_hash UNINDEXED,
+		symbol_id,
+		name,
+		signature,
+		docstring,
+		tokenize = 'unicode61 remove_diacritics 2'
+	);
+	`
+	if _, err := s.db.Exec(schema); err != nil {
+		return fmt.Errorf("codegraph init schema: %w", err)
+	}
+	return nil
+}
+
+// Load opens the SQLite database and initializes schema or migrates legacy JSON snapshots.
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := os.ReadFile(s.dbPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // Fresh store
+	if err := os.MkdirAll(filepath.Dir(s.dbPath), 0755); err != nil {
+		return fmt.Errorf("create codegraph dir: %w", err)
+	}
+
+	// Check if the file is a legacy JSON snapshot
+	if fi, err := os.Stat(s.dbPath); err == nil && fi.Size() > 0 {
+		prefix := make([]byte, 16)
+		f, rErr := os.Open(s.dbPath)
+		if rErr == nil {
+			n, _ := f.Read(prefix)
+			f.Close()
+			trimmed := bytes.TrimSpace(prefix[:n])
+			if len(trimmed) > 0 && trimmed[0] == '{' {
+				// Legacy JSON snapshot detected; migrate to SQLite
+				if err := s.migrateLegacyJSON(); err != nil {
+					return fmt.Errorf("migrate legacy json: %w", err)
+				}
+			}
 		}
-		return fmt.Errorf("codegraph load %s: %w", s.dbPath, err)
 	}
 
-	var snap diskSnapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
-		// If corrupted or non-JSON format, start empty
-		return nil
+	if s.db == nil {
+		db, err := sql.Open("sqlite", s.dbPath)
+		if err != nil {
+			return fmt.Errorf("open codegraph sqlite %s: %w", s.dbPath, err)
+		}
+		s.db = db
 	}
 
-	s.activeBranch = snap.ActiveBranch
-	if s.activeBranch == "" {
-		s.activeBranch = "main"
-	}
-	s.branches = snap.Branches
-	if s.branches == nil {
-		s.branches = make(map[string]*Branch)
-	}
-	s.manifests = snap.Manifests
-	if s.manifests == nil {
-		s.manifests = make(map[string]map[string]string)
-	}
-	s.nodes = snap.Nodes
-	if s.nodes == nil {
-		s.nodes = make(map[string][]Node)
-	}
-	s.edges = snap.Edges
-	if s.edges == nil {
-		s.edges = make(map[string][]Edge)
+	if err := s.initSchema(); err != nil {
+		return err
 	}
 
-	s.ftsIndexes = make(map[string]*FTSIndex)
-	s.branchGraphs = make(map[string]*branchGraph)
+	// Load active branch from metadata
+	var active string
+	err := s.db.QueryRow("SELECT value FROM metadata WHERE key = 'active_branch'").Scan(&active)
+	if err == nil && active != "" {
+		s.activeBranch = active
+	} else {
+		if s.activeBranch == "" {
+			s.activeBranch = "main"
+		}
+		_, _ = s.db.Exec("INSERT OR REPLACE INTO metadata(key, value) VALUES('active_branch', ?)", s.activeBranch)
+	}
 
 	return nil
 }
 
-// Save writes the current graph state to disk atomically.
+// migrateLegacyJSON reads old JSON snapshot data and writes it into a fresh SQLite database.
+func (s *Store) migrateLegacyJSON() error {
+	data, err := os.ReadFile(s.dbPath)
+	if err != nil {
+		return err
+	}
+
+	var snap diskSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		// Not valid JSON, let SQLite try opening it
+		return nil
+	}
+
+	// Rename old JSON to .bak
+	bakPath := s.dbPath + ".json.bak"
+	_ = os.Rename(s.dbPath, bakPath)
+
+	db, err := sql.Open("sqlite", s.dbPath)
+	if err != nil {
+		return err
+	}
+	s.db = db
+
+	if err := s.initSchema(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if snap.ActiveBranch != "" {
+		s.activeBranch = snap.ActiveBranch
+	} else {
+		s.activeBranch = "main"
+	}
+	_, _ = tx.Exec("INSERT OR REPLACE INTO metadata(key, value) VALUES('active_branch', ?)", s.activeBranch)
+
+	for name, b := range snap.Branches {
+		up := b.UpdatedAt
+		if up.IsZero() {
+			up = time.Now().UTC()
+		}
+		_, _ = tx.Exec("INSERT OR REPLACE INTO branches(name, head_commit, updated_at) VALUES(?, ?, ?)", name, b.HeadCommit, up)
+	}
+
+	for branch, m := range snap.Manifests {
+		now := time.Now().UTC()
+		for path, hash := range m {
+			_, _ = tx.Exec("INSERT OR REPLACE INTO file_manifest(branch_name, file_path, blob_hash, updated_at) VALUES(?, ?, ?, ?)", branch, path, hash, now)
+		}
+	}
+
+	for hash, nodes := range snap.Nodes {
+		for _, n := range nodes {
+			_, _ = tx.Exec(`INSERT OR IGNORE INTO nodes(blob_hash, symbol_id, kind, name, file_path, start_line, end_line, signature, docstring, exported)
+				VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				hash, n.SymbolID, n.Kind, n.Name, n.FilePath, n.StartLine, n.EndLine, n.Signature, n.Docstring, n.Exported)
+			_, _ = tx.Exec(`INSERT INTO fts_nodes(blob_hash, symbol_id, name, signature, docstring) VALUES(?, ?, ?, ?, ?)`,
+				hash, n.SymbolID, n.Name, n.Signature, n.Docstring)
+		}
+	}
+
+	for hash, edges := range snap.Edges {
+		for _, e := range edges {
+			_, _ = tx.Exec(`INSERT OR IGNORE INTO edges(blob_hash, source_symbol, target_symbol, relation, file_path, line)
+				VALUES(?, ?, ?, ?, ?, ?)`,
+				hash, e.SourceSymbol, e.TargetSymbol, e.Relation, e.FilePath, e.Line)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// ensureDB ensures the SQLite database connection is open and schema initialized.
+func (s *Store) ensureDB() error {
+	if s.db != nil {
+		return nil
+	}
+	db, err := sql.Open("sqlite", s.dbPath)
+	if err != nil {
+		return fmt.Errorf("open codegraph sqlite %s: %w", s.dbPath, err)
+	}
+	s.db = db
+	return s.initSchema()
+}
+
+// Save is a lightweight operation in SQLite since point mutations are committed immediately.
+// It checkpoints WAL and ensures active branch metadata is up to date.
 func (s *Store) Save() error {
 	s.mu.RLock()
-	snap := diskSnapshot{
-		Version:      "1.0",
-		ActiveBranch: s.activeBranch,
-		Branches:     s.branches,
-		Manifests:    s.manifests,
-		Nodes:        s.nodes,
-		Edges:        s.edges,
-		SavedAt:      time.Now().UTC(),
-	}
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
 
-	data, err := json.MarshalIndent(snap, "", "  ")
-	if err != nil {
-		return fmt.Errorf("codegraph marshal: %w", err)
+	if err := s.ensureDB(); err != nil {
+		return err
 	}
 
-	dir := filepath.Dir(s.dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("codegraph mkdir %s: %w", dir, err)
-	}
-
-	tmpPath := s.dbPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("codegraph write temp: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, s.dbPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("codegraph rename: %w", err)
-	}
-
+	_, _ = s.db.Exec("INSERT OR REPLACE INTO metadata(key, value) VALUES('active_branch', ?)", s.activeBranch)
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(PASSIVE);")
 	return nil
 }
 
@@ -242,14 +405,10 @@ func (s *Store) SetActiveBranch(branch string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activeBranch = branch
-	if _, ok := s.branches[branch]; !ok {
-		s.branches[branch] = &Branch{
-			Name:      branch,
-			UpdatedAt: time.Now().UTC(),
-		}
-	}
-	if _, ok := s.manifests[branch]; !ok {
-		s.manifests[branch] = make(map[string]string)
+
+	if err := s.ensureDB(); err == nil {
+		_, _ = s.db.Exec("INSERT OR REPLACE INTO metadata(key, value) VALUES('active_branch', ?)", branch)
+		_, _ = s.db.Exec("INSERT OR IGNORE INTO branches(name, updated_at) VALUES(?, ?)", branch, time.Now().UTC())
 	}
 }
 
@@ -268,13 +427,25 @@ func (s *Store) ListBranches() []Branch {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]Branch, 0, len(s.branches))
-	for _, b := range s.branches {
-		result = append(result, *b)
+	if err := s.ensureDB(); err != nil {
+		return nil
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
-	})
+
+	rows, err := s.db.Query("SELECT name, COALESCE(head_commit, ''), updated_at FROM branches ORDER BY name")
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var result []Branch
+	for rows.Next() {
+		var b Branch
+		var up time.Time
+		if err := rows.Scan(&b.Name, &b.HeadCommit, &up); err == nil {
+			b.UpdatedAt = up
+			result = append(result, b)
+		}
+	}
 	return result
 }
 
@@ -282,11 +453,19 @@ func (s *Store) ListBranches() []Branch {
 func (s *Store) HasBlob(blobHash string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.nodes[blobHash]
-	return ok
+
+	if err := s.ensureDB(); err != nil {
+		return false
+	}
+
+	var exists int
+	err := s.db.QueryRow("SELECT 1 FROM nodes WHERE blob_hash = ? LIMIT 1", blobHash).Scan(&exists)
+	return err == nil && exists == 1
 }
 
 // AddFile registers or updates a file in the active branch.
+// It inserts new nodes and edges indexed by content blob hash (de-duplicated),
+// updates the branch file manifest, and updates in-memory caches.
 func (s *Store) AddFile(branch, filePath, blobHash string, nodes []Node, edges []Edge) {
 	if branch == "" {
 		branch = s.ActiveBranch()
@@ -294,43 +473,79 @@ func (s *Store) AddFile(branch, filePath, blobHash string, nodes []Node, edges [
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Ensure branch manifest
-	if _, ok := s.branches[branch]; !ok {
-		s.branches[branch] = &Branch{
-			Name:      branch,
-			UpdatedAt: time.Now().UTC(),
-		}
-	}
-	if _, ok := s.manifests[branch]; !ok {
-		s.manifests[branch] = make(map[string]string)
+	if err := s.ensureDB(); err != nil {
+		return
 	}
 
-	oldHash, hadOld := s.manifests[branch][filePath]
+	now := time.Now().UTC()
 
-	// Update manifest
-	s.manifests[branch][filePath] = blobHash
+	// Check old hash for incremental FTS update
+	var oldHash string
+	_ = s.db.QueryRow("SELECT blob_hash FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath).Scan(&oldHash)
 
-	// Store nodes & edges if not already present
-	if _, ok := s.nodes[blobHash]; !ok && len(nodes) > 0 {
-		s.nodes[blobHash] = nodes
+	tx, err := s.db.Begin()
+	if err != nil {
+		return
 	}
-	if _, ok := s.edges[blobHash]; !ok && len(edges) > 0 {
-		s.edges[blobHash] = edges
-	}
+	defer tx.Rollback() //nolint:errcheck
 
-	// Incremental FTS update
-	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
-		if hadOld && oldHash != blobHash {
-			if oldNodes, ok := s.nodes[oldHash]; ok {
-				for _, n := range oldNodes {
-					fts.RemoveNode(n.SymbolID)
+	_, _ = tx.Exec("INSERT OR IGNORE INTO branches(name, updated_at) VALUES(?, ?)", branch, now)
+	_, _ = tx.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", now, branch)
+	_, _ = tx.Exec("INSERT OR REPLACE INTO file_manifest(branch_name, file_path, blob_hash, updated_at) VALUES(?, ?, ?, ?)", branch, filePath, blobHash, now)
+
+	// Check if this blob hash is already known in nodes
+	var nodeCount int
+	_ = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE blob_hash = ?", blobHash).Scan(&nodeCount)
+
+	if nodeCount == 0 && len(nodes) > 0 {
+		nodeStmt, err := tx.Prepare(`INSERT OR IGNORE INTO nodes(blob_hash, symbol_id, kind, name, file_path, start_line, end_line, signature, docstring, exported)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		if err == nil {
+			defer nodeStmt.Close()
+			ftsStmt, _ := tx.Prepare(`INSERT INTO fts_nodes(blob_hash, symbol_id, name, signature, docstring) VALUES(?, ?, ?, ?, ?)`)
+			if ftsStmt != nil {
+				defer ftsStmt.Close()
+			}
+			for _, n := range nodes {
+				_, _ = nodeStmt.Exec(blobHash, n.SymbolID, n.Kind, n.Name, n.FilePath, n.StartLine, n.EndLine, n.Signature, n.Docstring, n.Exported)
+				if ftsStmt != nil {
+					_, _ = ftsStmt.Exec(blobHash, n.SymbolID, n.Name, n.Signature, n.Docstring)
 				}
 			}
 		}
-		if !hadOld || oldHash != blobHash {
+	}
+
+	// Check if this blob hash is already known in edges
+	var edgeCount int
+	_ = tx.QueryRow("SELECT COUNT(*) FROM edges WHERE blob_hash = ?", blobHash).Scan(&edgeCount)
+
+	if edgeCount == 0 && len(edges) > 0 {
+		edgeStmt, err := tx.Prepare(`INSERT OR IGNORE INTO edges(blob_hash, source_symbol, target_symbol, relation, file_path, line)
+			VALUES(?, ?, ?, ?, ?, ?)`)
+		if err == nil {
+			defer edgeStmt.Close()
+			for _, e := range edges {
+				_, _ = edgeStmt.Exec(blobHash, e.SourceSymbol, e.TargetSymbol, e.Relation, e.FilePath, e.Line)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return
+	}
+
+	// Incremental in-memory FTS update
+	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
+		if oldHash != "" && oldHash != blobHash {
+			oldNodes := s.getNodesByBlobLocked(oldHash)
+			for _, n := range oldNodes {
+				fts.RemoveNode(n.SymbolID)
+			}
+		}
+		if oldHash == "" || oldHash != blobHash {
 			newNodes := nodes
 			if len(newNodes) == 0 {
-				newNodes = s.nodes[blobHash]
+				newNodes = s.getNodesByBlobLocked(blobHash)
 			}
 			for _, n := range newNodes {
 				fts.IndexNode(n)
@@ -339,11 +554,9 @@ func (s *Store) AddFile(branch, filePath, blobHash string, nodes []Node, edges [
 	}
 
 	// Invalidate branchGraph cache on content change
-	if !hadOld || oldHash != blobHash {
+	if oldHash == "" || oldHash != blobHash {
 		delete(s.branchGraphs, branch)
 	}
-
-	s.branches[branch].UpdatedAt = time.Now().UTC()
 }
 
 // RemoveFile removes a file from a branch manifest.
@@ -354,25 +567,27 @@ func (s *Store) RemoveFile(branch, filePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if m, ok := s.manifests[branch]; ok {
-		if oldHash, ok := m[filePath]; ok {
-			if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
-				if oldNodes, ok := s.nodes[oldHash]; ok {
-					for _, n := range oldNodes {
-						fts.RemoveNode(n.SymbolID)
-					}
-				}
-			}
-			delete(m, filePath)
-			delete(s.branchGraphs, branch)
-		}
+	if err := s.ensureDB(); err != nil {
+		return
 	}
-	if b, ok := s.branches[branch]; ok {
-		b.UpdatedAt = time.Now().UTC()
+
+	var oldHash string
+	_ = s.db.QueryRow("SELECT blob_hash FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath).Scan(&oldHash)
+
+	if oldHash != "" {
+		if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
+			oldNodes := s.getNodesByBlobLocked(oldHash)
+			for _, n := range oldNodes {
+				fts.RemoveNode(n.SymbolID)
+			}
+		}
+		_, _ = s.db.Exec("DELETE FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath)
+		delete(s.branchGraphs, branch)
+		_, _ = s.db.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", time.Now().UTC(), branch)
 	}
 }
 
-// PruneDeletedFiles removes manifest entries for files no longer in active file list.
+// PruneDeletedFiles removes manifest entries for files no longer in the active file list.
 func (s *Store) PruneDeletedFiles(branch string, activeFiles map[string]bool) {
 	if branch == "" {
 		branch = s.ActiveBranch()
@@ -380,61 +595,133 @@ func (s *Store) PruneDeletedFiles(branch string, activeFiles map[string]bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	m, ok := s.manifests[branch]
-	if !ok {
+	if err := s.ensureDB(); err != nil {
+		return
+	}
+
+	rows, err := s.db.Query("SELECT file_path, blob_hash FROM file_manifest WHERE branch_name = ?", branch)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type toDelete struct {
+		path string
+		hash string
+	}
+	var deleted []toDelete
+
+	for rows.Next() {
+		var path, hash string
+		if err := rows.Scan(&path, &hash); err == nil {
+			if !activeFiles[path] {
+				deleted = append(deleted, toDelete{path: path, hash: hash})
+			}
+		}
+	}
+	rows.Close()
+
+	if len(deleted) == 0 {
 		return
 	}
 
 	fts := s.ftsIndexes[branch]
-	pruned := false
+	tx, err := s.db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
 
-	for path, hash := range m {
-		if !activeFiles[path] {
-			if fts != nil {
-				if oldNodes, ok := s.nodes[hash]; ok {
-					for _, n := range oldNodes {
-						fts.RemoveNode(n.SymbolID)
-					}
-				}
+	delStmt, _ := tx.Prepare("DELETE FROM file_manifest WHERE branch_name = ? AND file_path = ?")
+	if delStmt != nil {
+		defer delStmt.Close()
+	}
+
+	for _, item := range deleted {
+		if fts != nil {
+			oldNodes := s.getNodesByBlobLocked(item.hash)
+			for _, n := range oldNodes {
+				fts.RemoveNode(n.SymbolID)
 			}
-			delete(m, path)
-			pruned = true
+		}
+		if delStmt != nil {
+			_, _ = delStmt.Exec(branch, item.path)
 		}
 	}
 
-	if pruned {
-		delete(s.branchGraphs, branch)
-		if b, ok := s.branches[branch]; ok {
-			b.UpdatedAt = time.Now().UTC()
+	_, _ = tx.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", time.Now().UTC(), branch)
+	_ = tx.Commit()
+
+	delete(s.branchGraphs, branch)
+}
+
+func (s *Store) getNodesByBlobLocked(blobHash string) []Node {
+	rows, err := s.db.Query(`SELECT symbol_id, kind, name, file_path, start_line, end_line, signature, docstring, exported
+		FROM nodes WHERE blob_hash = ?`, blobHash)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var nodes []Node
+	for rows.Next() {
+		var n Node
+		n.BlobHash = blobHash
+		if err := rows.Scan(&n.SymbolID, &n.Kind, &n.Name, &n.FilePath, &n.StartLine, &n.EndLine, &n.Signature, &n.Docstring, &n.Exported); err == nil {
+			nodes = append(nodes, n)
 		}
 	}
+	return nodes
 }
 
 func (s *Store) getBranchNodesLocked(branch string) []Node {
-	manifest, ok := s.manifests[branch]
-	if !ok {
+	if err := s.ensureDB(); err != nil {
 		return nil
 	}
 
+	query := `SELECT n.blob_hash, n.symbol_id, n.kind, n.name, n.file_path, n.start_line, n.end_line, n.signature, n.docstring, n.exported
+		FROM nodes n
+		JOIN file_manifest m ON n.blob_hash = m.blob_hash
+		WHERE m.branch_name = ?
+		ORDER BY n.file_path, n.start_line`
+
+	rows, err := s.db.Query(query, branch)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
 	var results []Node
-	for _, hash := range manifest {
-		if nodeList, ok := s.nodes[hash]; ok {
-			results = append(results, nodeList...)
+	for rows.Next() {
+		var n Node
+		if err := rows.Scan(&n.BlobHash, &n.SymbolID, &n.Kind, &n.Name, &n.FilePath, &n.StartLine, &n.EndLine, &n.Signature, &n.Docstring, &n.Exported); err == nil {
+			results = append(results, n)
 		}
 	}
 	return results
 }
 
 func (s *Store) getBranchEdgesLocked(branch string) []Edge {
-	manifest, ok := s.manifests[branch]
-	if !ok {
+	if err := s.ensureDB(); err != nil {
 		return nil
 	}
 
+	query := `SELECT e.blob_hash, e.source_symbol, e.target_symbol, e.relation, e.file_path, e.line
+		FROM edges e
+		JOIN file_manifest m ON e.blob_hash = m.blob_hash
+		WHERE m.branch_name = ?`
+
+	rows, err := s.db.Query(query, branch)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
 	var results []Edge
-	for _, hash := range manifest {
-		if edgeList, ok := s.edges[hash]; ok {
-			results = append(results, edgeList...)
+	for rows.Next() {
+		var e Edge
+		if err := rows.Scan(&e.BlobHash, &e.SourceSymbol, &e.TargetSymbol, &e.Relation, &e.FilePath, &e.Line); err == nil {
+			results = append(results, e)
 		}
 	}
 	return results
@@ -450,6 +737,7 @@ func (s *Store) getOrBuildFTS(branch string) *FTSIndex {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
 		return fts
 	}
@@ -459,6 +747,7 @@ func (s *Store) getOrBuildFTS(branch string) *FTSIndex {
 	for _, n := range nodes {
 		fts.IndexNode(n)
 	}
+
 	s.ftsIndexes[branch] = fts
 	return fts
 }
@@ -473,6 +762,7 @@ func (s *Store) getOrBuildGraph(branch string) *branchGraph {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if bg, ok := s.branchGraphs[branch]; ok && bg != nil {
 		return bg
 	}
@@ -480,11 +770,12 @@ func (s *Store) getOrBuildGraph(branch string) *branchGraph {
 	nodes := s.getBranchNodesLocked(branch)
 	edges := s.getBranchEdgesLocked(branch)
 	bg := buildBranchGraph(nodes, edges)
+
 	s.branchGraphs[branch] = bg
 	return bg
 }
 
-// GetBranchNodes returns all active AST nodes on a given branch.
+// GetBranchNodes returns all indexed AST nodes on the given branch.
 func (s *Store) GetBranchNodes(branch string) []Node {
 	if branch == "" {
 		branch = s.ActiveBranch()
@@ -494,7 +785,7 @@ func (s *Store) GetBranchNodes(branch string) []Node {
 	return s.getBranchNodesLocked(branch)
 }
 
-// GetBranchEdges returns all active relationship edges on a given branch.
+// GetBranchEdges returns all relationship edges on the given branch.
 func (s *Store) GetBranchEdges(branch string) []Edge {
 	if branch == "" {
 		branch = s.ActiveBranch()
@@ -816,12 +1107,12 @@ func (s *Store) DiffBranches(baseBranch, targetBranch string) *BranchDiff {
 	}
 }
 
-// ExportDuckDBSchema returns the standard DuckDB SQL DDL schema.
+// ExportDuckDBSchema returns the standard SQL DDL schema.
 func (s *Store) ExportDuckDBSchema() string {
 	return `
--- DuckDB Code Graph Schema
+-- Code Graph Relational Schema
 CREATE TABLE IF NOT EXISTS branches (
-    branch_name VARCHAR PRIMARY KEY,
+    name VARCHAR PRIMARY KEY,
     head_commit VARCHAR,
     updated_at TIMESTAMP
 );
@@ -854,7 +1145,7 @@ CREATE TABLE IF NOT EXISTS edges (
     relation VARCHAR,
     file_path VARCHAR,
     line INTEGER,
-    PRIMARY KEY (blob_hash, source_symbol, target_symbol, relation)
+    PRIMARY KEY (blob_hash, source_symbol, target_symbol, relation, line)
 );
 `
 }

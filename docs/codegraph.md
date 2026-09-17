@@ -1,13 +1,13 @@
 # Repository Code Graph (`codegraph`)
 
-LocalHarness includes a built-in semantic AST **Code Graph** system inspired by GitLab Orbit and Sourcegraph SCIP. It indexes code symbols, definitions, type hierarchies, and cross-file call relationships into a per-project DuckDB-compatible database.
+LocalHarness includes a built-in semantic AST **Code Graph** system synthesizing **GitLab Orbit**'s Git content-addressed storage with **Google Code Search (`cs`)**'s dual lexical/semantic retrieval. It indexes code symbols, definitions, type hierarchies, and cross-file call relationships into an embedded pure-Go SQLite database.
 
 ## Key Highlights
 
-- **Embedded DuckDB Storage**: Saved at `~/.divmora/localharness/knowledge/<project-uuid>/codegraph.duckdb`.
+- **Embedded Pure-Go SQLite Storage**: Saved at `~/.divmora/localharness/knowledge/<project-uuid>/codegraph.db` with WAL mode and memory-mapping. Zero CGO dependencies, cross-compiling cleanly across Darwin, Linux, and Windows. Automatically migrates legacy JSON snapshots.
 - **Content-Addressed (Git-style) De-duplication**: Code symbols and edges are indexed by file content SHA-256 (`blob_hash`). Unchanged files across branches take 0 ms to index and 0 extra bytes on disk.
 - **Branch-Aware Manifests**: Tracks git branches independently via `file_manifest`, allowing instant branch switching and cross-branch graph diffs (`DiffBranches`).
-- **Live Incremental Freshness**: Automatically re-indexes modified files on `write_to_file` and `replace_file_content` without full rescans.
+- **Live Incremental Freshness**: Automatically re-indexes modified files on `write_to_file` and `replace_file_content` without full rescans (<3ms single-file transaction).
 - **Multi-Language Support**: Built-in parsers for Go (`go/ast`), Python, TypeScript/JavaScript, Rust, and Protobuf.
 
 ---

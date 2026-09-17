@@ -3,6 +3,7 @@ package codegraph
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 )
@@ -43,7 +44,15 @@ func (m *Manager) GetStore(projectUUID string) (*Store, error) {
 		return store, nil
 	}
 
-	dbPath := filepath.Join(m.knowledgeDir, projectUUID, "codegraph.duckdb")
+	sqlitePath := filepath.Join(m.knowledgeDir, projectUUID, "codegraph.db")
+	legacyPath := filepath.Join(m.knowledgeDir, projectUUID, "codegraph.duckdb")
+	dbPath := sqlitePath
+	if _, err := os.Stat(sqlitePath); os.IsNotExist(err) {
+		if _, err := os.Stat(legacyPath); err == nil {
+			dbPath = legacyPath
+		}
+	}
+
 	store := NewStore(dbPath)
 	if err := store.Load(); err != nil {
 		return nil, fmt.Errorf("load codegraph store for project %s: %w", projectUUID, err)
@@ -120,4 +129,14 @@ func (m *Manager) RemoveFile(ctx context.Context, wsPath, relPath string) error 
 	}
 
 	return idx.RemoveFile(ctx, relPath, "")
+}
+
+// Close closes all managed stores.
+func (m *Manager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, store := range m.stores {
+		_ = store.Close()
+	}
+	return nil
 }
