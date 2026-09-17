@@ -69,6 +69,22 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Ensure LLM response usage is accumulated once per generation rather than multiplied by (N+1) across individual tool steps.
 - [ ] **TaskManager Context Cancellation During `waitMs` Window** (#47)
   - Observe `ctx.Done()` during initial task wait window and default empty `cwd` safely to the workspace.
+- [ ] **Deterministic Tool Call Dispatch in OpenAI Streaming Parser** (#48)
+  - Sort tool call indices numerically before dispatch to prevent Go map iteration from randomizing tool execution order.
+- [ ] **Windows Ripgrep Drive Letter Path Parsing** (#49)
+  - Properly parse Windows paths containing drive letters (`C:\...`) in `grep_search` to prevent corrupted filenames and zeroed line numbers.
+- [ ] **Persistent Terminal Foreground Interrupt on Timeout/Cancel** (#50)
+  - Send `SIGINT` / `Ctrl+C` to persistent terminals on command timeout or cancellation to prevent background commands from wedging the terminal session.
+- [ ] **Conversation Step Writer Lock Inversion Deadlock Fix** (#51)
+  - Avoid holding `Conversation.mu` during blocking sends in `Flush()` to eliminate mutual deadlocks when the step queue is full.
+- [ ] **Thread-Safe Desktop Driver Lazy Initialization** (#52)
+  - Guard `globalDesktopDriver` initialization with `sync.Once` to eliminate concurrent data races across subagents.
+- [ ] **Subagent Isolated Environment Variables Without `os.Setenv`** (#53)
+  - Pass subagent environment variables to child process descriptors rather than mutating process-wide state via `os.Setenv`.
+- [ ] **Server-Side Request Forgery (SSRF) Protection in `read_url_content`** (#54)
+  - Block internal, private, loopback, and cloud metadata IPs (`169.254.169.254`, `metadata.google.internal`) in web tools.
+- [ ] **Heuristic Binary File Classification in `view_file`** (#55)
+  - Replace naive `http.DetectContentType` with NUL byte detection and source extension matching to prevent false binary classifications on code files.
 - [ ] **Cross-Platform Shell Resolver for Windows**
   - Detect availability of `bash`, and gracefully fallback to `powershell.exe`, `pwsh`, or `cmd.exe` in `run_command` and `task_manager`, preventing execution failures on Windows environments where Git Bash is not in `%PATH%`.
 - [ ] **URL & Domain Allowlist Policy Engine**
