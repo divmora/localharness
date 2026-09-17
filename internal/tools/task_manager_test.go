@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"sync"
@@ -73,6 +74,33 @@ func TestTaskManagerStartBackgroundWithWait(t *testing.T) {
 	snap, _ := tm.GetTaskStatus(taskID)
 	if snap.Status != TaskRunning {
 		t.Errorf("expected running, got %q", snap.Status)
+	}
+}
+
+func TestTaskManagerStartBackground_ContextCancelDuringWait(t *testing.T) {
+	tm := NewTaskManager(testLogger(), 5)
+	defer tm.Shutdown()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel context after 50ms while StartBackground is waiting with 10s waitMs
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 10000, nil)
+	duration := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error on canceled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if duration >= 2*time.Second {
+		t.Errorf("StartBackground took %v; should have returned immediately upon cancellation", duration)
 	}
 }
 

@@ -222,6 +222,8 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 		defer timer.Stop()
 
 		select {
+		case <-ctx.Done():
+			return taskID, output.Last(recentOutputSize), ctx.Err()
 		case <-task.done:
 			// Task completed within wait window
 		case <-timer.C:

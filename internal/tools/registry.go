@@ -120,6 +120,23 @@ func (r *Registry) ValidatePath(path string) (string, error) {
 	return r.wsMgr.ValidatePath(path)
 }
 
+// Workspaces returns the list of configured workspace directories.
+func (r *Registry) Workspaces() []string {
+	if r.wsMgr == nil {
+		return nil
+	}
+	return r.wsMgr.Workspaces()
+}
+
+// PrimaryWorkspace returns the first configured workspace directory, or empty string if none.
+func (r *Registry) PrimaryWorkspace() string {
+	ws := r.Workspaces()
+	if len(ws) > 0 {
+		return ws[0]
+	}
+	return ""
+}
+
 // Logger returns the registry's logger.
 func (r *Registry) Logger() *slog.Logger {
 	return r.logger

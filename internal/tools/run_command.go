@@ -72,7 +72,10 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 				WithComponent("run_command")
 		}
 		cwd = validCwd
+	} else if primary := r.PrimaryWorkspace(); primary != "" {
+		cwd = primary
 	}
+	rc.Cwd = cwd
 
 	// ── Persistent terminal mode ──
 	if rc.Persistent {

@@ -1005,6 +1005,40 @@ func TestRunCommand(t *testing.T) {
 	}
 }
 
+func TestRunCommand_DefaultCwdToPrimaryWorkspace(t *testing.T) {
+	cfg := &pb.BuiltinToolsConfig{RunCommand: true}
+	reg, wsDir := testRegistryWithConfig(t, cfg)
+	ctx := context.Background()
+
+	// Synchronous command with omitted cwd
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_RunCommand{
+			RunCommand: &pb.ActionRunCommand{
+				Command: "pwd",
+				Cwd:     "", // Omitted cwd
+			},
+		},
+	}
+
+	err := reg.Execute(ctx, "run_command", step)
+	if err != nil {
+		t.Fatalf("run_command failed: %v", err)
+	}
+
+	rc := step.GetRunCommand()
+	if rc.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", rc.ExitCode)
+	}
+	expectedDir, _ := filepath.EvalSymlinks(wsDir)
+	actualDir, _ := filepath.EvalSymlinks(strings.TrimSpace(rc.Stdout))
+	if actualDir != expectedDir {
+		t.Errorf("expected executed cwd %q, got %q", expectedDir, actualDir)
+	}
+	if rc.Cwd != wsDir {
+		t.Errorf("expected rc.Cwd to default to %q, got %q", wsDir, rc.Cwd)
+	}
+}
+
 func TestRunCommandMissingCommand(t *testing.T) {
 	cfg := &pb.BuiltinToolsConfig{RunCommand: true}
 	reg, _ := testRegistryWithConfig(t, cfg)
