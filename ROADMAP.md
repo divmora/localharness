@@ -57,6 +57,18 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 4. Developer Experience & Security
 
+- [ ] **General-Purpose Agent Access Modes (`ACCESS_MODE_WORKSPACE`, `ACCESS_MODE_SYSTEM`, `ACCESS_MODE_UNRESTRICTED`)** (#42)
+  - Add first-class `AccessMode` enum to proto, workspace manager, and engine to enable general-purpose OS administration, devops, and desktop automation alongside sandboxed project agents.
+- [ ] **Isolate Turn Cancellation to Current Turn Context** (#43)
+  - Ensure client `Cancel` aborts only the active turn without destroying the WebSocket session or killing background workers.
+- [ ] **Disconnect Cleanup Deadlock Prevention & Resource Teardown** (#44)
+  - Prevent 5-minute cleanup deadlocks when clients disconnect while awaiting user prompts; ensure clean closure of SQLite stores.
+- [ ] **Multi-Chunk Replacement Line-Shift Offset Adjustment** (#45)
+  - Add line delta tracking or bottom-to-top chunk ordering in `replace_file_content` to prevent line shifting corruption across sequential chunks.
+- [ ] **Turn Token Usage Deduplication Across Parallel Tool Executions** (#46)
+  - Ensure LLM response usage is accumulated once per generation rather than multiplied by (N+1) across individual tool steps.
+- [ ] **TaskManager Context Cancellation During `waitMs` Window** (#47)
+  - Observe `ctx.Done()` during initial task wait window and default empty `cwd` safely to the workspace.
 - [ ] **Cross-Platform Shell Resolver for Windows**
   - Detect availability of `bash`, and gracefully fallback to `powershell.exe`, `pwsh`, or `cmd.exe` in `run_command` and `task_manager`, preventing execution failures on Windows environments where Git Bash is not in `%PATH%`.
 - [ ] **URL & Domain Allowlist Policy Engine**
