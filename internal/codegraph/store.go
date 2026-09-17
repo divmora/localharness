@@ -23,6 +23,102 @@ type Store struct {
 	manifests map[string]map[string]string // [branch_name][file_path] -> blob_hash
 	nodes     map[string][]Node            // keyed by blob_hash
 	edges     map[string][]Edge            // keyed by blob_hash
+
+	// In-memory caches per branch
+	ftsIndexes   map[string]*FTSIndex    // [branch_name] -> cached FTS index
+	branchGraphs map[string]*branchGraph // [branch_name] -> indexed nodes and edges
+}
+
+// branchGraph indexes nodes and edges for O(1) lookups on a branch.
+type branchGraph struct {
+	nodeByID        map[string]Node
+	nodesByName     map[string][]Node
+	nodesByFile     map[string][]Node
+	callersByTarget map[string][]Edge // incoming call edges (Relation == "calls")
+	calleesBySource map[string][]Edge // outgoing call edges (Relation == "calls")
+	refsByTarget    map[string][]Edge // all referencing edges (calls, implements, imports, etc.)
+	implsByTarget   map[string][]Edge // implements edges (Relation == "implements")
+}
+
+func (bg *branchGraph) lookupNode(symbol string, fallbackFilePath string) Node {
+	if n, ok := bg.nodeByID[symbol]; ok {
+		return n
+	}
+	if list := bg.nodesByName[symbol]; len(list) > 0 {
+		return list[0]
+	}
+	return Node{
+		SymbolID: symbol,
+		Name:     symbol,
+		FilePath: fallbackFilePath,
+	}
+}
+
+// symbolLookupKeys returns all suffix keys under which a symbol should be indexed
+// for O(1) matching of exact, ":" and "." suffixes.
+func symbolLookupKeys(sym string) []string {
+	sym = strings.TrimSpace(sym)
+	if sym == "" {
+		return nil
+	}
+	keys := []string{sym}
+	seen := map[string]bool{sym: true}
+
+	for i := 0; i < len(sym); i++ {
+		if (sym[i] == ':' || sym[i] == '.') && i+1 < len(sym) {
+			k := sym[i+1:]
+			if !seen[k] {
+				seen[k] = true
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
+}
+
+func buildBranchGraph(nodes []Node, edges []Edge) *branchGraph {
+	bg := &branchGraph{
+		nodeByID:        make(map[string]Node, len(nodes)),
+		nodesByName:     make(map[string][]Node, len(nodes)),
+		nodesByFile:     make(map[string][]Node),
+		callersByTarget: make(map[string][]Edge),
+		calleesBySource: make(map[string][]Edge),
+		refsByTarget:    make(map[string][]Edge),
+		implsByTarget:   make(map[string][]Edge),
+	}
+
+	for _, n := range nodes {
+		bg.nodeByID[n.SymbolID] = n
+		bg.nodesByName[n.Name] = append(bg.nodesByName[n.Name], n)
+		if n.FilePath != "" {
+			bg.nodesByFile[n.FilePath] = append(bg.nodesByFile[n.FilePath], n)
+		}
+	}
+
+	for _, e := range edges {
+		// Index for FindReferences (any relation)
+		for _, k := range symbolLookupKeys(e.TargetSymbol) {
+			bg.refsByTarget[k] = append(bg.refsByTarget[k], e)
+		}
+
+		// Index for GetCallHierarchy & GetImpactRadius
+		if e.Relation == "calls" {
+			for _, k := range symbolLookupKeys(e.TargetSymbol) {
+				bg.callersByTarget[k] = append(bg.callersByTarget[k], e)
+			}
+			for _, k := range symbolLookupKeys(e.SourceSymbol) {
+				bg.calleesBySource[k] = append(bg.calleesBySource[k], e)
+			}
+		}
+
+		if e.Relation == "implements" {
+			for _, k := range symbolLookupKeys(e.TargetSymbol) {
+				bg.implsByTarget[k] = append(bg.implsByTarget[k], e)
+			}
+		}
+	}
+
+	return bg
 }
 
 // diskSnapshot is the persisted JSON structure inside codegraph.duckdb
@@ -45,6 +141,8 @@ func NewStore(dbPath string) *Store {
 		manifests:    make(map[string]map[string]string),
 		nodes:        make(map[string][]Node),
 		edges:        make(map[string][]Edge),
+		ftsIndexes:   make(map[string]*FTSIndex),
+		branchGraphs: make(map[string]*branchGraph),
 	}
 }
 
@@ -92,6 +190,9 @@ func (s *Store) Load() error {
 	if s.edges == nil {
 		s.edges = make(map[string][]Edge)
 	}
+
+	s.ftsIndexes = make(map[string]*FTSIndex)
+	s.branchGraphs = make(map[string]*branchGraph)
 
 	return nil
 }
@@ -204,6 +305,8 @@ func (s *Store) AddFile(branch, filePath, blobHash string, nodes []Node, edges [
 		s.manifests[branch] = make(map[string]string)
 	}
 
+	oldHash, hadOld := s.manifests[branch][filePath]
+
 	// Update manifest
 	s.manifests[branch][filePath] = blobHash
 
@@ -213,6 +316,31 @@ func (s *Store) AddFile(branch, filePath, blobHash string, nodes []Node, edges [
 	}
 	if _, ok := s.edges[blobHash]; !ok && len(edges) > 0 {
 		s.edges[blobHash] = edges
+	}
+
+	// Incremental FTS update
+	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
+		if hadOld && oldHash != blobHash {
+			if oldNodes, ok := s.nodes[oldHash]; ok {
+				for _, n := range oldNodes {
+					fts.RemoveNode(n.SymbolID)
+				}
+			}
+		}
+		if !hadOld || oldHash != blobHash {
+			newNodes := nodes
+			if len(newNodes) == 0 {
+				newNodes = s.nodes[blobHash]
+			}
+			for _, n := range newNodes {
+				fts.IndexNode(n)
+			}
+		}
+	}
+
+	// Invalidate branchGraph cache on content change
+	if !hadOld || oldHash != blobHash {
+		delete(s.branchGraphs, branch)
 	}
 
 	s.branches[branch].UpdatedAt = time.Now().UTC()
@@ -227,7 +355,17 @@ func (s *Store) RemoveFile(branch, filePath string) {
 	defer s.mu.Unlock()
 
 	if m, ok := s.manifests[branch]; ok {
-		delete(m, filePath)
+		if oldHash, ok := m[filePath]; ok {
+			if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
+				if oldNodes, ok := s.nodes[oldHash]; ok {
+					for _, n := range oldNodes {
+						fts.RemoveNode(n.SymbolID)
+					}
+				}
+			}
+			delete(m, filePath)
+			delete(s.branchGraphs, branch)
+		}
 	}
 	if b, ok := s.branches[branch]; ok {
 		b.UpdatedAt = time.Now().UTC()
@@ -247,21 +385,32 @@ func (s *Store) PruneDeletedFiles(branch string, activeFiles map[string]bool) {
 		return
 	}
 
-	for path := range m {
+	fts := s.ftsIndexes[branch]
+	pruned := false
+
+	for path, hash := range m {
 		if !activeFiles[path] {
+			if fts != nil {
+				if oldNodes, ok := s.nodes[hash]; ok {
+					for _, n := range oldNodes {
+						fts.RemoveNode(n.SymbolID)
+					}
+				}
+			}
 			delete(m, path)
+			pruned = true
+		}
+	}
+
+	if pruned {
+		delete(s.branchGraphs, branch)
+		if b, ok := s.branches[branch]; ok {
+			b.UpdatedAt = time.Now().UTC()
 		}
 	}
 }
 
-// GetBranchNodes returns all active AST nodes on a given branch.
-func (s *Store) GetBranchNodes(branch string) []Node {
-	if branch == "" {
-		branch = s.ActiveBranch()
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+func (s *Store) getBranchNodesLocked(branch string) []Node {
 	manifest, ok := s.manifests[branch]
 	if !ok {
 		return nil
@@ -276,14 +425,7 @@ func (s *Store) GetBranchNodes(branch string) []Node {
 	return results
 }
 
-// GetBranchEdges returns all active relationship edges on a given branch.
-func (s *Store) GetBranchEdges(branch string) []Edge {
-	if branch == "" {
-		branch = s.ActiveBranch()
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+func (s *Store) getBranchEdgesLocked(branch string) []Edge {
 	manifest, ok := s.manifests[branch]
 	if !ok {
 		return nil
@@ -298,6 +440,70 @@ func (s *Store) GetBranchEdges(branch string) []Edge {
 	return results
 }
 
+func (s *Store) getOrBuildFTS(branch string) *FTSIndex {
+	s.mu.RLock()
+	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
+		s.mu.RUnlock()
+		return fts
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
+		return fts
+	}
+
+	fts := NewFTSIndex()
+	nodes := s.getBranchNodesLocked(branch)
+	for _, n := range nodes {
+		fts.IndexNode(n)
+	}
+	s.ftsIndexes[branch] = fts
+	return fts
+}
+
+func (s *Store) getOrBuildGraph(branch string) *branchGraph {
+	s.mu.RLock()
+	if bg, ok := s.branchGraphs[branch]; ok && bg != nil {
+		s.mu.RUnlock()
+		return bg
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if bg, ok := s.branchGraphs[branch]; ok && bg != nil {
+		return bg
+	}
+
+	nodes := s.getBranchNodesLocked(branch)
+	edges := s.getBranchEdgesLocked(branch)
+	bg := buildBranchGraph(nodes, edges)
+	s.branchGraphs[branch] = bg
+	return bg
+}
+
+// GetBranchNodes returns all active AST nodes on a given branch.
+func (s *Store) GetBranchNodes(branch string) []Node {
+	if branch == "" {
+		branch = s.ActiveBranch()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.getBranchNodesLocked(branch)
+}
+
+// GetBranchEdges returns all active relationship edges on a given branch.
+func (s *Store) GetBranchEdges(branch string) []Edge {
+	if branch == "" {
+		branch = s.ActiveBranch()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.getBranchEdgesLocked(branch)
+}
+
 // SearchSymbols finds symbols matching query pattern and optional kind filter using BM25 FTS ranking.
 func (s *Store) SearchSymbols(branch, query, kind string, limit int) []Node {
 	scored := s.SearchSymbolsFTS(branch, query, kind, limit)
@@ -310,7 +516,9 @@ func (s *Store) SearchSymbols(branch, query, kind string, limit int) []Node {
 
 // SearchSymbolsFTS finds and ranks symbols matching query using full-text search with BM25 scoring.
 func (s *Store) SearchSymbolsFTS(branch, query, kind string, limit int) []ScoredNode {
-	nodes := s.GetBranchNodes(branch)
+	if branch == "" {
+		branch = s.ActiveBranch()
+	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -318,18 +526,12 @@ func (s *Store) SearchSymbolsFTS(branch, query, kind string, limit int) []Scored
 	query = strings.TrimSpace(query)
 	kind = strings.ToLower(strings.TrimSpace(kind))
 
-	if len(nodes) == 0 {
-		return nil
-	}
-
-	// Build in-memory FTS index for the branch
-	fts := NewFTSIndex()
-	for _, n := range nodes {
-		fts.IndexNode(n)
-	}
-
 	// If empty query, return top nodes alphabetically
 	if query == "" {
+		nodes := s.GetBranchNodes(branch)
+		if len(nodes) == 0 {
+			return nil
+		}
 		var results []ScoredNode
 		for _, n := range nodes {
 			if kind != "" && strings.ToLower(n.Kind) != kind {
@@ -346,25 +548,36 @@ func (s *Store) SearchSymbolsFTS(branch, query, kind string, limit int) []Scored
 		return results
 	}
 
+	fts := s.getOrBuildFTS(branch)
 	return fts.Search(query, kind, limit)
 }
 
 // FindReferences locates all callers and usages referencing targetSymbol on branch.
 func (s *Store) FindReferences(branch, targetSymbol string) []Edge {
-	edges := s.GetBranchEdges(branch)
-	target := strings.TrimSpace(targetSymbol)
-
-	var refs []Edge
-	for _, e := range edges {
-		if e.TargetSymbol == target || strings.HasSuffix(e.TargetSymbol, ":"+target) || strings.HasSuffix(e.TargetSymbol, "."+target) {
-			refs = append(refs, e)
-		}
+	if branch == "" {
+		branch = s.ActiveBranch()
 	}
-	return refs
+	target := strings.TrimSpace(targetSymbol)
+	if target == "" {
+		return nil
+	}
+
+	bg := s.getOrBuildGraph(branch)
+	refs := bg.refsByTarget[target]
+	if len(refs) == 0 {
+		return nil
+	}
+
+	result := make([]Edge, len(refs))
+	copy(result, refs)
+	return result
 }
 
 // GetCallHierarchy traverses incoming callers or outgoing callees up to maxDepth.
 func (s *Store) GetCallHierarchy(branch, symbolID, direction string, maxDepth int) *CallHierarchy {
+	if branch == "" {
+		branch = s.ActiveBranch()
+	}
 	if maxDepth <= 0 {
 		maxDepth = 3
 	}
@@ -372,15 +585,7 @@ func (s *Store) GetCallHierarchy(branch, symbolID, direction string, maxDepth in
 		direction = "incoming"
 	}
 
-	nodes := s.GetBranchNodes(branch)
-	edges := s.GetBranchEdges(branch)
-
-	// Build node lookup
-	nodeMap := make(map[string]Node)
-	for _, n := range nodes {
-		nodeMap[n.SymbolID] = n
-		nodeMap[n.Name] = n
-	}
+	bg := s.getOrBuildGraph(branch)
 
 	hierarchy := &CallHierarchy{
 		RootSymbol: symbolID,
@@ -398,47 +603,28 @@ func (s *Store) GetCallHierarchy(branch, symbolID, direction string, maxDepth in
 		visited[curr] = true
 
 		if direction == "incoming" {
-			// Find who calls curr
-			for _, e := range edges {
-				if e.Relation != "calls" {
-					continue
-				}
-				if e.TargetSymbol == curr || strings.HasSuffix(e.TargetSymbol, ":"+curr) || strings.HasSuffix(e.TargetSymbol, "."+curr) {
-					callerNode := nodeMap[e.SourceSymbol]
-					if callerNode.SymbolID == "" {
-						callerNode = Node{
-							SymbolID: e.SourceSymbol,
-							Name:     e.SourceSymbol,
-							FilePath: e.FilePath,
-						}
-					}
-					hierarchy.Calls = append(hierarchy.Calls, CallItem{
-						CallerNode:   callerNode,
-						CalleeSymbol: e.TargetSymbol,
-						FilePath:     e.FilePath,
-						Line:         e.Line,
-						Depth:        depth,
-					})
-					traverse(e.SourceSymbol, depth+1)
-				}
+			for _, e := range bg.callersByTarget[curr] {
+				callerNode := bg.lookupNode(e.SourceSymbol, e.FilePath)
+				hierarchy.Calls = append(hierarchy.Calls, CallItem{
+					CallerNode:   callerNode,
+					CalleeSymbol: e.TargetSymbol,
+					FilePath:     e.FilePath,
+					Line:         e.Line,
+					Depth:        depth,
+				})
+				traverse(e.SourceSymbol, depth+1)
 			}
 		} else {
-			// Find what curr calls
-			for _, e := range edges {
-				if e.Relation != "calls" {
-					continue
-				}
-				if e.SourceSymbol == curr || strings.HasSuffix(e.SourceSymbol, ":"+curr) {
-					callerNode := nodeMap[e.SourceSymbol]
-					hierarchy.Calls = append(hierarchy.Calls, CallItem{
-						CallerNode:   callerNode,
-						CalleeSymbol: e.TargetSymbol,
-						FilePath:     e.FilePath,
-						Line:         e.Line,
-						Depth:        depth,
-					})
-					traverse(e.TargetSymbol, depth+1)
-				}
+			for _, e := range bg.calleesBySource[curr] {
+				callerNode := bg.lookupNode(e.SourceSymbol, e.FilePath)
+				hierarchy.Calls = append(hierarchy.Calls, CallItem{
+					CallerNode:   callerNode,
+					CalleeSymbol: e.TargetSymbol,
+					FilePath:     e.FilePath,
+					Line:         e.Line,
+					Depth:        depth,
+				})
+				traverse(e.TargetSymbol, depth+1)
 			}
 		}
 	}
@@ -449,17 +635,14 @@ func (s *Store) GetCallHierarchy(branch, symbolID, direction string, maxDepth in
 
 // GetImpactRadius calculates all downstream callers, implementations, and affected files.
 func (s *Store) GetImpactRadius(branch, symbolOrFile string, maxDepth int) *ImpactResult {
+	if branch == "" {
+		branch = s.ActiveBranch()
+	}
 	if maxDepth <= 0 {
 		maxDepth = 5
 	}
 
-	nodes := s.GetBranchNodes(branch)
-	edges := s.GetBranchEdges(branch)
-
-	nodeMap := make(map[string]Node)
-	for _, n := range nodes {
-		nodeMap[n.SymbolID] = n
-	}
+	bg := s.getOrBuildGraph(branch)
 
 	affectedFilesMap := make(map[string]bool)
 	callersMap := make(map[string]Node)
@@ -467,17 +650,30 @@ func (s *Store) GetImpactRadius(branch, symbolOrFile string, maxDepth int) *Impa
 
 	// Determine starting symbols
 	var startingSymbols []string
-	if strings.Contains(symbolOrFile, "/") && (strings.HasSuffix(symbolOrFile, ".go") || strings.HasSuffix(symbolOrFile, ".py") || strings.HasSuffix(symbolOrFile, ".ts")) {
+	if strings.HasSuffix(symbolOrFile, ".go") || strings.HasSuffix(symbolOrFile, ".py") || strings.HasSuffix(symbolOrFile, ".ts") || strings.Contains(symbolOrFile, "/") {
 		affectedFilesMap[symbolOrFile] = true
-		for _, n := range nodes {
-			if n.FilePath == symbolOrFile {
+		if nodes, ok := bg.nodesByFile[symbolOrFile]; ok {
+			for _, n := range nodes {
 				startingSymbols = append(startingSymbols, n.SymbolID)
+			}
+		} else {
+			// Suffix match for relative file paths e.g. "user.go" matching "pkg/user.go"
+			for file, nodes := range bg.nodesByFile {
+				if strings.HasSuffix(file, "/"+symbolOrFile) {
+					affectedFilesMap[file] = true
+					for _, n := range nodes {
+						startingSymbols = append(startingSymbols, n.SymbolID)
+					}
+				}
 			}
 		}
 	} else {
 		startingSymbols = append(startingSymbols, symbolOrFile)
-		for _, n := range nodes {
-			if n.SymbolID == symbolOrFile || n.Name == symbolOrFile {
+		if n, ok := bg.nodeByID[symbolOrFile]; ok && n.FilePath != "" {
+			affectedFilesMap[n.FilePath] = true
+		}
+		for _, n := range bg.nodesByName[symbolOrFile] {
+			if n.FilePath != "" {
 				affectedFilesMap[n.FilePath] = true
 			}
 		}
@@ -492,28 +688,26 @@ func (s *Store) GetImpactRadius(branch, symbolOrFile string, maxDepth int) *Impa
 		}
 		visited[sym] = true
 
-		for _, e := range edges {
-			// Find callers
-			if e.Relation == "calls" && (e.TargetSymbol == sym || strings.HasSuffix(e.TargetSymbol, ":"+sym) || strings.HasSuffix(e.TargetSymbol, "."+sym)) {
-				affectedFilesMap[e.FilePath] = true
-				if n, ok := nodeMap[e.SourceSymbol]; ok {
-					callersMap[n.SymbolID] = n
-				} else {
-					callersMap[e.SourceSymbol] = Node{
-						SymbolID: e.SourceSymbol,
-						Name:     e.SourceSymbol,
-						FilePath: e.FilePath,
-					}
+		// Find callers
+		for _, e := range bg.callersByTarget[sym] {
+			affectedFilesMap[e.FilePath] = true
+			if n, ok := bg.nodeByID[e.SourceSymbol]; ok {
+				callersMap[n.SymbolID] = n
+			} else {
+				callersMap[e.SourceSymbol] = Node{
+					SymbolID: e.SourceSymbol,
+					Name:     e.SourceSymbol,
+					FilePath: e.FilePath,
 				}
-				traverse(e.SourceSymbol, depth+1)
 			}
+			traverse(e.SourceSymbol, depth+1)
+		}
 
-			// Find implementations
-			if e.Relation == "implements" && (e.TargetSymbol == sym || strings.HasSuffix(e.TargetSymbol, ":"+sym)) {
-				affectedFilesMap[e.FilePath] = true
-				if n, ok := nodeMap[e.SourceSymbol]; ok {
-					implMap[n.SymbolID] = n
-				}
+		// Find implementations
+		for _, e := range bg.implsByTarget[sym] {
+			affectedFilesMap[e.FilePath] = true
+			if n, ok := bg.nodeByID[e.SourceSymbol]; ok {
+				implMap[n.SymbolID] = n
 			}
 		}
 	}

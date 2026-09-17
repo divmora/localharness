@@ -72,6 +72,90 @@ func TestFTSIndex_NaturalLanguageDocstringSearch(t *testing.T) {
 	}
 }
 
+func TestFTSIndex_RemoveNode_AndIncrementalUpdate(t *testing.T) {
+	fts := NewFTSIndex()
+
+	nodeA := Node{
+		SymbolID:  "auth/token.go:GenerateToken",
+		Kind:      "function",
+		Name:      "GenerateToken",
+		FilePath:  "auth/token.go",
+		Signature: "func GenerateToken(userID string) string",
+		Docstring: "GenerateToken creates a cryptographic JWT signature with claims.",
+	}
+	nodeB := Node{
+		SymbolID:  "auth/token.go:VerifyToken",
+		Kind:      "function",
+		Name:      "VerifyToken",
+		FilePath:  "auth/token.go",
+		Signature: "func VerifyToken(token string) bool",
+		Docstring: "VerifyToken inspects token signature against public key.",
+	}
+
+	fts.IndexNode(nodeA)
+	fts.IndexNode(nodeB)
+
+	if fts.Len() != 2 {
+		t.Fatalf("expected 2 documents, got %d", fts.Len())
+	}
+	if !fts.HasNode("auth/token.go:GenerateToken") {
+		t.Fatal("expected HasNode to be true for GenerateToken")
+	}
+
+	// Verify initial search finds GenerateToken
+	res := fts.Search("cryptographic", "", 10)
+	if len(res) == 0 || res[0].Node.Name != "GenerateToken" {
+		t.Fatalf("expected search for 'cryptographic' to find GenerateToken, got %v", res)
+	}
+
+	// Remove GenerateToken
+	fts.RemoveNode("auth/token.go:GenerateToken")
+	if fts.Len() != 1 {
+		t.Fatalf("expected 1 document after removal, got %d", fts.Len())
+	}
+	if fts.HasNode("auth/token.go:GenerateToken") {
+		t.Fatal("expected HasNode to be false after removal")
+	}
+
+	// Search for removed node's unique term must return 0 results
+	resAfter := fts.Search("cryptographic", "", 10)
+	if len(resAfter) != 0 {
+		t.Fatalf("expected 0 results for removed term 'cryptographic', got %v", resAfter)
+	}
+
+	// Search for remaining node should still succeed
+	resRemaining := fts.Search("VerifyToken", "", 10)
+	if len(resRemaining) == 0 || resRemaining[0].Node.Name != "VerifyToken" {
+		t.Fatalf("expected search to still find VerifyToken, got %v", resRemaining)
+	}
+
+	// Test removing non-existent symbol is a safe no-op
+	fts.RemoveNode("nonexistent/symbol:DoSomething")
+	if fts.Len() != 1 {
+		t.Fatalf("expected docCount to remain 1 after removing nonexistent symbol, got %d", fts.Len())
+	}
+
+	// Test idempotent re-indexing: replace VerifyToken with updated docstring
+	updatedNodeB := Node{
+		SymbolID:  "auth/token.go:VerifyToken",
+		Kind:      "function",
+		Name:      "VerifyToken",
+		FilePath:  "auth/token.go",
+		Signature: "func VerifyToken(token string) bool",
+		Docstring: "VerifyToken validates quantum asymmetric signatures.",
+	}
+	fts.IndexNode(updatedNodeB)
+	if fts.Len() != 1 {
+		t.Fatalf("expected docCount to stay 1 after updating same symbol, got %d", fts.Len())
+	}
+
+	// New term 'quantum' should now match
+	resQuantum := fts.Search("quantum", "", 10)
+	if len(resQuantum) == 0 || resQuantum[0].Node.Name != "VerifyToken" {
+		t.Fatalf("expected search for 'quantum' to find updated VerifyToken, got %v", resQuantum)
+	}
+}
+
 func TestMultiLanguageParsing_Python(t *testing.T) {
 	pyCode := `
 class BaseService:
