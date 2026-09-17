@@ -63,8 +63,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Add line delta tracking or bottom-to-top chunk ordering in `replace_file_content` to prevent line shifting corruption across sequential chunks.
 - [ ] **TaskManager Context Cancellation During `waitMs` Window** (#47)
   - Observe `ctx.Done()` during initial task wait window and default empty `cwd` safely to the workspace.
-- [ ] **Deterministic Tool Call Dispatch in OpenAI Streaming Parser** (#48)
-  - Sort tool call indices numerically before dispatch to prevent Go map iteration from randomizing tool execution order.
 - [ ] **Windows Ripgrep Drive Letter Path Parsing** (#49)
   - Properly parse Windows paths containing drive letters (`C:\...`) in `grep_search` to prevent corrupted filenames and zeroed line numbers.
 - [ ] **Persistent Terminal Foreground Interrupt on Timeout/Cancel** (#50)

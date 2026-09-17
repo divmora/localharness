@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -658,8 +659,15 @@ func (o *OpenAIProvider) parseOpenAISSEStream(ctx context.Context, body io.Reade
 		finalChunk.FinishReason = "stop"
 	}
 
-	// Convert accumulated tool calls to the final list
-	for _, acc := range toolCallAccums {
+	// Convert accumulated tool calls to the final list in deterministic order (sorted by index)
+	indices := make([]int, 0, len(toolCallAccums))
+	for idx := range toolCallAccums {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	for _, idx := range indices {
+		acc := toolCallAccums[idx]
 		var args map[string]interface{}
 		argsStr := acc.ArgsJSON.String()
 		if err := json.Unmarshal([]byte(argsStr), &args); err != nil {

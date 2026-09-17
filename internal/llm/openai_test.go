@@ -137,3 +137,69 @@ func TestOpenAIWithModel(t *testing.T) {
 		t.Errorf("original provider ModelName changed to %q", p.ModelName())
 	}
 }
+
+func TestOpenAIStreaming_DeterministicToolCallOrder(t *testing.T) {
+	ssePayload := `data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_0","type":"function","function":{"name":"write_to_file","arguments":"{\"path\":\"a.txt\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_1","type":"function","function":{"name":"run_command","arguments":"{\"cmd\":\"cat a.txt\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"call_2","type":"function","function":{"name":"view_file","arguments":"{\"path\":\"b.txt\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{"tool_calls":[{"index":3,"id":"call_3","type":"function","function":{"name":"ask_question","arguments":"{\"question\":\"done?\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, ssePayload)
+	}))
+	defer server.Close()
+
+	logger := slog.Default()
+	p, err := NewOpenAIProvider(OpenAIConfig{
+		BaseURL:   server.URL,
+		ModelName: "test-model",
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider failed: %v", err)
+	}
+
+	expectedOrder := []string{"write_to_file", "run_command", "view_file", "ask_question"}
+
+	// Run multiple iterations to verify Go map iteration randomization never scrambles the order
+	for iter := 0; iter < 50; iter++ {
+		chunksCh, errCh := p.GenerateStream(context.Background(), &GenerateRequest{
+			Messages: []Message{{Role: "user", Content: "do work"}},
+		})
+
+		var lastChunk StreamChunk
+		for chunk := range chunksCh {
+			if chunk.Done {
+				lastChunk = chunk
+			}
+		}
+
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("iter %d: unexpected stream error: %v", iter, err)
+			}
+		default:
+		}
+
+		if len(lastChunk.ToolCalls) != len(expectedOrder) {
+			t.Fatalf("iter %d: expected %d tool calls, got %d", iter, len(expectedOrder), len(lastChunk.ToolCalls))
+		}
+
+		for i, tc := range lastChunk.ToolCalls {
+			if tc.Name != expectedOrder[i] {
+				t.Fatalf("iter %d: tool call at index %d was %q, want %q (order was randomized!)",
+					iter, i, tc.Name, expectedOrder[i])
+			}
+		}
+	}
+}
