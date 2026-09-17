@@ -2,6 +2,7 @@
 package errors
 
 import (
+	stderrors "errors"
 	"fmt"
 	"strconv"
 
@@ -146,6 +147,11 @@ func Wrap(err error, code ErrorCode, message string) *HarnessError {
 		Message: message,
 		Cause:   err,
 	}
+}
+
+// Is reports whether any error in err's tree matches target.
+func Is(err, target error) bool {
+	return stderrors.Is(err, target)
 }
 
 // IsErrorCode checks if an error is a HarnessError with a specific code.

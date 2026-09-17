@@ -36,7 +36,9 @@ type Session struct {
 	mu                     sync.Mutex // Protects writes to conn
 	engine                 *engine.Engine
 	conv                   *conversation.Conversation
-	cancel                 context.CancelFunc
+	cancel                 context.CancelFunc // Session context cancel function (for teardown)
+	currentTurnCancel      context.CancelFunc // Active turn context cancel function
+	turnCancelMu           sync.Mutex         // Protects currentTurnCancel
 	toolRegistry           *tools.Registry
 	mcpMgr                 *mcpbridge.Manager                     // MCP server bridge
 	pendingToolResults     map[string]chan *pb.ToolResult         // stepID → result channel
@@ -326,6 +328,12 @@ func (s *Session) handleAutoWake(ctx context.Context, notif tools.SystemMessage)
 // Waits for any in-flight handleUserMessage goroutines to complete their
 // post-run save (SetMessages + SaveAll) before doing final cleanup.
 func (s *Session) cleanup() {
+	s.turnCancelMu.Lock()
+	if s.currentTurnCancel != nil {
+		s.currentTurnCancel()
+	}
+	s.turnCancelMu.Unlock()
+
 	s.logger.Info("session cleanup: waiting for in-flight turns to complete")
 	s.turnWg.Wait()
 	s.logger.Info("session cleanup: all turns complete, saving state")
@@ -747,6 +755,20 @@ func (s *Session) handleUserMessage(ctx context.Context, msg *pb.UserMessage) {
 
 	defer s.turnWg.Done()
 
+	// Derive a turn-specific context so that cancellation aborts only this turn
+	// rather than terminating the entire session and WebSocket connection.
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	s.turnCancelMu.Lock()
+	s.currentTurnCancel = turnCancel
+	s.turnCancelMu.Unlock()
+
+	defer func() {
+		turnCancel()
+		s.turnCancelMu.Lock()
+		s.currentTurnCancel = nil
+		s.turnCancelMu.Unlock()
+	}()
+
 	// Reset auto-wake count on user messages so the user gets fresh auto-wake budget
 	if !strings.HasPrefix(msg.Content, "[System notification:") {
 		s.autoWakeCount = 0
@@ -784,9 +806,13 @@ func (s *Session) handleUserMessage(ctx context.Context, msg *pb.UserMessage) {
 		}
 		s.engine.SetSettingsChanges(changes)
 	}
-	if err := s.engine.RunWithContext(ctx, msg.Content, msg.Context); err != nil {
-		s.logger.Error("engine error", "error", err)
-		s.sendError("ENGINE_ERROR", err.Error(), false)
+	if err := s.engine.RunWithContext(turnCtx, msg.Content, msg.Context); err != nil {
+		if errors.Is(err, context.Canceled) {
+			s.logger.Info("turn cancelled by client")
+		} else {
+			s.logger.Error("engine error", "error", err)
+			s.sendError("ENGINE_ERROR", err.Error(), false)
+		}
 	}
 
 	// Sync engine history back to conversation
@@ -808,11 +834,17 @@ func (s *Session) handleUserMessage(ctx context.Context, msg *pb.UserMessage) {
 	}
 }
 
-// handleCancel aborts the current turn.
+// handleCancel aborts the current turn without terminating the WebSocket session.
 func (s *Session) handleCancel() {
-	if s.cancel != nil {
+	s.turnCancelMu.Lock()
+	turnCancel := s.currentTurnCancel
+	s.turnCancelMu.Unlock()
+
+	if turnCancel != nil {
 		s.logger.Info("cancelling current turn")
-		s.cancel()
+		turnCancel()
+	} else {
+		s.logger.Warn("cancel requested but no active turn is running")
 	}
 }
 

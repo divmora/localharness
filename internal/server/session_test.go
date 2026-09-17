@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -120,5 +122,72 @@ func TestMapLLMMessageToProto(t *testing.T) {
 	tr := pm3.ToolResult
 	if tr.CallId != "call-1" || tr.Name != "create_file" || tr.Content != `{"created": true}` || tr.IsError {
 		t.Errorf("unexpected tool result: %v", tr)
+	}
+}
+
+func TestHandleCancel_NoActiveTurn(t *testing.T) {
+	s := &Session{
+		logger: slog.Default(),
+	}
+	// Calling handleCancel with no active turn should not panic and should be a safe no-op
+	s.handleCancel()
+}
+
+func TestHandleCancel_IsolatesTurnCancellation(t *testing.T) {
+	sessionCtx, sessionCancel := context.WithCancel(context.Background())
+	defer sessionCancel()
+
+	s := &Session{
+		logger: slog.Default(),
+		cancel: sessionCancel,
+	}
+
+	turnCtx, turnCancel := context.WithCancel(sessionCtx)
+	s.turnCancelMu.Lock()
+	s.currentTurnCancel = turnCancel
+	s.turnCancelMu.Unlock()
+
+	// Verify both contexts are active
+	if turnCtx.Err() != nil {
+		t.Fatalf("turn context should not be cancelled initially")
+	}
+	if sessionCtx.Err() != nil {
+		t.Fatalf("session context should not be cancelled initially")
+	}
+
+	// Cancel current turn
+	s.handleCancel()
+
+	// Turn context must be cancelled
+	if turnCtx.Err() != context.Canceled {
+		t.Errorf("expected turn context to be cancelled, got %v", turnCtx.Err())
+	}
+
+	// Session context MUST remain alive
+	if sessionCtx.Err() != nil {
+		t.Errorf("session context must NOT be cancelled by handleCancel, got %v", sessionCtx.Err())
+	}
+}
+
+func TestCleanup_CancelsActiveTurn(t *testing.T) {
+	sessionCtx, sessionCancel := context.WithCancel(context.Background())
+	defer sessionCancel()
+
+	s := &Session{
+		logger: slog.Default(),
+		cancel: sessionCancel,
+	}
+
+	turnCtx, turnCancel := context.WithCancel(sessionCtx)
+	s.turnCancelMu.Lock()
+	s.currentTurnCancel = turnCancel
+	s.turnCancelMu.Unlock()
+
+	// Run cleanup
+	s.cleanup()
+
+	// Active turn must be cancelled by cleanup
+	if turnCtx.Err() != context.Canceled {
+		t.Errorf("expected turn context to be cancelled by cleanup, got %v", turnCtx.Err())
 	}
 }
