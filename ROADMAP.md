@@ -59,8 +59,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 - [ ] **General-Purpose Agent Access Modes (`ACCESS_MODE_WORKSPACE`, `ACCESS_MODE_SYSTEM`, `ACCESS_MODE_UNRESTRICTED`)** (#42)
   - Add first-class `AccessMode` enum to proto, workspace manager, and engine to enable general-purpose OS administration, devops, and desktop automation alongside sandboxed project agents.
-- [ ] **Disconnect Cleanup Deadlock Prevention & Resource Teardown** (#44)
-  - Prevent 5-minute cleanup deadlocks when clients disconnect while awaiting user prompts; ensure clean closure of SQLite stores.
 - [ ] **Multi-Chunk Replacement Line-Shift Offset Adjustment** (#45)
   - Add line delta tracking or bottom-to-top chunk ordering in `replace_file_content` to prevent line shifting corruption across sequential chunks.
 - [ ] **Turn Token Usage Deduplication Across Parallel Tool Executions** (#46)

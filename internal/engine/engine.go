@@ -2952,3 +2952,15 @@ func (e *Engine) AddPendingMessages(msgs ...string) {
 	defer e.mu.Unlock()
 	e.pendingSyntheticMsgs = append(e.pendingSyntheticMsgs, msgs...)
 }
+
+// Close releases resources held by the engine, including open SQLite databases
+// and active subagents.
+func (e *Engine) Close() error {
+	if e.subagentTracker != nil {
+		e.subagentTracker.KillAll()
+	}
+	if e.codeGraphManager != nil {
+		return e.codeGraphManager.Close()
+	}
+	return nil
+}

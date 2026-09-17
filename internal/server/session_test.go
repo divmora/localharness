@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"testing"
+	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/llm"
@@ -190,4 +191,100 @@ func TestCleanup_CancelsActiveTurn(t *testing.T) {
 	if turnCtx.Err() != context.Canceled {
 		t.Errorf("expected turn context to be cancelled by cleanup, got %v", turnCtx.Err())
 	}
+}
+
+func TestCleanup_UnblocksPendingQuestions(t *testing.T) {
+	_, sessionCancel := context.WithCancel(context.Background())
+	defer sessionCancel()
+
+	s := &Session{
+		logger:           slog.Default(),
+		cancel:           sessionCancel,
+		pendingQuestions: make(map[string]chan *pb.QuestionResponse),
+	}
+
+	ch := make(chan *pb.QuestionResponse, 1)
+	s.pendingQuestions["q-123"] = ch
+
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		s.cleanup()
+	}()
+
+	select {
+	case resp := <-ch:
+		if !resp.Skipped {
+			t.Errorf("expected question response to be skipped, got: %+v", resp)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup timed out waiting to unblock pending question")
+	}
+
+	<-doneCh
+}
+
+func TestCleanup_UnblocksPendingPermissions(t *testing.T) {
+	_, sessionCancel := context.WithCancel(context.Background())
+	defer sessionCancel()
+
+	s := &Session{
+		logger:             slog.Default(),
+		cancel:             sessionCancel,
+		pendingPermissions: make(map[string]chan *pb.PermissionResponse),
+	}
+
+	ch := make(chan *pb.PermissionResponse, 1)
+	s.pendingPermissions["perm-456"] = ch
+
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		s.cleanup()
+	}()
+
+	select {
+	case resp := <-ch:
+		if resp.Approved {
+			t.Errorf("expected permission response to be denied, got: %+v", resp)
+		}
+		if resp.DenialReason == "" {
+			t.Errorf("expected denial reason to be set, got empty")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup timed out waiting to unblock pending permission")
+	}
+
+	<-doneCh
+}
+
+func TestCleanup_UnblocksPendingToolResults(t *testing.T) {
+	_, sessionCancel := context.WithCancel(context.Background())
+	defer sessionCancel()
+
+	s := &Session{
+		logger:             slog.Default(),
+		cancel:             sessionCancel,
+		pendingToolResults: make(map[string]chan *pb.ToolResult),
+	}
+
+	ch := make(chan *pb.ToolResult, 1)
+	s.pendingToolResults["step-789"] = ch
+
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		s.cleanup()
+	}()
+
+	select {
+	case res := <-ch:
+		if !res.IsError {
+			t.Errorf("expected tool result to be an error, got: %+v", res)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cleanup timed out waiting to unblock pending tool result")
+	}
+
+	<-doneCh
 }

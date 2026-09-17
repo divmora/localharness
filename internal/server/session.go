@@ -163,6 +163,9 @@ func (s *Session) Run() {
 						clientMsgs = nil
 						continue
 					}
+					if s.cancel != nil {
+						s.cancel()
+					}
 					s.cleanup()
 					return
 				}
@@ -189,6 +192,9 @@ func (s *Session) Run() {
 						s.Detach()
 						clientMsgs = nil
 						continue
+					}
+					if s.cancel != nil {
+						s.cancel()
 					}
 					s.cleanup()
 					return
@@ -324,15 +330,65 @@ func (s *Session) handleAutoWake(ctx context.Context, notif tools.SystemMessage)
 	go s.handleUserMessage(ctx, syntheticMsg)
 }
 
-// cleanup persists state and shuts down resources on disconnect.
-// Waits for any in-flight handleUserMessage goroutines to complete their
-// post-run save (SetMessages + SaveAll) before doing final cleanup.
-func (s *Session) cleanup() {
+// cancelPendingRequests aborts all active turns and unblocks any waiting handlers
+// (ask_question, ask_permission, host tools) with cancellation responses.
+func (s *Session) cancelPendingRequests() {
+	// Cancel session context if set
+	if s.cancel != nil {
+		s.cancel()
+	}
+
+	// Cancel current in-flight turn context
 	s.turnCancelMu.Lock()
 	if s.currentTurnCancel != nil {
 		s.currentTurnCancel()
 	}
 	s.turnCancelMu.Unlock()
+
+	// Drain and unblock all pending question handlers
+	s.pendingQuestionsMu.Lock()
+	for reqID, ch := range s.pendingQuestions {
+		select {
+		case ch <- &pb.QuestionResponse{RequestId: reqID, Skipped: true}:
+		default:
+		}
+	}
+	s.pendingQuestionsMu.Unlock()
+
+	// Drain and unblock all pending permission handlers
+	s.pendingPermissionsMu.Lock()
+	for reqID, ch := range s.pendingPermissions {
+		select {
+		case ch <- &pb.PermissionResponse{
+			RequestId:    reqID,
+			Approved:     false,
+			DenialReason: "session closed / client disconnected",
+		}:
+		default:
+		}
+	}
+	s.pendingPermissionsMu.Unlock()
+
+	// Drain and unblock all pending host tool handlers
+	s.pendingMu.Lock()
+	for stepID, ch := range s.pendingToolResults {
+		select {
+		case ch <- &pb.ToolResult{
+			StepId:     stepID,
+			IsError:    true,
+			ResultJson: `{"error": "session closed / client disconnected"}`,
+		}:
+		default:
+		}
+	}
+	s.pendingMu.Unlock()
+}
+
+// cleanup persists state and shuts down resources on disconnect.
+// Waits for any in-flight handleUserMessage goroutines to complete their
+// post-run save (SetMessages + SaveAll) before doing final cleanup.
+func (s *Session) cleanup() {
+	s.cancelPendingRequests()
 
 	s.logger.Info("session cleanup: waiting for in-flight turns to complete")
 	s.turnWg.Wait()
@@ -352,6 +408,9 @@ func (s *Session) cleanup() {
 	}
 	if s.mcpMgr != nil {
 		s.mcpMgr.Close()
+	}
+	if s.engine != nil {
+		_ = s.engine.Close()
 	}
 }
 
