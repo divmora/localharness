@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -617,5 +618,100 @@ func TestConversation_Close_DrainsWorker(t *testing.T) {
 	// Double close should be idempotent
 	if err := conv.Close(); err != nil {
 		t.Errorf("second Close() failed: %v", err)
+	}
+}
+
+func TestConversation_Flush_FullQueueNoDeadlock(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, err := mgr.Create(&pb.HarnessConfig{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	defer conv.Close()
+
+	// Make StepsDir an invalid path (point to a regular file instead of dir) so writeStepContent fails
+	invalidPath := filepath.Join(tmpDir, "invalid_steps_file")
+	if err := os.WriteFile(invalidPath, []byte("blocker"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	conv.StepsDir = invalidPath
+
+	// Fill the stepQueue to capacity (256 items) with failing writes
+	for i := 0; i < 256; i++ {
+		conv.stepQueue <- stepContentItem{
+			stepIndex: int32(i),
+			content:   fmt.Sprintf("content %d", i),
+		}
+	}
+
+	// Concurrently invoke operations that require conv.mu while Flush() is running
+	doneCh := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-doneCh:
+				return
+			default:
+				_ = conv.NextStepIndex()
+				_ = conv.NextTrajectoryID()
+				conv.AddMessage(&pb.ConversationMessage{Role: "user", Content: "ping"})
+				_ = conv.Messages()
+				_ = conv.SaveState()
+				time.Sleep(1 * time.Millisecond)
+			}
+		}
+	}()
+
+	flushErrCh := make(chan error, 1)
+	go func() {
+		flushErrCh <- conv.Flush()
+	}()
+
+	// Flush must complete without deadlocking
+	select {
+	case err := <-flushErrCh:
+		close(doneCh)
+		if err == nil {
+			t.Errorf("expected error from Flush on invalid StepsDir, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		close(doneCh)
+		t.Fatalf("deadlock detected: Flush() did not return within 5 seconds when stepQueue was full and writes failed")
+	}
+}
+
+func TestConversation_Flush_ConcurrentWithClose(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+
+	for iteration := 0; iteration < 20; iteration++ {
+		conv, err := mgr.Create(&pb.HarnessConfig{})
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		// Spawn multiple goroutines calling SaveStepContent and Flush
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				for j := 0; j < 10; j++ {
+					_ = conv.SaveStepContent(int32(idx*10+j), "concurrent step content")
+					_ = conv.Flush()
+				}
+			}(i)
+		}
+
+		// Concurrently close the conversation
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(2 * time.Millisecond)
+			_ = conv.Close()
+		}()
+
+		wg.Wait()
 	}
 }

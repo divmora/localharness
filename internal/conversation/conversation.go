@@ -244,11 +244,11 @@ type Conversation struct {
 	// In-memory state
 	State *pb.ConversationState
 
-	mu          sync.Mutex
-	stepQueue   chan stepContentItem
-	stepWg      sync.WaitGroup
-	closed      bool
-	lastStepErr error
+	mu        sync.Mutex
+	queueMu   sync.RWMutex
+	stepQueue chan stepContentItem
+	stepWg    sync.WaitGroup
+	closed    bool
 }
 
 // ─── Step & Trajectory Management ───────────────────────────────────────
@@ -351,13 +351,11 @@ func (c *Conversation) startStepWriter() {
 	c.stepWg.Add(1)
 	go func() {
 		defer c.stepWg.Done()
+		var lastErr error
 		for item := range c.stepQueue {
 			if item.isFlush {
-				var err error
-				c.mu.Lock()
-				err = c.lastStepErr
-				c.lastStepErr = nil
-				c.mu.Unlock()
+				err := lastErr
+				lastErr = nil
 				if item.done != nil {
 					item.done <- err
 				}
@@ -366,9 +364,7 @@ func (c *Conversation) startStepWriter() {
 
 			err := c.writeStepContent(item.stepIndex, item.content, false)
 			if err != nil {
-				c.mu.Lock()
-				c.lastStepErr = err
-				c.mu.Unlock()
+				lastErr = err
 			}
 			if item.done != nil {
 				item.done <- err
@@ -389,18 +385,18 @@ func (c *Conversation) writeStepContent(stepIndex int32, content string, syncDis
 
 // SaveStepContent offloads step content persistence to a non-blocking background write-behind worker.
 func (c *Conversation) SaveStepContent(stepIndex int32, content string) error {
-	c.mu.Lock()
+	c.queueMu.RLock()
 	if c.closed {
-		c.mu.Unlock()
+		c.queueMu.RUnlock()
 		return c.writeStepContent(stepIndex, content, true)
 	}
 
 	select {
 	case c.stepQueue <- stepContentItem{stepIndex: stepIndex, content: content}:
-		c.mu.Unlock()
+		c.queueMu.RUnlock()
 		return nil
 	default:
-		c.mu.Unlock()
+		c.queueMu.RUnlock()
 		// Queue full: fallback to synchronous write without fsync
 		return c.writeStepContent(stepIndex, content, false)
 	}
@@ -413,29 +409,29 @@ func (c *Conversation) SaveStepContentSync(stepIndex int32, content string) erro
 
 // Flush waits for all pending background step content writes to finish.
 func (c *Conversation) Flush() error {
-	c.mu.Lock()
+	c.queueMu.RLock()
 	if c.closed {
-		c.mu.Unlock()
+		c.queueMu.RUnlock()
 		return nil
 	}
 
 	done := make(chan error, 1)
 	c.stepQueue <- stepContentItem{isFlush: true, done: done}
-	c.mu.Unlock()
+	c.queueMu.RUnlock()
 
 	return <-done
 }
 
 // Close stops the background step writer and flushes any pending writes.
 func (c *Conversation) Close() error {
-	c.mu.Lock()
+	c.queueMu.Lock()
 	if c.closed {
-		c.mu.Unlock()
+		c.queueMu.Unlock()
 		return nil
 	}
 	c.closed = true
 	close(c.stepQueue)
-	c.mu.Unlock()
+	c.queueMu.Unlock()
 
 	c.stepWg.Wait()
 	return nil
