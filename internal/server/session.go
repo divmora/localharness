@@ -337,6 +337,7 @@ func (s *Session) cleanup() {
 		if err := s.conv.SaveAll(); err != nil {
 			s.logger.Error("failed to save conversation state during cleanup", "error", err)
 		}
+		_ = s.conv.Close()
 	}
 	if s.toolRegistry != nil {
 		s.toolRegistry.Shutdown()

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -185,7 +186,7 @@ func (m *Manager) newConversation(id string) *Conversation {
 	brainDir := filepath.Join(m.brainDir, id)
 	sysGen := filepath.Join(brainDir, ".system_generated")
 
-	return &Conversation{
+	c := &Conversation{
 		ID: id,
 
 		// conversations/<uuid>.pb — the protobuf state file
@@ -201,10 +202,26 @@ func (m *Manager) newConversation(id string) *Conversation {
 		LogsDir:        filepath.Join(sysGen, "logs"),
 		TasksDir:       filepath.Join(sysGen, "tasks"),
 		TranscriptPath: filepath.Join(sysGen, "logs", "transcript.jsonl"),
+
+		stepQueue: make(chan stepContentItem, 256),
 	}
+
+	c.startStepWriter()
+	runtime.SetFinalizer(c, func(conv *Conversation) {
+		_ = conv.Close()
+	})
+
+	return c
 }
 
 // ─── Conversation ───────────────────────────────────────────────────────
+
+type stepContentItem struct {
+	stepIndex int32
+	content   string
+	isFlush   bool
+	done      chan error
+}
 
 // Conversation represents a single conversation session with persistent state.
 type Conversation struct {
@@ -227,7 +244,11 @@ type Conversation struct {
 	// In-memory state
 	State *pb.ConversationState
 
-	mu sync.Mutex
+	mu          sync.Mutex
+	stepQueue   chan stepContentItem
+	stepWg      sync.WaitGroup
+	closed      bool
+	lastStepErr error
 }
 
 // ─── Step & Trajectory Management ───────────────────────────────────────
@@ -326,13 +347,98 @@ func (c *Conversation) LogStep(entry *TranscriptJSONEntry) error {
 	return nil
 }
 
-// SaveStepContent saves step content to .system_generated/steps/<N>/content.md.
-func (c *Conversation) SaveStepContent(stepIndex int32, content string) error {
+func (c *Conversation) startStepWriter() {
+	c.stepWg.Add(1)
+	go func() {
+		defer c.stepWg.Done()
+		for item := range c.stepQueue {
+			if item.isFlush {
+				var err error
+				c.mu.Lock()
+				err = c.lastStepErr
+				c.lastStepErr = nil
+				c.mu.Unlock()
+				if item.done != nil {
+					item.done <- err
+				}
+				continue
+			}
+
+			err := c.writeStepContent(item.stepIndex, item.content, false)
+			if err != nil {
+				c.mu.Lock()
+				c.lastStepErr = err
+				c.mu.Unlock()
+			}
+			if item.done != nil {
+				item.done <- err
+			}
+		}
+	}()
+}
+
+// writeStepContent writes step content to steps/<N>/content.md.
+// If syncDisk is false, avoids fsync to keep the hot execution path non-blocking.
+func (c *Conversation) writeStepContent(stepIndex int32, content string, syncDisk bool) error {
 	stepDir := filepath.Join(c.StepsDir, fmt.Sprintf("%d", stepIndex))
 	if err := os.MkdirAll(stepDir, 0755); err != nil {
 		return err
 	}
-	return atomicWriteFile(filepath.Join(stepDir, "content.md"), []byte(content), 0644)
+	return atomicWriteFileOpts(filepath.Join(stepDir, "content.md"), []byte(content), 0644, syncDisk)
+}
+
+// SaveStepContent offloads step content persistence to a non-blocking background write-behind worker.
+func (c *Conversation) SaveStepContent(stepIndex int32, content string) error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return c.writeStepContent(stepIndex, content, true)
+	}
+
+	select {
+	case c.stepQueue <- stepContentItem{stepIndex: stepIndex, content: content}:
+		c.mu.Unlock()
+		return nil
+	default:
+		c.mu.Unlock()
+		// Queue full: fallback to synchronous write without fsync
+		return c.writeStepContent(stepIndex, content, false)
+	}
+}
+
+// SaveStepContentSync writes step content synchronously with physical fsync.
+func (c *Conversation) SaveStepContentSync(stepIndex int32, content string) error {
+	return c.writeStepContent(stepIndex, content, true)
+}
+
+// Flush waits for all pending background step content writes to finish.
+func (c *Conversation) Flush() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+
+	done := make(chan error, 1)
+	c.stepQueue <- stepContentItem{isFlush: true, done: done}
+	c.mu.Unlock()
+
+	return <-done
+}
+
+// Close stops the background step writer and flushes any pending writes.
+func (c *Conversation) Close() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	close(c.stepQueue)
+	c.mu.Unlock()
+
+	c.stepWg.Wait()
+	return nil
 }
 
 // TranscriptJSONEntry represents one line in transcript.jsonl.
@@ -400,8 +506,11 @@ func (c *Conversation) SaveState() error {
 	return c.saveStateLocked()
 }
 
-// SaveAll persists state (for convenience — transcript is append-only via LogStep).
+// SaveAll flushes pending background writes and persists conversation state.
 func (c *Conversation) SaveAll() error {
+	if err := c.Flush(); err != nil {
+		return err
+	}
 	return c.SaveState()
 }
 
@@ -420,10 +529,14 @@ func (c *Conversation) saveStateLocked() error {
 }
 
 // atomicWriteFile writes data to a temp file in the same directory, then
-// atomically renames it to the target path. This prevents corrupt reads
-// if another process (e.g., lhctl) reads during a write, or if the
-// process crashes mid-write.
+// atomically renames it to the target path. Syncs to disk before rename.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFileOpts(path, data, perm, true)
+}
+
+// atomicWriteFileOpts writes data to a temp file, optionally syncs to disk,
+// and atomically renames it to the target path.
+func atomicWriteFileOpts(path string, data []byte, perm os.FileMode, syncDisk bool) error {
 	dir := filepath.Dir(path)
 
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
@@ -453,13 +566,15 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 			WithComponent("conversation")
 	}
 
-	// Sync to disk before rename to ensure durability.
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return errors.Wrap(err, errors.ErrCodePersistenceError,
-			"atomic write: sync").
-			WithContext("temp_path", tmpPath).
-			WithComponent("conversation")
+	// Sync to disk before rename to ensure durability if requested.
+	if syncDisk {
+		if err := tmp.Sync(); err != nil {
+			tmp.Close()
+			return errors.Wrap(err, errors.ErrCodePersistenceError,
+				"atomic write: sync").
+				WithContext("temp_path", tmpPath).
+				WithComponent("conversation")
+		}
 	}
 
 	if err := tmp.Close(); err != nil {

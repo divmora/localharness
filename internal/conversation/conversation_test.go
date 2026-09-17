@@ -2,10 +2,12 @@ package conversation
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/divmora/localharness/internal/config"
 
@@ -343,10 +345,15 @@ func TestSaveStepContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr, _ := NewManager(tmpDir)
 	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
 
 	err := conv.SaveStepContent(0, "# Step 0 Content\n\nThis is the step content.")
 	if err != nil {
 		t.Fatalf("SaveStepContent failed: %v", err)
+	}
+
+	if err := conv.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
 	}
 
 	contentPath := filepath.Join(conv.StepsDir, "0", "content.md")
@@ -490,10 +497,125 @@ func TestSaveAll(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr, _ := NewManager(tmpDir)
 	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
 
 	// SaveAll should not error
 	err := conv.SaveAll()
 	if err != nil {
 		t.Fatalf("SaveAll failed: %v", err)
+	}
+}
+
+// ─── Issue #40: Asynchronous Step Persistence Tests ─────────────────────────
+
+func TestSaveStepContent_NonBlockingQueue(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
+
+	// Measure enqueue time for 25 steps: should be nearly instantaneous (< 10ms)
+	start := time.Now()
+	for i := 0; i < 25; i++ {
+		content := fmt.Sprintf("# Step %d\nContent for step %d", i, i)
+		if err := conv.SaveStepContent(int32(i), content); err != nil {
+			t.Fatalf("SaveStepContent(%d) failed: %v", i, err)
+		}
+	}
+	enqueueDuration := time.Since(start)
+	t.Logf("25 step saves enqueued in %v", enqueueDuration)
+	if enqueueDuration > 50*time.Millisecond {
+		t.Errorf("expected non-blocking enqueue to take < 50ms, took %v", enqueueDuration)
+	}
+
+	// Flush all background writes to disk
+	if err := conv.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	// Verify all 25 files exist on disk with correct content
+	for i := 0; i < 25; i++ {
+		path := filepath.Join(conv.StepsDir, fmt.Sprintf("%d", i), "content.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("cannot read step %d file: %v", i, err)
+		}
+		expected := fmt.Sprintf("# Step %d\nContent for step %d", i, i)
+		if string(data) != expected {
+			t.Errorf("step %d content mismatch: got %q, want %q", i, string(data), expected)
+		}
+	}
+}
+
+func TestSaveStepContentSync(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
+
+	err := conv.SaveStepContentSync(99, "immediately synchronous content")
+	if err != nil {
+		t.Fatalf("SaveStepContentSync failed: %v", err)
+	}
+
+	// File must exist immediately without calling Flush()
+	path := filepath.Join(conv.StepsDir, "99", "content.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read synchronous step file: %v", err)
+	}
+	if string(data) != "immediately synchronous content" {
+		t.Errorf("unexpected content: %q", string(data))
+	}
+}
+
+func TestSaveAll_FlushesPendingSteps(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
+
+	// Enqueue step content via non-blocking write-behind
+	_ = conv.SaveStepContent(7, "step content before SaveAll")
+
+	// SaveAll should automatically flush pending step content writes
+	if err := conv.SaveAll(); err != nil {
+		t.Fatalf("SaveAll failed: %v", err)
+	}
+
+	// Verify file is on disk immediately
+	path := filepath.Join(conv.StepsDir, "7", "content.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("step file should exist on disk after SaveAll: %v", err)
+	}
+	if string(data) != "step content before SaveAll" {
+		t.Errorf("unexpected content: %q", string(data))
+	}
+}
+
+func TestConversation_Close_DrainsWorker(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+
+	_ = conv.SaveStepContent(10, "content before close")
+	if err := conv.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	// After Close returns, all writes must have drained to disk
+	path := filepath.Join(conv.StepsDir, "10", "content.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("step file should exist on disk after Close: %v", err)
+	}
+	if string(data) != "content before close" {
+		t.Errorf("unexpected content: %q", string(data))
+	}
+
+	// Double close should be idempotent
+	if err := conv.Close(); err != nil {
+		t.Errorf("second Close() failed: %v", err)
 	}
 }
