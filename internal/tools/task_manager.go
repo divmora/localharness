@@ -237,6 +237,10 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 func (tm *TaskManager) monitorTask(task *BackgroundTask) {
 	err := task.cmd.Wait()
 
+	if task.stdin != nil {
+		_ = task.stdin.Close()
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -356,6 +360,10 @@ func (tm *TaskManager) KillTask(taskID string) error {
 	}
 
 	tm.logger.Info("killing background task", "task_id", taskID)
+
+	if task.stdin != nil {
+		_ = task.stdin.Close()
+	}
 
 	// Try SIGTERM to the process group first (or Kill on Windows)
 	if task.cmd.Process != nil {
@@ -518,6 +526,9 @@ func (tm *TaskManager) createTerminal(cwd string, env map[string]string) (*Persi
 	// Monitor terminal process
 	go func() {
 		_ = cmd.Wait()
+		if term.stdin != nil {
+			_ = term.stdin.Close()
+		}
 		close(term.done)
 	}()
 
@@ -710,6 +721,9 @@ func (tm *TaskManager) Shutdown() {
 	// Kill all running tasks
 	for _, task := range tm.tasks {
 		if task.Status == TaskRunning {
+			if task.stdin != nil {
+				_ = task.stdin.Close()
+			}
 			if task.cmd.Process != nil {
 				_ = killProcessGroup(task.cmd.Process.Pid)
 			}
@@ -719,6 +733,9 @@ func (tm *TaskManager) Shutdown() {
 
 	// Kill all terminals
 	for _, term := range tm.terminals {
+		if term.stdin != nil {
+			_ = term.stdin.Close()
+		}
 		if term.cmd.Process != nil {
 			_ = killProcessGroup(term.cmd.Process.Pid)
 		}

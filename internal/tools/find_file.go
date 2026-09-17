@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/util"
 )
 
 func registerFindFile(r *Registry) {
@@ -52,18 +53,34 @@ func executeFindFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	searchPath = validPath
 	ff.Path = searchPath
 
+	maxResults := 100
+	gitignore := util.LoadGitIgnore(searchPath)
+
 	// Try system `find` first, fall back to Go-native walk
 	matches, err := trySystemFind(ctx, ff.Pattern, searchPath)
 	if err != nil {
 		r.Logger().Debug("system find not available, falling back to native", "error", err)
-		matches, err = nativeFindFile(ctx, ff.Pattern, searchPath)
+		matches, err = nativeFindFile(ctx, ff.Pattern, searchPath, maxResults)
 		if err != nil {
 			return fmt.Errorf("find_file: %w", err)
 		}
+	} else {
+		// Filter system find results through gitignore
+		var filtered []string
+		for _, m := range matches {
+			rel, relErr := filepath.Rel(searchPath, m)
+			if relErr == nil && gitignore.Matches(rel, false) {
+				continue
+			}
+			filtered = append(filtered, m)
+			if len(filtered) >= maxResults {
+				break
+			}
+		}
+		matches = filtered
 	}
 
 	// Cap results
-	maxResults := 100
 	if len(matches) > maxResults {
 		matches = matches[:maxResults]
 	}
@@ -109,8 +126,13 @@ func trySystemFind(ctx context.Context, pattern, searchPath string) ([]string, e
 	return results, nil
 }
 
-func nativeFindFile(ctx context.Context, pattern, searchPath string) ([]string, error) {
+func nativeFindFile(ctx context.Context, pattern, searchPath string, maxResults int) ([]string, error) {
+	if maxResults <= 0 {
+		maxResults = 100
+	}
+
 	var matches []string
+	gitignore := util.LoadGitIgnore(searchPath)
 
 	skipDirs := map[string]bool{
 		".git": true, "node_modules": true, "__pycache__": true,
@@ -118,7 +140,7 @@ func nativeFindFile(ctx context.Context, pattern, searchPath string) ([]string, 
 		"dist": true, "build": true, ".next": true,
 	}
 
-	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(searchPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -129,22 +151,38 @@ func nativeFindFile(ctx context.Context, pattern, searchPath string) ([]string, 
 		default:
 		}
 
-		if info.IsDir() {
-			if skipDirs[info.Name()] {
+		relPath, _ := filepath.Rel(searchPath, path)
+
+		if d.IsDir() {
+			if path == searchPath {
+				return nil
+			}
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			if gitignore.Matches(relPath, true) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// Match by glob pattern
-		matched, _ := filepath.Match(pattern, info.Name())
-		if matched {
-			matches = append(matches, path)
+		// Check gitignore for files
+		if gitignore.Matches(relPath, false) {
+			return nil
 		}
 
+		// Match by glob pattern
+		matched, _ := filepath.Match(pattern, d.Name())
 		// Also match if pattern is a substring of the filename (case-insensitive)
-		if !matched && strings.Contains(strings.ToLower(info.Name()), strings.ToLower(pattern)) {
+		if !matched && strings.Contains(strings.ToLower(d.Name()), strings.ToLower(pattern)) {
+			matched = true
+		}
+
+		if matched {
 			matches = append(matches, path)
+			if len(matches) >= maxResults {
+				return filepath.SkipAll
+			}
 		}
 
 		return nil

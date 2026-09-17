@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/util"
 )
 
 // maxLineContentLen caps each matching line's content to prevent long lines
@@ -106,7 +108,6 @@ func tryRipgrep(ctx context.Context, sd *pb.ActionGrepSearch, searchPath string,
 		"--no-heading",
 		"--line-number",
 		"--color=never",
-		"--max-count", fmt.Sprintf("%d", maxResults+1), // +1 to detect truncation
 	}
 
 	if !sd.IsRegex {
@@ -127,58 +128,82 @@ func tryRipgrep(ctx context.Context, sd *pb.ActionGrepSearch, searchPath string,
 	args = append(args, sd.Query, searchPath)
 
 	cmd := exec.CommandContext(ctx, rgPath, args...)
-	output, err := cmd.Output()
-
-	// rg returns exit code 1 for no matches (not an error)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return nil, 0, nil // No matches
-		}
-		return nil, 0, fmt.Errorf("ripgrep error: %w", err)
+		return nil, 0, fmt.Errorf("ripgrep stdout pipe: %w", err)
+	}
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+
+	if err := cmd.Start(); err != nil {
+		return nil, 0, fmt.Errorf("ripgrep start: %w", err)
 	}
 
-	return parseRipgrepOutput(string(output), sd.MatchPerLine, maxResults)
-}
-
-func parseRipgrepOutput(output string, matchPerLine bool, maxResults int) ([]*pb.SearchMatch, int, error) {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		return nil, 0, nil
-	}
-
-	totalCount := len(lines)
 	var matches []*pb.SearchMatch
+	totalCount := 0
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
-	for i, line := range lines {
-		if i >= maxResults {
-			break
-		}
-
-		if !matchPerLine {
-			// File-only mode: each line is just a filename
-			matches = append(matches, &pb.SearchMatch{
-				Filename: line,
-			})
+	for scanner.Scan() {
+		line := scanner.Text()
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
 		}
 
-		// Line-level mode: format is "filename:linenum:content"
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
-			continue
+		match := parseRipgrepLine(line, sd.MatchPerLine)
+		if match != nil {
+			totalCount++
+			if len(matches) < maxResults {
+				matches = append(matches, match)
+			}
+			// When totalCount exceeds maxResults, kill rg process early to avoid buffering massive output
+			if totalCount > maxResults {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				break
+			}
 		}
+	}
 
-		lineNum := 0
-		_, _ = fmt.Sscanf(parts[1], "%d", &lineNum)
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		if totalCount > maxResults {
+			waitErr = nil
+		} else if exitErr, ok := waitErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			waitErr = nil
+		}
+	}
 
-		matches = append(matches, &pb.SearchMatch{
-			Filename:    parts[0],
-			LineNumber:  int32(lineNum),
-			LineContent: truncateLineContent(parts[2]),
-		})
+	if waitErr != nil && totalCount == 0 {
+		return nil, 0, fmt.Errorf("ripgrep error: %w: %s", waitErr, strings.TrimSpace(stderrBuf.String()))
 	}
 
 	return matches, totalCount, nil
+}
+
+func parseRipgrepLine(line string, matchPerLine bool) *pb.SearchMatch {
+	if !matchPerLine {
+		return &pb.SearchMatch{
+			Filename: line,
+		}
+	}
+
+	// Line-level mode: format is "filename:linenum:content"
+	parts := strings.SplitN(line, ":", 3)
+	if len(parts) < 3 {
+		return nil
+	}
+
+	lineNum := 0
+	_, _ = fmt.Sscanf(parts[1], "%d", &lineNum)
+
+	return &pb.SearchMatch{
+		Filename:    parts[0],
+		LineNumber:  int32(lineNum),
+		LineContent: truncateLineContent(parts[2]),
+	}
 }
 
 // nativeSearch is a pure Go fallback when ripgrep is unavailable.
@@ -204,7 +229,13 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 		searchQuery = strings.ToLower(searchQuery)
 	}
 
-	err := filepath.Walk(searchPath, func(path string, info os.FileInfo, err error) error {
+	baseDir := searchPath
+	if info, err := os.Stat(searchPath); err == nil && !info.IsDir() {
+		baseDir = filepath.Dir(searchPath)
+	}
+	gitignore := util.LoadGitIgnore(baseDir)
+
+	err := filepath.WalkDir(searchPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // Skip unreadable entries
 		}
@@ -216,12 +247,25 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 		default:
 		}
 
-		if info.IsDir() {
+		relPath, _ := filepath.Rel(baseDir, path)
+
+		if d.IsDir() {
+			if path == searchPath {
+				return nil
+			}
 			// Skip hidden dirs and common large dirs
-			name := info.Name()
+			name := d.Name()
 			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "__pycache__" {
 				return filepath.SkipDir
 			}
+			if gitignore.Matches(relPath, true) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip if file matches gitignore
+		if gitignore.Matches(relPath, false) {
 			return nil
 		}
 
@@ -229,7 +273,7 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 		if len(sd.Includes) > 0 {
 			matched := false
 			for _, pattern := range sd.Includes {
-				if m, _ := filepath.Match(pattern, info.Name()); m {
+				if m, _ := filepath.Match(pattern, d.Name()); m {
 					matched = true
 					break
 				}
@@ -245,7 +289,8 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 		}
 
 		// Skip large files (>5MB)
-		if info.Size() > 5*1024*1024 {
+		info, err := d.Info()
+		if err != nil || info.Size() > 5*1024*1024 {
 			return nil
 		}
 
@@ -253,7 +298,6 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 		if err != nil {
 			return nil
 		}
-		defer f.Close()
 
 		fileMatched := false
 		scanner := bufio.NewScanner(f)
@@ -288,6 +332,9 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 				}
 			}
 		}
+
+		// Close file handle immediately per file, without defer
+		f.Close()
 
 		if !sd.MatchPerLine && fileMatched && len(matches) < maxResults {
 			matches = append(matches, &pb.SearchMatch{

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1405,5 +1406,186 @@ func TestEditFile_Fallbacks(t *testing.T) {
 	data, _ := os.ReadFile(testFile)
 	if !strings.Contains(string(data), "successfully replaced via fallback\n") {
 		t.Errorf("expected target to be replaced via fallback, got %s", string(data))
+	}
+}
+
+// ─── Issue #37 Tests: Grep search, Find file, and Task manager FD leak fixes ─
+
+func TestGrepSearch_HonorsGitIgnore(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// Setup files
+	_ = os.WriteFile(filepath.Join(wsDir, "included.go"), []byte("package test\nconst Token = \"MY_SECRET_QUERY\"\n"), 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, "ignored.txt"), []byte("const Token = \"MY_SECRET_QUERY\"\n"), 0644)
+	_ = os.MkdirAll(filepath.Join(wsDir, "ignored_dir"), 0755)
+	_ = os.WriteFile(filepath.Join(wsDir, "ignored_dir", "sub.go"), []byte("const Token = \"MY_SECRET_QUERY\"\n"), 0644)
+
+	// .gitignore
+	_ = os.WriteFile(filepath.Join(wsDir, ".gitignore"), []byte("*.txt\nignored_dir/\n"), 0644)
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_GrepSearch{
+			GrepSearch: &pb.ActionGrepSearch{
+				Query:        "MY_SECRET_QUERY",
+				Path:         wsDir,
+				MatchPerLine: true,
+			},
+		},
+	}
+
+	err := reg.Execute(ctx, "grep_search", step)
+	if err != nil {
+		t.Fatalf("grep_search failed: %v", err)
+	}
+
+	sd := step.GetGrepSearch()
+	if len(sd.Matches) != 1 {
+		t.Fatalf("expected exactly 1 match (included.go), got %d: %v", len(sd.Matches), sd.Matches)
+	}
+	if !strings.HasSuffix(sd.Matches[0].Filename, "included.go") {
+		t.Errorf("expected match to be included.go, got %s", sd.Matches[0].Filename)
+	}
+}
+
+func TestGrepSearch_NativeSearchNoFDLeak(t *testing.T) {
+	wsDir := t.TempDir()
+	ctx := context.Background()
+
+	// Create 40 files across subdirectories
+	for i := 0; i < 40; i++ {
+		dir := filepath.Join(wsDir, fmt.Sprintf("sub%d", i%5))
+		_ = os.MkdirAll(dir, 0755)
+		content := fmt.Sprintf("file %d content\nmarker_target_string\n", i)
+		_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d.txt", i)), []byte(content), 0644)
+	}
+
+	sd := &pb.ActionGrepSearch{
+		Query:        "marker_target_string",
+		Path:         wsDir,
+		MatchPerLine: true,
+	}
+
+	matches, total, err := nativeSearch(ctx, sd, wsDir, 50)
+	if err != nil {
+		t.Fatalf("nativeSearch failed: %v", err)
+	}
+	if total != 40 {
+		t.Errorf("expected 40 total matches, got %d", total)
+	}
+	if len(matches) != 40 {
+		t.Errorf("expected 40 matches, got %d", len(matches))
+	}
+}
+
+func TestParseRipgrepLine(t *testing.T) {
+	// Line mode
+	line := "foo/bar.go:42:func TestMethod() {"
+	match := parseRipgrepLine(line, true)
+	if match == nil {
+		t.Fatal("expected non-nil match")
+	}
+	if match.Filename != "foo/bar.go" {
+		t.Errorf("expected filename foo/bar.go, got %s", match.Filename)
+	}
+	if match.LineNumber != 42 {
+		t.Errorf("expected line number 42, got %d", match.LineNumber)
+	}
+	if match.LineContent != "func TestMethod() {" {
+		t.Errorf("expected line content func TestMethod() {, got %s", match.LineContent)
+	}
+
+	// Line mode with truncation
+	longContent := strings.Repeat("a", 250)
+	longLine := "file.go:1:" + longContent
+	matchLong := parseRipgrepLine(longLine, true)
+	if len(matchLong.LineContent) != maxLineContentLen+3 { // 200 + "..."
+		t.Errorf("expected truncated line content len %d, got %d", maxLineContentLen+3, len(matchLong.LineContent))
+	}
+
+	// File mode
+	fileMatch := parseRipgrepLine("pkg/main.go", false)
+	if fileMatch == nil || fileMatch.Filename != "pkg/main.go" {
+		t.Errorf("expected pkg/main.go, got %v", fileMatch)
+	}
+}
+
+func TestNativeFindFile_HonorsGitIgnoreAndMaxResults(t *testing.T) {
+	wsDir := t.TempDir()
+	ctx := context.Background()
+
+	_ = os.WriteFile(filepath.Join(wsDir, "file1.go"), []byte("package main"), 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, "file2.go"), []byte("package main"), 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, "file3.go"), []byte("package main"), 0644)
+	_ = os.WriteFile(filepath.Join(wsDir, "secret.go"), []byte("package main"), 0644)
+	_ = os.MkdirAll(filepath.Join(wsDir, "ignored_dir"), 0755)
+	_ = os.WriteFile(filepath.Join(wsDir, "ignored_dir", "file4.go"), []byte("package main"), 0644)
+
+	_ = os.WriteFile(filepath.Join(wsDir, ".gitignore"), []byte("secret.go\nignored_dir/\n"), 0644)
+
+	// Test maxResults early termination
+	matches, err := nativeFindFile(ctx, "*.go", wsDir, 2)
+	if err != nil {
+		t.Fatalf("nativeFindFile failed: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Errorf("expected early exit with exactly 2 matches, got %d", len(matches))
+	}
+
+	// Test gitignore honoring without hitting maxResults
+	matchesAll, err := nativeFindFile(ctx, "*.go", wsDir, 100)
+	if err != nil {
+		t.Fatalf("nativeFindFile failed: %v", err)
+	}
+	if len(matchesAll) != 3 {
+		t.Fatalf("expected 3 matches (file1, file2, file3), got %d: %v", len(matchesAll), matchesAll)
+	}
+	for _, m := range matchesAll {
+		if strings.Contains(m, "secret.go") || strings.Contains(m, "ignored_dir") {
+			t.Errorf("unexpected ignored file found: %s", m)
+		}
+	}
+}
+
+func TestTaskManager_StdinPipesClosed(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tm := NewTaskManager(logger, 5)
+	defer tm.Shutdown()
+
+	ctx := context.Background()
+	taskID, _, err := tm.StartBackground(ctx, "sleep 0.1", "", nil, 0, nil)
+	if err != nil {
+		t.Fatalf("StartBackground failed: %v", err)
+	}
+
+	// Wait for task to finish
+	tm.mu.RLock()
+	task := tm.tasks[taskID]
+	tm.mu.RUnlock()
+
+	<-task.done
+
+	// Verify task stdin is closed
+	if task.stdin != nil {
+		_, writeErr := task.stdin.Write([]byte("test"))
+		if writeErr == nil {
+			t.Error("expected write to task.stdin to fail after completion")
+		}
+	}
+
+	// Test persistent terminal stdin closed on Shutdown
+	term, err := tm.createTerminal("", nil)
+	if err != nil {
+		t.Fatalf("createTerminal failed: %v", err)
+	}
+
+	tm.Shutdown()
+	<-term.done
+
+	if term.stdin != nil {
+		_, writeErr := term.stdin.Write([]byte("echo hi\n"))
+		if writeErr == nil {
+			t.Error("expected write to term.stdin to fail after terminal closed")
+		}
 	}
 }
