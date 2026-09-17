@@ -119,7 +119,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 - [ ] **Dynamic Runtime Model Switching (`change model` / `/model <name>`)**
   - Support hot-swapping the active LLM model mid-session during interactive chat (`lhctl` TUI) and via daemon API/session updates without restarting the conversation or dropping session context.
   - Dynamically recalculate context window limits, compaction token budgets, and capability flags (vision support, function calling, reasoning depth) when switching models at runtime.
-  - Support per-turn model overrides and explicit model targeting for subagents invoked via `invoke_subagent`.
 - [ ] **LiteLLM Endpoint-Aware Model Routing & Catalog Discovery**
   - Allow selecting and executing models hosted behind configured LiteLLM endpoints (e.g., `endpoint_name/model_name` syntax or automatic resolution from the active LiteLLM endpoint).
   - Query LiteLLM's `/v1/models` endpoint dynamically to discover available models and populate interactive autocompletion for `/model` in the TUI and `--model` CLI flags.

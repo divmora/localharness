@@ -45,6 +45,7 @@ type SubagentInstance struct {
 	ConversationID string
 	TypeName       string
 	Role           string
+	Model          string
 	State          SubagentState
 	Engine         *Engine
 	Cancel         context.CancelFunc

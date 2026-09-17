@@ -1091,3 +1091,307 @@ func TestSubagentWorkspaceAndPermissionInheritance(t *testing.T) {
 		t.Errorf("expected 0 permission prompts for subagent reading inside workspace, got %d", count)
 	}
 }
+
+func TestSubagentModelTiering(t *testing.T) {
+	parentProvider := &mockProvider{
+		modelName: "claude-3-5-sonnet",
+		responses: []*llm.GenerateResponse{
+			// Parent Turn 1: Launches multiple subagents with different tiers
+			{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call_tier_launch",
+						Name: "invoke_subagent",
+						Args: map[string]interface{}{
+							"Subagents": []interface{}{
+								map[string]interface{}{
+									"TypeName": "research", // Should default to flash -> claude-3-5-haiku
+									"Role":     "Code Researcher",
+									"Prompt":   "Investigate AST",
+								},
+								map[string]interface{}{
+									"TypeName": "self",
+									"Role":     "Self Planner",
+									"Prompt":   "Plan release",
+									"Model":    "pro", // Should resolve to pro -> claude-3-5-sonnet
+								},
+								map[string]interface{}{
+									"TypeName": "self",
+									"Role":     "Fast Worker",
+									"Prompt":   "Fast check",
+									"Model":    "flash_lite", // Should resolve to flash_lite -> claude-3-5-haiku
+								},
+								map[string]interface{}{
+									"TypeName": "self",
+									"Role":     "Cross Model Worker",
+									"Prompt":   "Run benchmark",
+									"Model":    "gpt-4o-mini", // Explicit model
+								},
+							},
+						},
+					},
+				},
+			},
+			// Parent Turn 2: Parent ends
+			{
+				Content:      "Subagents dispatched",
+				FinishReason: "stop",
+			},
+			// Child responses
+			{Content: "Research complete", FinishReason: "stop"},
+			{Content: "Plan complete", FinishReason: "stop"},
+			{Content: "Fast check complete", FinishReason: "stop"},
+			{Content: "Benchmark complete", FinishReason: "stop"},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(nil, logger)
+
+	eng := NewEngine(Config{
+		Provider:         parentProvider,
+		ToolRegistry:     reg,
+		SystemPrompt:     "test parent",
+		ConversationID:   "test-conv-tiers",
+		TrajectoryID:     "traj_tiers",
+		BrainDir:         t.TempDir(),
+		Logger:           logger,
+		SubagentsEnabled: true,
+		MaxDepth:         3,
+		MaxSubagents:     10,
+	})
+
+	err := eng.Run(context.Background(), "Launch tiered subagents")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	// Verify the tool result message in history contains the resolved models
+	var toolResultContent string
+	for _, m := range eng.History() {
+		if m.ToolResult != nil && m.ToolResult.CallID == "call_tier_launch" {
+			toolResultContent = m.ToolResult.Content
+			break
+		}
+	}
+
+	if toolResultContent == "" {
+		t.Fatal("expected tool result for call_tier_launch not found in history")
+	}
+
+	// Check model names in the launch output
+	if !strings.Contains(toolResultContent, `"model": "claude-3-5-haiku"`) {
+		t.Errorf("expected research subagent to resolve to 'claude-3-5-haiku' (flash tier), got:\n%s", toolResultContent)
+	}
+	if !strings.Contains(toolResultContent, `"model": "claude-3-5-sonnet"`) {
+		t.Errorf("expected pro subagent to resolve to 'claude-3-5-sonnet' (pro tier), got:\n%s", toolResultContent)
+	}
+	if !strings.Contains(toolResultContent, `"model": "gpt-4o-mini"`) {
+		t.Errorf("expected explicit subagent to resolve to 'gpt-4o-mini', got:\n%s", toolResultContent)
+	}
+
+	// Wait for background subagents to finish before tempdir cleanup
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestSubagentCompressedHandoffBriefing(t *testing.T) {
+	childHandoffText := `### Handoff Briefing
+- **Task & Goal**: Refactor codegraph SQLite schema.
+- **Status**: COMPLETED
+- **Files Created & Modified**:
+  - internal/codegraph/sqlite.go: Migrated JSON to indexed SQLite.
+  - internal/codegraph/sqlite_test.go: Added concurrent benchmark.
+- **Key Changes & Decisions**: Zero CGO modernc.org/sqlite with WAL mode.
+- **Verification & Tests**: go test ./internal/codegraph/... passed 100%.
+- **Next Steps**: Update documentation.`
+
+	notifyCh := make(chan tools.SystemMessage, 10)
+
+	provider := &mockProvider{
+		modelName: "gpt-4o",
+		responses: []*llm.GenerateResponse{
+			// Parent Turn 1: Launch subagent
+			{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call_subagent_briefing",
+						Name: "invoke_subagent",
+						Args: map[string]interface{}{
+							"Subagents": []interface{}{
+								map[string]interface{}{
+									"TypeName": "research",
+									"Role":     "SQLite Researcher",
+									"Prompt":   "Refactor SQLite storage",
+								},
+							},
+						},
+					},
+				},
+			},
+			// Parent Turn 2: Done
+			{
+				Content:      "Parent waiting",
+				FinishReason: "stop",
+			},
+		},
+		responsesByModel: map[string][]*llm.GenerateResponse{
+			"gpt-4o-mini": {
+				// Child Turn: Subagent completes with full handoff text
+				{
+					Content:      childHandoffText,
+					FinishReason: "stop",
+				},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(nil, logger)
+	parentBrainDir := t.TempDir()
+
+	eng := NewEngine(Config{
+		Provider:         provider,
+		ToolRegistry:     reg,
+		SystemPrompt:     "test parent",
+		ConversationID:   "test-conv-compressed-handoff",
+		TrajectoryID:     "traj_compressed",
+		BrainDir:         parentBrainDir,
+		Logger:           logger,
+		SubagentsEnabled: true,
+		NotifySendCh:     notifyCh,
+		MaxDepth:         3,
+	})
+
+	err := eng.Run(context.Background(), "Run child and inspect handoff")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	// Wait for child notification to arrive on notifyCh
+	var receivedMsg tools.SystemMessage
+	select {
+	case msg := <-notifyCh:
+		receivedMsg = msg
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subagent completion notification")
+	}
+
+	if receivedMsg.Source != "subagent_complete" {
+		t.Errorf("expected source 'subagent_complete', got %q", receivedMsg.Source)
+	}
+
+	lines := strings.Split(strings.TrimSpace(receivedMsg.Content), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected exactly 3 lines in compressed handoff notification, got %d lines:\n%s", len(lines), receivedMsg.Content)
+	}
+
+	// Line 1: Subagent status and role
+	if !strings.Contains(lines[0], "Subagent 'research'") || !strings.Contains(lines[0], "completed") {
+		t.Errorf("line 1 missing subagent status: %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "Conversation ID: ") {
+		t.Errorf("line 1 missing conversation ID: %q", lines[0])
+	}
+
+	// Line 2: Markdown link to handoff_briefing.md
+	if !strings.Contains(lines[1], "Handoff Briefing: [handoff_briefing.md](file://") {
+		t.Errorf("line 2 missing markdown link to handoff_briefing.md: %q", lines[1])
+	}
+
+	// Extract the filepath from the link and verify the file exists on disk
+	linkStart := strings.Index(lines[1], "(file://")
+	linkEnd := strings.Index(lines[1], ")")
+	if linkStart == -1 || linkEnd == -1 {
+		t.Fatalf("malformed briefing link: %q", lines[1])
+	}
+	filePath := lines[1][linkStart+len("(file://") : linkEnd]
+	data, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("failed to read handoff_briefing.md at %q: %v", filePath, readErr)
+	}
+	if string(data) != childHandoffText {
+		t.Errorf("handoff_briefing.md content mismatch:\ngot %q\nwant %q", string(data), childHandoffText)
+	}
+
+	// Line 3: Concise summary excerpt (not the whole 500 characters)
+	if !strings.HasPrefix(lines[2], "Summary: ") {
+		t.Errorf("line 3 must start with 'Summary: ', got %q", lines[2])
+	}
+	if strings.Contains(lines[2], "###") {
+		t.Errorf("line 3 should not have raw markdown headers: %q", lines[2])
+	}
+	if !strings.Contains(lines[2], "Refactor codegraph SQLite schema.") {
+		t.Errorf("line 3 should contain the summary goal: %q", lines[2])
+	}
+
+	// Wait for background subagents to finish before tempdir cleanup
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestCompactionSummarizerProvider(t *testing.T) {
+	// Main provider (e.g. Claude 3.5 Sonnet)
+	mainProvider := &mockProvider{
+		modelName: "claude-3-5-sonnet",
+		responses: []*llm.GenerateResponse{
+			{Content: "normal turn answer", FinishReason: "stop"},
+		},
+	}
+
+	// Fast summarizer provider (e.g. Claude 3.5 Haiku)
+	summarizerProvider := &mockProvider{
+		modelName: "claude-3-5-haiku",
+		responses: []*llm.GenerateResponse{
+			{
+				Content:      "- Goal: do work\n- Files: main.go",
+				FinishReason: "stop",
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(nil, logger)
+
+	// Create engine with dedicated SummarizerProvider
+	eng := NewEngine(Config{
+		Provider:            mainProvider,
+		SummarizerProvider:  summarizerProvider,
+		ToolRegistry:        reg,
+		SystemPrompt:        "system",
+		ConversationID:      "test-conv-summarizer",
+		TrajectoryID:        "traj_sum",
+		CompactionThreshold: 50, // Low threshold to force compaction
+		KeepRecentMessages:  2,
+		Logger:              logger,
+		InitialHistory: []llm.Message{
+			{Role: "user", Content: strings.Repeat("hello world this is a long conversation message ", 20)},
+			{Role: "model", Content: strings.Repeat("response from assistant with lots of information ", 20)},
+			{Role: "user", Content: "recent message 1"},
+			{Role: "model", Content: "recent response 1"},
+			{Role: "user", Content: "recent message 2"},
+			{Role: "model", Content: "recent response 2"},
+		},
+	})
+
+	err := eng.Run(context.Background(), "Trigger compaction on turn")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	// Verify summarizerProvider was invoked for compaction
+	summarizerProvider.mu.Lock()
+	sumCalls := len(summarizerProvider.callLog)
+	summarizerProvider.mu.Unlock()
+
+	if sumCalls == 0 {
+		t.Error("expected summarizerProvider to be called for compaction, but callLog was empty")
+	}
+
+	// Verify mainProvider was used for normal turn generation (not compaction)
+	mainProvider.mu.Lock()
+	mainCalls := len(mainProvider.callLog)
+	mainProvider.mu.Unlock()
+
+	if mainCalls != 1 {
+		t.Errorf("expected mainProvider to be called exactly 1 time for turn generation, got %d", mainCalls)
+	}
+}

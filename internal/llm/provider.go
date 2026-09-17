@@ -95,6 +95,12 @@ type Provider interface {
 	Close() error
 }
 
+// ModelCloner is an optional interface implemented by providers that support
+// creating a shallow copy configured with a different model name.
+type ModelCloner interface {
+	WithModel(modelName string) Provider
+}
+
 // StreamChunk is a partial response from a streaming LLM call.
 type StreamChunk struct {
 	// Incremental text content

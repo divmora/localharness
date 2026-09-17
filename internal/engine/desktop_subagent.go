@@ -175,6 +175,8 @@ func (e *Engine) executeDesktopSubagent(ctx context.Context, tc llm.ToolCall, st
 	// Create child engine
 	childEngine := NewEngine(Config{
 		Provider:                 e.provider,
+		SummarizerProvider:       e.summarizerProvider,
+		ModelTierResolver:        e.modelTierResolver,
 		ToolRegistry:             e.toolRegistry,
 		SystemPrompt:             desktopSubagentSystemPrompt,
 		InitialHistory:           initialHistory,

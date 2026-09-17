@@ -107,3 +107,33 @@ func TestOpenAIRetryOn429(t *testing.T) {
 		t.Errorf("expected 2 attempts, got %d", attempts.Load())
 	}
 }
+
+func TestOpenAIWithModel(t *testing.T) {
+	logger := slog.Default()
+	p, err := NewOpenAIProvider(OpenAIConfig{
+		BaseURL:   "http://localhost:11434/v1",
+		ModelName: "gpt-4o",
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider failed: %v", err)
+	}
+
+	cloner, ok := interface{}(p).(ModelCloner)
+	if !ok {
+		t.Fatalf("OpenAIProvider must implement ModelCloner")
+	}
+
+	cloned := cloner.WithModel("gpt-4o-mini")
+	if cloned == nil {
+		t.Fatal("cloned provider should not be nil")
+	}
+
+	if cloned.ModelName() != "gpt-4o-mini" {
+		t.Errorf("expected cloned ModelName 'gpt-4o-mini', got %q", cloned.ModelName())
+	}
+
+	// Original provider should remain unchanged
+	if p.ModelName() != "gpt-4o" {
+		t.Errorf("original provider ModelName changed to %q", p.ModelName())
+	}
+}

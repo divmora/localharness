@@ -91,6 +91,20 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 func (o *OpenAIProvider) ModelName() string { return o.model }
 func (o *OpenAIProvider) Close() error      { return nil }
 
+// WithModel returns a copy of OpenAIProvider configured with a different model name,
+// sharing the same base URL, API key, HTTP client, and logger.
+func (o *OpenAIProvider) WithModel(modelName string) Provider {
+	return &OpenAIProvider{
+		apiKey:      o.apiKey,
+		baseURL:     o.baseURL,
+		model:       modelName,
+		temperature: o.temperature,
+		maxTokens:   o.maxTokens,
+		client:      o.client,
+		logger:      o.logger,
+	}
+}
+
 // parseRetryAfter parses the Retry-After header which can be seconds or an HTTP-date.
 func parseRetryAfter(header string) (time.Duration, bool) {
 	if header == "" {

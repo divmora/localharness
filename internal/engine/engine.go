@@ -72,6 +72,8 @@ const defaultMaxConcurrentToolWorkers = 8
 // Engine orchestrates the agentic loop.
 type Engine struct {
 	provider                 llm.Provider
+	summarizerProvider       llm.Provider
+	modelTierResolver        ModelTierResolver
 	toolRegistry             *tools.Registry
 	logger                   *slog.Logger
 	stepCB                   StepCallback
@@ -154,6 +156,8 @@ type Engine struct {
 // Config holds engine configuration.
 type Config struct {
 	Provider            llm.Provider
+	SummarizerProvider  llm.Provider      // Optional: dedicated fast provider for context compaction (defaults to flash tier)
+	ModelTierResolver   ModelTierResolver // Optional: custom resolver for model tiers (defaults to DefaultModelTierResolver)
 	ToolRegistry        *tools.Registry
 	SystemPrompt        string
 	ConversationID      string
@@ -358,8 +362,28 @@ func NewEngine(cfg Config) *Engine {
 		bus = NewAgentBus()
 	}
 
+	resolver := cfg.ModelTierResolver
+	if resolver == nil {
+		resolver = DefaultModelTierResolver
+	}
+
+	summarizer := cfg.SummarizerProvider
+	if summarizer == nil && cfg.Provider != nil {
+		tierModel := resolver(cfg.Provider.ModelName(), string(ModelTierFlash))
+		if tierModel != "" && tierModel != cfg.Provider.ModelName() {
+			if cloner, ok := cfg.Provider.(llm.ModelCloner); ok {
+				summarizer = cloner.WithModel(tierModel)
+			}
+		}
+	}
+	if summarizer == nil {
+		summarizer = cfg.Provider
+	}
+
 	eng := &Engine{
 		provider:                 cfg.Provider,
+		summarizerProvider:       summarizer,
+		modelTierResolver:        resolver,
 		toolRegistry:             cfg.ToolRegistry,
 		logger:                   cfg.Logger,
 		stepCB:                   cfg.OnStep,
@@ -436,6 +460,14 @@ func (e *Engine) SetYoloMode(enabled bool) {
 	e.mu.Lock()
 	e.yoloMode = enabled
 	e.mu.Unlock()
+}
+
+// getSummarizerProvider returns the provider to use for context compaction.
+func (e *Engine) getSummarizerProvider() llm.Provider {
+	if e.summarizerProvider != nil {
+		return e.summarizerProvider
+	}
+	return e.provider
 }
 
 // AddPermissionGrant adds a conversation-scoped permission grant.
@@ -798,7 +830,7 @@ drained:
 		// Context compaction — summarize old messages if over threshold
 		if e.compactionThreshold > 0 {
 			compacted, result, compErr := CompactIfNeeded(
-				ctx, e.provider, e.history, CompactionConfig{
+				ctx, e.getSummarizerProvider(), e.history, CompactionConfig{
 					Threshold:          e.compactionThreshold,
 					KeepRecentMessages: e.keepRecentMessages,
 					LastRealTokenCount: e.lastRealTokenCount,

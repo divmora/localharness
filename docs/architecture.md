@@ -338,9 +338,11 @@ Each built-in tool is tagged with a `ToolGroup` (`read` or `write`). When a chil
 
 - **Async**: `invoke_subagent` launches child engines in background goroutines and returns immediately with launch results.
 - **Context Isolation**: Each child engine gets a fresh message history with only the provided prompt.
-- **Resource Sharing**: Children share the parent’s LLM provider, tool registry, workspace configs, and permission handler.
+- **Model Tiering Resolution**: Child engines do not blindly inherit heavy parent models. Subagents support model tiers (`inherit`, `flash_lite`, `flash`, `pro`) or explicit model overrides via `llm.ModelCloner`. `research` subagents default to the `flash` tier.
+- **Resource Sharing**: Children share the parent’s tool registry, workspace configs, and permission handler.
 - **Step Bubbling**: Child engines use the same step/trajectory callbacks as the parent. All child steps stream to the client in real-time.
-- **Completion Notification**: When a child finishes, it sends a `SystemMessage` to the parent’s notification channel.
+- **Compressed Completion Notification**: When a child finishes, its full briefing is saved to `handoff_briefing.md` in the child brain directory. The parent receives a compact 3-line `SystemMessage` with a clickable markdown link (`[handoff_briefing.md](file://...)`) and an excerpt, eliminating prompt bloating.
+- **Fast Summarizer for Compaction**: Context compaction leverages `SummarizerProvider` (auto-resolved to the fast `flash` tier), freeing heavy primary models from synchronous compaction overhead.
 
 ### Trajectory and ID Hierarchies
 

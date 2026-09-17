@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -99,6 +100,10 @@ func defineSubagentDeclaration() llm.FunctionDeclaration {
 					"type":        "boolean",
 					"description": "Set true to enable the subagent to define and invoke its own subagents.",
 				},
+				"default_model": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional default model tier ('inherit', 'flash_lite', 'flash', 'pro') or explicit model name for this subagent type.",
+				},
 			},
 		},
 	}
@@ -139,6 +144,16 @@ Use invoke_subagent when:
 							"Prompt": map[string]interface{}{
 								"type":        "string",
 								"description": "Task description for the subagent. Must be specific and self-contained.",
+							},
+							"Model": map[string]interface{}{
+								"type":        "string",
+								"enum":        []string{"inherit", "flash_lite", "flash", "pro"},
+								"description": "Model tier or name to use. 'inherit' (default) uses the calling agent's model. 'flash_lite' uses a very light model. 'flash' uses a smaller, faster model suited for simple tasks like research lookups, file reading, or quick searches. 'pro' uses a larger, more capable model suited for complex tasks requiring deep reasoning, large refactors, or multi-step planning.",
+							},
+							"Workspace": map[string]interface{}{
+								"type":        "string",
+								"enum":        []string{"inherit", "branch", "share"},
+								"description": "Workspace mode for the subagent. 'inherit' (default) uses the same workspace as the parent. 'branch' creates a new isolated workspace branched or cloned from the parent. 'share' creates a new workspace sharing the parent's underlying repository directory.",
 							},
 						},
 					},
@@ -226,6 +241,7 @@ func (e *Engine) executeDefineSubagent(ctx context.Context, tc llm.ToolCall, ste
 	enableWrite, _ := tc.Args["enable_write_tools"].(bool)
 	enableMCP, _ := tc.Args["enable_mcp_tools"].(bool)
 	enableSubagent, _ := tc.Args["enable_subagent_tools"].(bool)
+	defaultModel, _ := tc.Args["default_model"].(string)
 
 	if name == "" {
 		e.feedToolError(tc, step, "name is required for define_subagent")
@@ -243,6 +259,7 @@ func (e *Engine) executeDefineSubagent(ctx context.Context, tc llm.ToolCall, ste
 		EnableWriteTools:    enableWrite,
 		EnableMCPTools:      enableMCP,
 		EnableSubagentTools: enableSubagent,
+		DefaultModelTier:    defaultModel,
 	}
 
 	if err := e.subagentRegistry.Define(typeDef); err != nil {
@@ -287,6 +304,7 @@ type subagentInvocationArgs struct {
 	Role      string `json:"Role"`
 	Prompt    string `json:"Prompt"`
 	Workspace string `json:"Workspace,omitempty"`
+	Model     string `json:"Model,omitempty"`
 }
 
 // executeSubagent handles the invoke_subagent tool call.
@@ -338,6 +356,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 		ConversationID string `json:"conversation_id"`
 		TypeName       string `json:"type_name"`
 		Role           string `json:"role"`
+		Model          string `json:"model,omitempty"`
 	}
 	var results []launchResult
 
@@ -379,6 +398,10 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 		var childBrainDir string
 		if e.appDataDir != "" {
 			childBrainDir = filepath.Join(e.appDataDir, "brain", childConvID)
+		} else if e.brainDir != "" {
+			childBrainDir = filepath.Join(e.brainDir, "subagents", childConvID)
+		}
+		if childBrainDir != "" {
 			for _, d := range []string{
 				childBrainDir,
 				filepath.Join(childBrainDir, "scratch"),
@@ -426,9 +449,22 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			excludeHostTools = true
 		}
 
+		// Resolve child engine model provider
+		reqModel := inv.Model
+		if reqModel == "" {
+			if typeDef.DefaultModelTier != "" {
+				reqModel = typeDef.DefaultModelTier
+			} else if inv.TypeName == "research" {
+				reqModel = string(ModelTierFlash)
+			}
+		}
+		childProvider := ResolveSubagentProvider(e.provider, reqModel, e.modelTierResolver)
+
 		// Create child engine with its own flat brain dir and shared bus.
 		childEngine := NewEngine(Config{
-			Provider:                 e.provider,
+			Provider:                 childProvider,
+			SummarizerProvider:       e.summarizerProvider,
+			ModelTierResolver:        e.modelTierResolver,
 			ToolRegistry:             e.toolRegistry,
 			SystemPrompt:             sysPrompt,
 			ConversationID:           childConvID,
@@ -477,6 +513,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			ConversationID: childConvID,
 			TypeName:       inv.TypeName,
 			Role:           inv.Role,
+			Model:          childProvider.ModelName(),
 			State:          SubagentStateRunning,
 			Engine:         childEngine,
 			Cancel:         cancel,
@@ -516,18 +553,37 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			handoffPath := ""
 			if inst.Engine.brainDir != "" {
 				handoffPath = filepath.Join(inst.Engine.brainDir, "handoff_briefing.md")
-				if resultText != "" {
-					_ = os.WriteFile(handoffPath, []byte(resultText), 0644)
+				briefingContent := resultText
+				if briefingContent == "" && childErr != nil {
+					briefingContent = fmt.Sprintf("Error: %v\n", childErr)
+				}
+				if briefingContent != "" {
+					_ = os.WriteFile(handoffPath, []byte(briefingContent), 0644)
 				}
 			}
 
-			// Notify parent — include artifact directory and handoff briefing for cross-agent reads.
+			// Notify parent — compact 3-line notification with markdown link to handoff briefing.
 			statusStr := "completed"
 			if childErr != nil {
 				statusStr = fmt.Sprintf("failed: %v", childErr)
 			}
-			notifyContent := fmt.Sprintf("Subagent '%s' (%s) %s.\nConversation ID: %s\nArtifact Directory: %s\nHandoff Briefing: %s\n\n--- HANDOFF BRIEFING ---\n%s",
-				inst.TypeName, inst.Role, statusStr, inst.ConversationID, inst.Engine.brainDir, handoffPath, resultText)
+
+			summary := extractHandoffSummary(resultText, 250)
+			if summary == "" {
+				if childErr != nil {
+					summary = childErr.Error()
+				} else {
+					summary = "Task completed successfully."
+				}
+			}
+
+			briefingRef := "N/A"
+			if handoffPath != "" {
+				briefingRef = fmt.Sprintf("[handoff_briefing.md](file://%s)", filepath.ToSlash(handoffPath))
+			}
+
+			notifyContent := fmt.Sprintf("Subagent '%s' (%s) %s (Conversation ID: %s).\nHandoff Briefing: %s\nSummary: %s",
+				inst.TypeName, inst.Role, statusStr, inst.ConversationID, briefingRef, summary)
 
 			e.subagentTracker.NotifyParent(tools.SystemMessage{
 				Source:  "subagent_complete",
@@ -555,6 +611,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			ConversationID: childConvID,
 			TypeName:       inv.TypeName,
 			Role:           inv.Role,
+			Model:          childProvider.ModelName(),
 		})
 
 		e.logger.Info("launched subagent",
@@ -598,6 +655,7 @@ func (e *Engine) executeManageSubagents(ctx context.Context, tc llm.ToolCall, st
 				ConversationID string `json:"conversation_id"`
 				TypeName       string `json:"type_name"`
 				Role           string `json:"role"`
+				Model          string `json:"model,omitempty"`
 				State          string `json:"state"`
 			}
 			var infos []info
@@ -606,6 +664,7 @@ func (e *Engine) executeManageSubagents(ctx context.Context, tc llm.ToolCall, st
 					ConversationID: inst.ConversationID,
 					TypeName:       inst.TypeName,
 					Role:           inst.Role,
+					Model:          inst.Model,
 					State:          inst.GetState().String(),
 				})
 			}
@@ -726,6 +785,50 @@ func extractFinalResponse(history []llm.Message) string {
 		}
 	}
 	return ""
+}
+
+// extractHandoffSummary extracts a concise 1-2 sentence excerpt from the subagent's result text.
+func extractHandoffSummary(text string, maxLen int) string {
+	if text == "" {
+		return ""
+	}
+	if maxLen <= 0 {
+		maxLen = 250
+	}
+	lines := strings.Split(text, "\n")
+	var meaningful []string
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			continue
+		}
+		// Skip markdown headings and horizontal dividers
+		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "===") {
+			continue
+		}
+		// Strip leading list bullet markers
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		trimmed = strings.TrimPrefix(trimmed, "* ")
+		trimmed = strings.TrimSpace(trimmed)
+		if trimmed != "" {
+			meaningful = append(meaningful, trimmed)
+			if len(strings.Join(meaningful, " ")) >= maxLen {
+				break
+			}
+		}
+	}
+	combined := strings.Join(meaningful, " ")
+	if len(combined) > maxLen {
+		runes := []rune(combined)
+		if len(runes) > maxLen {
+			truncated := string(runes[:maxLen])
+			if lastSpace := strings.LastIndex(truncated, " "); lastSpace > maxLen/2 {
+				truncated = truncated[:lastSpace]
+			}
+			combined = strings.TrimRight(truncated, ",.; ") + "..."
+		}
+	}
+	return combined
 }
 
 // accumulateUsage sums up token usage estimates from model messages.

@@ -23,11 +23,13 @@ import (
 // mockProvider is a configurable mock LLM provider for testing.
 // It is safe for concurrent use by multiple goroutines (e.g., subagent tests).
 type mockProvider struct {
-	mu        sync.Mutex
-	responses []*llm.GenerateResponse
-	callIndex int
-	callLog   []*llm.GenerateRequest
-	genErr    error
+	mu               sync.Mutex
+	responses        []*llm.GenerateResponse
+	responsesByModel map[string][]*llm.GenerateResponse
+	callIndex        int
+	callLog          []*llm.GenerateRequest
+	genErr           error
+	modelName        string
 }
 
 func (m *mockProvider) Generate(ctx context.Context, req *llm.GenerateRequest) (*llm.GenerateResponse, error) {
@@ -48,8 +50,28 @@ func (m *mockProvider) Generate(ctx context.Context, req *llm.GenerateRequest) (
 	return resp, nil
 }
 
-func (m *mockProvider) ModelName() string { return "mock-model" }
-func (m *mockProvider) Close() error      { return nil }
+func (m *mockProvider) ModelName() string {
+	if m.modelName != "" {
+		return m.modelName
+	}
+	return "mock-model"
+}
+
+func (m *mockProvider) WithModel(modelName string) llm.Provider {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	resps := m.responses
+	if m.responsesByModel != nil && m.responsesByModel[modelName] != nil {
+		resps = m.responsesByModel[modelName]
+	}
+	return &mockProvider{
+		responses:        resps,
+		responsesByModel: m.responsesByModel,
+		genErr:           m.genErr,
+		modelName:        modelName,
+	}
+}
+func (m *mockProvider) Close() error { return nil }
 
 // failOnceProvider fails on the first N calls, then succeeds.
 type failOnceProvider struct {
