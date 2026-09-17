@@ -1,7 +1,7 @@
 package tools
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -79,28 +79,17 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		return fmt.Errorf("replace_file_content: at least one chunk is required")
 	}
 
-	// Read the file into lines
-	f, err := os.Open(path)
+	// Read the entire file into a single byte buffer
+	rawBytes, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("replace_file_content: %w", err)
 	}
 
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	f.Close()
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("replace_file_content: read error: %w", err)
-	}
-
-	totalLines := len(lines)
-	oldFileContent := strings.Join(lines, "\n") + "\n"
+	oldFileContent := string(rawBytes)
+	content := rawBytes
 	var diffParts []string
 
-	// Apply each chunk — process in order, working on the lines slice.
+	// Apply each chunk — process in order, working directly on the byte buffer.
 	// We use line-range scoping: only search within [start_line, end_line].
 	for i, chunk := range ef.Chunks {
 		target := chunk.TargetContent
@@ -110,6 +99,10 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 			return fmt.Errorf("replace_file_content: chunk %d: target_content is required", i)
 		}
 
+		targetBytes := []byte(target)
+		replacementBytes := []byte(replacement)
+
+		totalLines := countFileLines(content)
 		startLine := int(chunk.StartLine)
 		endLine := int(chunk.EndLine)
 
@@ -117,48 +110,57 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		if startLine <= 0 {
 			startLine = 1
 		}
-		if endLine <= 0 || endLine > len(lines) {
-			endLine = len(lines)
+		if endLine <= 0 || endLine > totalLines {
+			endLine = totalLines
 		}
 
 		// Validate range
-		if startLine > len(lines) {
+		if startLine > totalLines {
 			return fmt.Errorf("replace_file_content: chunk %d: start_line %d exceeds file length %d", i, startLine, totalLines)
 		}
 		if startLine > endLine {
 			return fmt.Errorf("replace_file_content: chunk %d: start_line %d > end_line %d", i, startLine, endLine)
 		}
 
-		// Extract the scoped region (0-indexed)
-		scopeStart := startLine - 1
-		scopeEnd := endLine
-		scopedText := strings.Join(lines[scopeStart:scopeEnd], "\n")
+		// Extract the scoped region byte range
+		scopeStart, scopeEnd := getLineByteRange(content, startLine, endLine, totalLines)
+		scopedBytes := content[scopeStart:scopeEnd]
+
+		// Support CRLF line endings transparently
+		if !bytes.Contains(targetBytes, []byte("\r\n")) && bytes.Contains(scopedBytes, []byte("\r\n")) {
+			crlfTarget := bytes.ReplaceAll(targetBytes, []byte("\n"), []byte("\r\n"))
+			if bytes.Count(scopedBytes, crlfTarget) > 0 {
+				targetBytes = crlfTarget
+				replacementBytes = bytes.ReplaceAll(replacementBytes, []byte("\n"), []byte("\r\n"))
+			}
+		}
 
 		// Search within scoped region only
-		count := strings.Count(scopedText, target)
+		count := bytes.Count(scopedBytes, targetBytes)
 		if count == 0 {
 			// Resilient fallback 1: Expand search window by ±20 lines
-			expStart := scopeStart - 20
-			if expStart < 0 {
-				expStart = 0
+			expStartLine := startLine - 20
+			if expStartLine < 1 {
+				expStartLine = 1
 			}
-			expEnd := scopeEnd + 20
-			if expEnd > len(lines) {
-				expEnd = len(lines)
+			expEndLine := endLine + 20
+			if expEndLine > totalLines {
+				expEndLine = totalLines
 			}
-			expText := strings.Join(lines[expStart:expEnd], "\n")
-			if strings.Count(expText, target) == 1 {
-				scopeStart = expStart
-				scopeEnd = expEnd
-				scopedText = expText
+			expScopeStart, expScopeEnd := getLineByteRange(content, expStartLine, expEndLine, totalLines)
+			expScopedBytes := content[expScopeStart:expScopeEnd]
+
+			if bytes.Count(expScopedBytes, targetBytes) == 1 {
+				scopeStart = expScopeStart
+				scopeEnd = expScopeEnd
+				scopedBytes = expScopedBytes
 				count = 1
 			} else {
 				// Resilient fallback 2: Check if target is unique across entire file
-				fullText := strings.Join(lines, "\n")
-				if strings.Count(fullText, target) == 1 {
+				if bytes.Count(content, targetBytes) == 1 {
 					scopeStart = 0
-					scopeEnd = len(lines)
-					scopedText = fullText
+					scopeEnd = len(content)
+					scopedBytes = content
 					count = 1
 				} else {
 					return fmt.Errorf("replace_file_content: chunk %d: target_content not found within lines %d-%d", i, startLine, endLine)
@@ -170,21 +172,19 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		}
 
 		// Perform replacement within the scoped region
-		var newScopedText string
+		var newScopedBytes []byte
 		if chunk.AllowMultiple {
-			newScopedText = strings.ReplaceAll(scopedText, target, replacement)
+			newScopedBytes = bytes.ReplaceAll(scopedBytes, targetBytes, replacementBytes)
 		} else {
-			newScopedText = strings.Replace(scopedText, target, replacement, 1)
+			newScopedBytes = bytes.Replace(scopedBytes, targetBytes, replacementBytes, 1)
 		}
 
-		// Replace the lines in the scoped region
-		newLines := strings.Split(newScopedText, "\n")
-		// Rebuild the lines slice: before + new scoped + after
-		result := make([]string, 0, scopeStart+len(newLines)+(len(lines)-scopeEnd))
-		result = append(result, lines[:scopeStart]...)
-		result = append(result, newLines...)
-		result = append(result, lines[scopeEnd:]...)
-		lines = result
+		// Rebuild content buffer without line/string splitting
+		newContent := make([]byte, 0, scopeStart+len(newScopedBytes)+(len(content)-scopeEnd))
+		newContent = append(newContent, content[:scopeStart]...)
+		newContent = append(newContent, newScopedBytes...)
+		newContent = append(newContent, content[scopeEnd:]...)
+		content = newContent
 
 		// Build diff
 		diffParts = append(diffParts, fmt.Sprintf("--- chunk %d (lines %d-%d) ---\n- %s\n+ %s",
@@ -193,14 +193,14 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 			truncateForDiff(replacement, 200)))
 	}
 
-	// Reconstruct content and write back
-	content := strings.Join(lines, "\n") + "\n"
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	// Write back modified content
+	if err := os.WriteFile(path, content, 0644); err != nil {
 		return fmt.Errorf("replace_file_content: write error: %w", err)
 	}
 
+	newFileContent := string(content)
 	filename := filepath.Base(path)
-	unifiedDiff := util.UnifiedDiff("a/"+filename, "b/"+filename, oldFileContent, content)
+	unifiedDiff := util.UnifiedDiff("a/"+filename, "b/"+filename, oldFileContent, newFileContent)
 	if unifiedDiff != "" {
 		ef.DiffBlock = unifiedDiff
 	} else {
@@ -224,6 +224,63 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 
 	return nil
+}
+
+// countFileLines counts the number of lines in a byte buffer matching bufio.Scanner line semantics.
+func countFileLines(content []byte) int {
+	if len(content) == 0 {
+		return 0
+	}
+	n := bytes.Count(content, []byte{'\n'})
+	if content[len(content)-1] != '\n' {
+		n++
+	}
+	return n
+}
+
+// getLineByteRange returns the byte offsets [start, end) for lines [startLine, endLine] (1-indexed).
+// The returned range includes the trailing newline of endLine if one is present in content.
+func getLineByteRange(content []byte, startLine, endLine, totalLines int) (int, int) {
+	if len(content) == 0 {
+		return 0, 0
+	}
+
+	scopeStart := 0
+	if startLine > 1 {
+		nlCount := 0
+		for i, b := range content {
+			if b == '\n' {
+				nlCount++
+				if nlCount == startLine-1 {
+					scopeStart = i + 1
+					break
+				}
+			}
+		}
+	}
+
+	scopeEnd := len(content)
+	if endLine < totalLines {
+		nlCount := 0
+		for i, b := range content {
+			if b == '\n' {
+				nlCount++
+				if nlCount == endLine {
+					scopeEnd = i + 1
+					break
+				}
+			}
+		}
+	}
+
+	if scopeStart > len(content) {
+		scopeStart = len(content)
+	}
+	if scopeEnd < scopeStart {
+		scopeEnd = scopeStart
+	}
+
+	return scopeStart, scopeEnd
 }
 
 func truncateForDiff(s string, maxLen int) string {

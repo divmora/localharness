@@ -18,7 +18,7 @@ func registerListDir(r *Registry) {
 			"Use this instead of run_command with ls, dir, or find (for directory listing). " +
 			"Directory path must be an absolute path to a directory that exists. " +
 			"For each child: relative path, whether it is a directory or file, size in bytes if file, " +
-			"and number of children (recursive) if directory.",
+			"and number of children if directory.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -87,9 +87,9 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 		}
 
 		if entry.IsDir() {
-			// Count recursive children (cap at reasonable depth to avoid slowness)
-			childCount := countChildren(filepath.Join(dirPath, entry.Name()), 3)
-			de.ChildCount = int32(childCount)
+			if !listDirSkipNames[entry.Name()] {
+				de.ChildCount = int32(shallowChildCount(filepath.Join(dirPath, entry.Name())))
+			}
 		} else {
 			if fi, err := entry.Info(); err == nil {
 				de.SizeBytes = fi.Size()
@@ -103,22 +103,19 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 	return nil
 }
 
-// countChildren recursively counts items in a directory up to maxDepth.
-func countChildren(dir string, maxDepth int) int {
-	if maxDepth <= 0 {
-		return 0
-	}
+// listDirSkipNames defines directory names that should strictly skip child counting
+// to prevent synchronous disk storms on large dependency and VCS directories.
+var listDirSkipNames = map[string]bool{
+	".git":         true,
+	"node_modules": true,
+	"vendor":       true,
+}
 
+// shallowChildCount counts immediate items in a directory without recursion.
+func shallowChildCount(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0
 	}
-
-	count := len(entries)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			count += countChildren(filepath.Join(dir, entry.Name()), maxDepth-1)
-		}
-	}
-	return count
+	return len(entries)
 }

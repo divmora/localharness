@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -107,7 +108,7 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		return nil
 	}
 
-	// Rewind and read lines
+	// Rewind and stream lines
 	if _, err := f.Seek(0, 0); err != nil {
 		return errors.Wrap(err, errors.ErrCodeToolExecution,
 			"failed to seek in file").
@@ -116,13 +117,47 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 			WithComponent("view_file")
 	}
 
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	// Increase buffer for large lines
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+	startLine := int(vf.StartLine)
+	endLine := int(vf.EndLine)
+
+	if startLine <= 0 {
+		startLine = 1
 	}
+	// If the LLM accidentally reversed start/end, swap them.
+	if endLine > 0 && startLine > endLine {
+		startLine, endLine = endLine, startLine
+	}
+	// Default endLine if omitted: up to 800 lines from startLine
+	if endLine <= 0 {
+		endLine = startLine + 799
+	}
+	// Enforce 800 line max per read
+	if endLine-startLine+1 > 800 {
+		endLine = startLine + 799
+	}
+	if startLine < 1 {
+		startLine = 1
+	}
+
+	scanner := bufio.NewScanner(f)
+	// Initial 64KB buffer, grow up to 4MB for long lines
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+
+	var sb strings.Builder
+	currentLine := 0
+	actualEndLine := 0
+
+	for scanner.Scan() {
+		currentLine++
+		if currentLine >= startLine && currentLine <= endLine {
+			actualEndLine = currentLine
+			sb.WriteString(strconv.Itoa(currentLine))
+			sb.WriteString(": ")
+			sb.Write(scanner.Bytes())
+			sb.WriteByte('\n')
+		}
+	}
+
 	if err := scanner.Err(); err != nil {
 		return errors.Wrap(err, errors.ErrCodeToolExecution,
 			"failed to read file").
@@ -131,43 +166,9 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 			WithComponent("view_file")
 	}
 
-	totalLines := len(lines)
-	startLine := int(vf.StartLine)
-	endLine := int(vf.EndLine)
-
-	// Default range
-	if startLine <= 0 {
-		startLine = 1
-	}
-	if endLine <= 0 || endLine > totalLines {
-		endLine = totalLines
-	}
-
-	// If the LLM accidentally reversed start/end, swap them.
-	if startLine > endLine {
-		startLine, endLine = endLine, startLine
-	}
-
-	// Enforce 800 line max per read
-	if endLine-startLine+1 > 800 {
-		endLine = startLine + 799
-	}
-
-	// Clamp
-	if startLine > totalLines {
-		startLine = totalLines
-	}
-	if startLine < 1 {
-		startLine = 1
-	}
-
-	// Extract the range (convert to 0-indexed)
-	selected := lines[startLine-1 : endLine]
-
-	// Add line numbers
-	var sb strings.Builder
-	for i, line := range selected {
-		fmt.Fprintf(&sb, "%d: %s\n", startLine+i, line)
+	totalLines := currentLine
+	if actualEndLine == 0 && totalLines > 0 && startLine <= totalLines {
+		actualEndLine = totalLines
 	}
 
 	vf.Content = sb.String()
@@ -176,14 +177,16 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	vf.IsBinary = false
 
 	// Add partial content indicator so the model knows it got a subset
-	if endLine < totalLines {
+	if totalLines > 0 && startLine > totalLines {
+		vf.Content = fmt.Sprintf("File only has %d lines (requested start_line %d is beyond end of file).\n", totalLines, startLine)
+	} else if actualEndLine < totalLines {
 		vf.Content += fmt.Sprintf(
 			"The above content does NOT show the entire file contents. "+
 				"Showing lines %d-%d of %d total. "+
 				"Call view_file again with start_line/end_line to see remaining lines.\n",
-			startLine, endLine, totalLines,
+			startLine, actualEndLine, totalLines,
 		)
-	} else if startLine == 1 && endLine == totalLines {
+	} else if startLine == 1 && actualEndLine == totalLines {
 		vf.Content += "The above content shows the entire, complete file contents of the requested file.\n"
 	}
 

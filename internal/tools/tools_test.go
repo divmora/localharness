@@ -2,9 +2,11 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -1190,5 +1192,218 @@ func TestMustMarshalSchema(t *testing.T) {
 	}
 	if result["type"] != "object" {
 		t.Error("schema should preserve 'type' field")
+	}
+}
+
+func TestListDir_ShallowAndSkipLargeDirs(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// Create a subdirectory with nested structure
+	subDir := filepath.Join(wsDir, "my_package")
+	_ = os.MkdirAll(filepath.Join(subDir, "nested", "deeper"), 0755)
+	_ = os.WriteFile(filepath.Join(subDir, "file1.txt"), []byte("1"), 0644)
+	_ = os.WriteFile(filepath.Join(subDir, "file2.txt"), []byte("2"), 0644)
+	_ = os.WriteFile(filepath.Join(subDir, "nested", "file3.txt"), []byte("3"), 0644)
+	_ = os.WriteFile(filepath.Join(subDir, "nested", "deeper", "file4.txt"), []byte("4"), 0644)
+
+	// Create directories that should be skipped from child counting
+	_ = os.MkdirAll(filepath.Join(wsDir, "node_modules", "pkg1"), 0755)
+	_ = os.WriteFile(filepath.Join(wsDir, "node_modules", "pkg1", "index.js"), []byte("export default {}"), 0644)
+
+	_ = os.MkdirAll(filepath.Join(wsDir, ".git", "objects"), 0755)
+	_ = os.WriteFile(filepath.Join(wsDir, ".git", "HEAD"), []byte("ref: refs/heads/main"), 0644)
+
+	_ = os.MkdirAll(filepath.Join(wsDir, "vendor", "mod1"), 0755)
+	_ = os.WriteFile(filepath.Join(wsDir, "vendor", "mod1", "lib.go"), []byte("package mod1"), 0644)
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ListDir{
+			ListDir: &pb.ActionListDir{Path: wsDir},
+		},
+	}
+
+	err := reg.Execute(ctx, "list_dir", step)
+	if err != nil {
+		t.Fatalf("list_dir failed: %v", err)
+	}
+
+	ld := step.GetListDir()
+	entryMap := make(map[string]*pb.DirEntry)
+	for _, e := range ld.Entries {
+		entryMap[e.Name] = e
+	}
+
+	// my_package has 3 immediate items: nested (dir), file1.txt, file2.txt
+	// It should NOT count deeper descendants (nested/file3.txt, nested/deeper, etc.)
+	if pkgEntry, ok := entryMap["my_package"]; !ok {
+		t.Fatal("expected my_package directory entry")
+	} else if pkgEntry.ChildCount != 3 {
+		t.Errorf("expected shallow child count 3 for my_package, got %d", pkgEntry.ChildCount)
+	}
+
+	// node_modules, .git, and vendor must have ChildCount == 0 (strictly skipped)
+	if nmEntry, ok := entryMap["node_modules"]; !ok {
+		t.Fatal("expected node_modules entry")
+	} else if nmEntry.ChildCount != 0 {
+		t.Errorf("expected childCount 0 for node_modules, got %d", nmEntry.ChildCount)
+	}
+
+	if gitEntry, ok := entryMap[".git"]; !ok {
+		t.Fatal("expected .git entry")
+	} else if gitEntry.ChildCount != 0 {
+		t.Errorf("expected childCount 0 for .git, got %d", gitEntry.ChildCount)
+	}
+
+	if vEntry, ok := entryMap["vendor"]; !ok {
+		t.Fatal("expected vendor entry")
+	} else if vEntry.ChildCount != 0 {
+		t.Errorf("expected childCount 0 for vendor, got %d", vEntry.ChildCount)
+	}
+}
+
+func TestViewFile_LineStreaming(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// 50-line file
+	var sb strings.Builder
+	for i := 1; i <= 50; i++ {
+		sb.WriteString(fmt.Sprintf("line content %d\n", i))
+	}
+	testFile := filepath.Join(wsDir, "stream_test.txt")
+	_ = os.WriteFile(testFile, []byte(sb.String()), 0644)
+
+	// Case 1: Read subset lines 10 to 15
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ViewFile{
+			ViewFile: &pb.ActionViewFile{
+				Path:      testFile,
+				StartLine: 10,
+				EndLine:   15,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "view_file", step); err != nil {
+		t.Fatalf("view_file failed: %v", err)
+	}
+	vf := step.GetViewFile()
+	if vf.TotalLines != 50 {
+		t.Errorf("expected 50 total lines, got %d", vf.TotalLines)
+	}
+	if !strings.Contains(vf.Content, "10: line content 10\n") {
+		t.Error("expected line 10 in content")
+	}
+	if !strings.Contains(vf.Content, "15: line content 15\n") {
+		t.Error("expected line 15 in content")
+	}
+	if strings.Contains(vf.Content, "16: line content 16\n") {
+		t.Error("line 16 should not be in content")
+	}
+	if !strings.Contains(vf.Content, "Showing lines 10-15 of 50 total.") {
+		t.Errorf("expected partial content indicator, got %s", vf.Content)
+	}
+
+	// Case 2: StartLine beyond EOF
+	stepBeyond := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ViewFile{
+			ViewFile: &pb.ActionViewFile{
+				Path:      testFile,
+				StartLine: 100,
+				EndLine:   150,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "view_file", stepBeyond); err != nil {
+		t.Fatalf("view_file beyond EOF failed: %v", err)
+	}
+	vfBeyond := stepBeyond.GetViewFile()
+	if vfBeyond.TotalLines != 50 {
+		t.Errorf("expected 50 total lines, got %d", vfBeyond.TotalLines)
+	}
+	if !strings.Contains(vfBeyond.Content, "File only has 50 lines (requested start_line 100 is beyond end of file).") {
+		t.Errorf("unexpected content for beyond EOF read: %s", vfBeyond.Content)
+	}
+}
+
+func TestEditFile_ByteBufferAndCRLF(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// Create file with CRLF line endings
+	crlfContent := "first line\r\nsecond line\r\nthird line\r\n"
+	testFile := filepath.Join(wsDir, "crlf.txt")
+	_ = os.WriteFile(testFile, []byte(crlfContent), 0644)
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReplaceFileContent{
+			ReplaceFileContent: &pb.ActionReplaceFileContent{
+				Path: testFile,
+				Chunks: []*pb.EditChunk{
+					{
+						StartLine:     2,
+						EndLine:       2,
+						TargetContent: "second line",
+						Replacement:   "SECOND LINE",
+					},
+				},
+			},
+		},
+	}
+
+	if err := reg.Execute(ctx, "replace_file_content", step); err != nil {
+		t.Fatalf("replace_file_content with CRLF failed: %v", err)
+	}
+
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "first line\r\nSECOND LINE\r\nthird line\r\n"
+	if string(data) != expected {
+		t.Errorf("expected CRLF content %q, got %q", expected, string(data))
+	}
+}
+
+func TestEditFile_Fallbacks(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	var sb strings.Builder
+	for i := 1; i <= 60; i++ {
+		if i == 35 {
+			sb.WriteString("unique target string to replace\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("filler line %d\n", i))
+		}
+	}
+	testFile := filepath.Join(wsDir, "fallback.txt")
+	_ = os.WriteFile(testFile, []byte(sb.String()), 0644)
+
+	// Target is on line 35, but we specify start_line=25, end_line=30
+	// Fallback 1 (±20 lines) expands search to lines 5-50 and finds it!
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReplaceFileContent{
+			ReplaceFileContent: &pb.ActionReplaceFileContent{
+				Path: testFile,
+				Chunks: []*pb.EditChunk{
+					{
+						StartLine:     25,
+						EndLine:       30,
+						TargetContent: "unique target string to replace",
+						Replacement:   "successfully replaced via fallback",
+					},
+				},
+			},
+		},
+	}
+
+	if err := reg.Execute(ctx, "replace_file_content", step); err != nil {
+		t.Fatalf("replace_file_content fallback failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(testFile)
+	if !strings.Contains(string(data), "successfully replaced via fallback\n") {
+		t.Errorf("expected target to be replaced via fallback, got %s", string(data))
 	}
 }
