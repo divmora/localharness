@@ -239,6 +239,7 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 		BrainDir:             childBrainDir,
 		AppDataDir:           e.appDataDir,
 		Logger:               e.logger.With("subagent", "browser", "role", "Browser Agent"),
+		StreamFlushInterval:  e.streamFlushInterval,
 		HostToolHandler:      e.hostToolHandler,
 		HostToolNames:        e.hostToolNames,
 		HostToolDecls:        e.hostToolDecls,

@@ -56,6 +56,14 @@ type PermissionGrant struct {
 // sends a QuestionResponse. Returns the user's answers.
 type QuestionHandler func(ctx context.Context, req *pb.ActionUserQuestion) (*pb.QuestionResponse, error)
 
+// DefaultStreamFlushInterval is the default batching/debounce window for streaming deltas.
+// Chunks arriving within this window are coalesced into a single StepUpdate, reducing
+// WebSocket frame serialization thrashing and UI render churn while preserving ~30-60fps display rate.
+const DefaultStreamFlushInterval = 30 * time.Millisecond
+
+// maxPendingStreamBytes is the buffer size limit triggering an immediate flush before the interval timer.
+const maxPendingStreamBytes = 512
+
 // Engine orchestrates the agentic loop.
 type Engine struct {
 	provider             llm.Provider
@@ -68,6 +76,7 @@ type Engine struct {
 	convID               string
 	sysPrompt            string
 	history              []llm.Message
+	streamFlushInterval  time.Duration
 	maxTurns             int // Safety limit on agentic loop iterations
 	compactionThreshold  int // Token threshold for context compaction (0 = disabled)
 	keepRecentMessages   int // Messages to preserve during compaction
@@ -204,6 +213,10 @@ type Config struct {
 	ExcludeHostTools  bool // Hide SDK-registered host tools
 	ExcludeMCPTools   bool // Hide MCP tools
 
+	// StreamFlushInterval configures the batching/debounce window for streaming deltas.
+	// Defaults to DefaultStreamFlushInterval (30ms) if 0. Set to <0 to disable batching.
+	StreamFlushInterval time.Duration
+
 	// Knowledge Items — project registry for workspace → project UUID mapping.
 	ProjectRegistry *ProjectRegistry
 
@@ -231,6 +244,13 @@ func NewEngine(cfg Config) *Engine {
 	}
 	if cfg.MaxSubagents <= 0 {
 		cfg.MaxSubagents = defaultMaxSubagents
+	}
+
+	flushInterval := cfg.StreamFlushInterval
+	if flushInterval == 0 {
+		flushInterval = DefaultStreamFlushInterval
+	} else if flushInterval < 0 {
+		flushInterval = 0 // disabled
 	}
 
 	// Build subagent registry (merge built-in + SDK types)
@@ -331,6 +351,7 @@ func NewEngine(cfg Config) *Engine {
 		trajectoryID:        cfg.TrajectoryID,
 		convID:              cfg.ConversationID,
 		sysPrompt:           sysPrompt,
+		streamFlushInterval: flushInterval,
 		maxTurns:            cfg.MaxTurns,
 		compactionThreshold: cfg.CompactionThreshold,
 		keepRecentMessages:  cfg.KeepRecentMessages,
@@ -2347,8 +2368,9 @@ func (e *Engine) nextStepIndex() int32 {
 	return e.stepIndex.Add(1) - 1
 }
 
-// streamGenerate reads from a streaming LLM provider, emitting STATE_STREAMING
-// StepUpdates for each text/thinking delta, and returns the assembled GenerateResponse.
+// streamGenerate reads from a streaming LLM provider, debouncing and coalescing
+// text and thinking deltas into batched STATE_STREAMING StepUpdates over a flush window,
+// and returns the assembled GenerateResponse.
 func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, req *llm.GenerateRequest) (*llm.GenerateResponse, error) {
 	chunksCh, errCh := sp.GenerateStream(ctx, req)
 
@@ -2356,58 +2378,180 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 	streamStepIdx := e.nextStepIndex()
 
 	var contentBuf, thinkingBuf strings.Builder
+	var pendingText, pendingThinking strings.Builder
 	var allToolCalls []llm.ToolCall
 	var finalUsage llm.Usage
 	var finishReason string
+	var hasEmittedFirstThinking, hasEmittedFirstText bool
 
-	for chunk := range chunksCh {
-		// Emit text delta
-		if chunk.TextDelta != "" {
-			contentBuf.WriteString(chunk.TextDelta)
-			e.emitStep(&pb.StepUpdate{
-				ConversationId: e.convID,
-				TrajectoryId:   e.trajectoryID,
-				StepIndex:      streamStepIdx,
-				TextDelta:      chunk.TextDelta,
-				Source:         pb.StepUpdate_SOURCE_MODEL,
-				State:          pb.StepUpdate_STATE_STREAMING,
-				Target:         pb.StepUpdate_TARGET_USER,
-			})
+	flushThinking := func() {
+		if pendingThinking.Len() == 0 {
+			return
 		}
+		delta := pendingThinking.String()
+		pendingThinking.Reset()
+		e.emitStep(&pb.StepUpdate{
+			ConversationId: e.convID,
+			TrajectoryId:   e.trajectoryID,
+			StepIndex:      streamStepIdx,
+			ThinkingDelta:  delta,
+			Source:         pb.StepUpdate_SOURCE_MODEL,
+			State:          pb.StepUpdate_STATE_STREAMING,
+			Target:         pb.StepUpdate_TARGET_USER,
+		})
+	}
 
+	flushText := func() {
+		if pendingText.Len() == 0 {
+			return
+		}
+		delta := pendingText.String()
+		pendingText.Reset()
+		e.emitStep(&pb.StepUpdate{
+			ConversationId: e.convID,
+			TrajectoryId:   e.trajectoryID,
+			StepIndex:      streamStepIdx,
+			TextDelta:      delta,
+			Source:         pb.StepUpdate_SOURCE_MODEL,
+			State:          pb.StepUpdate_STATE_STREAMING,
+			Target:         pb.StepUpdate_TARGET_USER,
+		})
+	}
+
+	flushAll := func() {
+		flushThinking()
+		flushText()
+	}
+	defer flushAll()
+
+	handleChunk := func(chunk llm.StreamChunk) {
 		// Emit thinking delta
 		if chunk.ThinkingDelta != "" {
 			thinkingBuf.WriteString(chunk.ThinkingDelta)
-			e.emitStep(&pb.StepUpdate{
-				ConversationId: e.convID,
-				TrajectoryId:   e.trajectoryID,
-				StepIndex:      streamStepIdx,
-				ThinkingDelta:  chunk.ThinkingDelta,
-				Source:         pb.StepUpdate_SOURCE_MODEL,
-				State:          pb.StepUpdate_STATE_STREAMING,
-				Target:         pb.StepUpdate_TARGET_USER,
-			})
+			if e.streamFlushInterval <= 0 {
+				e.emitStep(&pb.StepUpdate{
+					ConversationId: e.convID,
+					TrajectoryId:   e.trajectoryID,
+					StepIndex:      streamStepIdx,
+					ThinkingDelta:  chunk.ThinkingDelta,
+					Source:         pb.StepUpdate_SOURCE_MODEL,
+					State:          pb.StepUpdate_STATE_STREAMING,
+					Target:         pb.StepUpdate_TARGET_USER,
+				})
+			} else if !hasEmittedFirstThinking {
+				// Fast-path: emit initial thinking token immediately for 0ms TTFT
+				hasEmittedFirstThinking = true
+				e.emitStep(&pb.StepUpdate{
+					ConversationId: e.convID,
+					TrajectoryId:   e.trajectoryID,
+					StepIndex:      streamStepIdx,
+					ThinkingDelta:  chunk.ThinkingDelta,
+					Source:         pb.StepUpdate_SOURCE_MODEL,
+					State:          pb.StepUpdate_STATE_STREAMING,
+					Target:         pb.StepUpdate_TARGET_USER,
+				})
+			} else {
+				pendingThinking.WriteString(chunk.ThinkingDelta)
+				if pendingThinking.Len() >= maxPendingStreamBytes {
+					flushThinking()
+				}
+			}
+		}
+
+		// Emit text delta
+		if chunk.TextDelta != "" {
+			if pendingThinking.Len() > 0 {
+				flushThinking()
+			}
+			contentBuf.WriteString(chunk.TextDelta)
+			if e.streamFlushInterval <= 0 {
+				e.emitStep(&pb.StepUpdate{
+					ConversationId: e.convID,
+					TrajectoryId:   e.trajectoryID,
+					StepIndex:      streamStepIdx,
+					TextDelta:      chunk.TextDelta,
+					Source:         pb.StepUpdate_SOURCE_MODEL,
+					State:          pb.StepUpdate_STATE_STREAMING,
+					Target:         pb.StepUpdate_TARGET_USER,
+				})
+			} else if !hasEmittedFirstText {
+				// Fast-path: emit initial text token immediately for 0ms TTFT
+				hasEmittedFirstText = true
+				e.emitStep(&pb.StepUpdate{
+					ConversationId: e.convID,
+					TrajectoryId:   e.trajectoryID,
+					StepIndex:      streamStepIdx,
+					TextDelta:      chunk.TextDelta,
+					Source:         pb.StepUpdate_SOURCE_MODEL,
+					State:          pb.StepUpdate_STATE_STREAMING,
+					Target:         pb.StepUpdate_TARGET_USER,
+				})
+			} else {
+				pendingText.WriteString(chunk.TextDelta)
+				if pendingText.Len() >= maxPendingStreamBytes {
+					flushText()
+				}
+			}
 		}
 
 		// Collect tool calls (typically only in the final chunk)
 		if len(chunk.ToolCalls) > 0 {
 			allToolCalls = append(allToolCalls, chunk.ToolCalls...)
+			flushAll()
 		}
 
 		// Capture final metadata
 		if chunk.Done {
 			finalUsage = chunk.Usage
 			finishReason = chunk.FinishReason
+			flushAll()
 		}
 	}
 
-	// Check for stream error
-	select {
-	case err := <-errCh:
-		if err != nil {
-			return nil, err
+	if e.streamFlushInterval <= 0 {
+		for chunk := range chunksCh {
+			handleChunk(chunk)
 		}
-	default:
+	} else {
+		ticker := time.NewTicker(e.streamFlushInterval)
+		defer ticker.Stop()
+
+		streamOpen := true
+		for streamOpen {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-ticker.C:
+				flushAll()
+			case err, ok := <-errCh:
+				if !ok {
+					errCh = nil
+					continue
+				}
+				if err != nil {
+					return nil, err
+				}
+			case chunk, ok := <-chunksCh:
+				if !ok {
+					streamOpen = false
+					break
+				}
+				handleChunk(chunk)
+			}
+		}
+	}
+
+	flushAll()
+
+	// Check for stream error
+	if errCh != nil {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				return nil, err
+			}
+		default:
+		}
 	}
 
 	// Determine finish reason

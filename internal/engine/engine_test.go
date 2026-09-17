@@ -1463,72 +1463,127 @@ func (m *mockStreamingProvider) ModelName() string { return "mock-streaming-mode
 func (m *mockStreamingProvider) Close() error      { return nil }
 
 func TestStreamingTextResponse(t *testing.T) {
-	provider := &mockStreamingProvider{
-		streamChunks: []llm.StreamChunk{
-			{TextDelta: "Hello"},
-			{TextDelta: ", "},
-			{TextDelta: "world!"},
-			{
-				Done:         true,
-				FinishReason: "stop",
-				Usage:        llm.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
+	t.Run("batched default", func(t *testing.T) {
+		provider := &mockStreamingProvider{
+			streamChunks: []llm.StreamChunk{
+				{TextDelta: "Hello"},
+				{TextDelta: ", "},
+				{TextDelta: "world!"},
+				{
+					Done:         true,
+					FinishReason: "stop",
+					Usage:        llm.Usage{TotalTokens: 10},
+				},
 			},
-		},
-	}
+		}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	reg := tools.NewRegistry(nil, logger)
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		reg := tools.NewRegistry(nil, logger)
 
-	var steps []*pb.StepUpdate
-	eng := NewEngine(Config{
-		Provider:       provider,
-		ToolRegistry:   reg,
-		ConversationID: "test-stream",
-		TrajectoryID:   "test-traj",
-		BrainDir:       t.TempDir(),
-		Logger:         logger,
+		var steps []*pb.StepUpdate
+		eng := NewEngine(Config{
+			Provider:       provider,
+			ToolRegistry:   reg,
+			ConversationID: "test-stream",
+			TrajectoryID:   "test-traj",
+			BrainDir:       t.TempDir(),
+			Logger:         logger,
+		})
+		eng.stepCB = func(step *pb.StepUpdate) {
+			steps = append(steps, step)
+		}
+
+		err := eng.Run(context.Background(), "Hello")
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
+		}
+
+		var streamingSteps []*pb.StepUpdate
+		var accumulated strings.Builder
+		var finalStep *pb.StepUpdate
+		for _, s := range steps {
+			if s.State == pb.StepUpdate_STATE_STREAMING {
+				streamingSteps = append(streamingSteps, s)
+				accumulated.WriteString(s.TextDelta)
+			}
+			if s.State == pb.StepUpdate_STATE_DONE && s.Source == pb.StepUpdate_SOURCE_MODEL && s.Text != "" {
+				finalStep = s
+			}
+		}
+
+		if len(streamingSteps) == 0 {
+			t.Fatal("expected streaming steps")
+		}
+		// First token should be emitted immediately for instant TTFT
+		if streamingSteps[0].TextDelta != "Hello" {
+			t.Errorf("expected first delta %q, got %q", "Hello", streamingSteps[0].TextDelta)
+		}
+		// Accumulated deltas should match the full content
+		if accumulated.String() != "Hello, world!" {
+			t.Errorf("expected accumulated text %q, got %q", "Hello, world!", accumulated.String())
+		}
+		// Verify final step has full accumulated text
+		if finalStep == nil {
+			t.Fatal("expected a final STATE_DONE step with text")
+		}
+		if finalStep.Text != "Hello, world!" {
+			t.Errorf("expected final text %q, got %q", "Hello, world!", finalStep.Text)
+		}
 	})
-	eng.stepCB = func(step *pb.StepUpdate) {
-		steps = append(steps, step)
-	}
 
-	err := eng.Run(context.Background(), "Hello")
-	if err != nil {
-		t.Fatalf("Run failed: %v", err)
-	}
-
-	// Verify we got STATE_STREAMING steps with text_delta
-	var streamingSteps []*pb.StepUpdate
-	var finalStep *pb.StepUpdate
-	for _, s := range steps {
-		if s.State == pb.StepUpdate_STATE_STREAMING {
-			streamingSteps = append(streamingSteps, s)
+	t.Run("unbatched", func(t *testing.T) {
+		provider := &mockStreamingProvider{
+			streamChunks: []llm.StreamChunk{
+				{TextDelta: "Hello"},
+				{TextDelta: ", "},
+				{TextDelta: "world!"},
+				{
+					Done:         true,
+					FinishReason: "stop",
+					Usage:        llm.Usage{TotalTokens: 10},
+				},
+			},
 		}
-		if s.State == pb.StepUpdate_STATE_DONE && s.Source == pb.StepUpdate_SOURCE_MODEL && s.Text != "" {
-			finalStep = s
+
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		reg := tools.NewRegistry(nil, logger)
+
+		var steps []*pb.StepUpdate
+		eng := NewEngine(Config{
+			Provider:            provider,
+			ToolRegistry:        reg,
+			ConversationID:      "test-stream-unbatched",
+			TrajectoryID:        "test-traj",
+			BrainDir:            t.TempDir(),
+			Logger:              logger,
+			StreamFlushInterval: -1, // disable batching
+		})
+		eng.stepCB = func(step *pb.StepUpdate) {
+			steps = append(steps, step)
 		}
-	}
 
-	// Should have 3 streaming steps (one per text chunk, not the final Done chunk)
-	if len(streamingSteps) != 3 {
-		t.Errorf("expected 3 streaming steps, got %d", len(streamingSteps))
-	}
-
-	// Verify deltas
-	expectedDeltas := []string{"Hello", ", ", "world!"}
-	for i, s := range streamingSteps {
-		if i < len(expectedDeltas) && s.TextDelta != expectedDeltas[i] {
-			t.Errorf("step %d: expected delta %q, got %q", i, expectedDeltas[i], s.TextDelta)
+		err := eng.Run(context.Background(), "Hello")
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
 		}
-	}
 
-	// Verify final step has full accumulated text
-	if finalStep == nil {
-		t.Fatal("expected a final STATE_DONE step with text")
-	}
-	if finalStep.Text != "Hello, world!" {
-		t.Errorf("expected final text %q, got %q", "Hello, world!", finalStep.Text)
-	}
+		var streamingSteps []*pb.StepUpdate
+		for _, s := range steps {
+			if s.State == pb.StepUpdate_STATE_STREAMING {
+				streamingSteps = append(streamingSteps, s)
+			}
+		}
+
+		if len(streamingSteps) != 3 {
+			t.Fatalf("expected 3 streaming steps when unbatched, got %d", len(streamingSteps))
+		}
+		expectedDeltas := []string{"Hello", ", ", "world!"}
+		for i, s := range streamingSteps {
+			if s.TextDelta != expectedDeltas[i] {
+				t.Errorf("step %d: expected delta %q, got %q", i, expectedDeltas[i], s.TextDelta)
+			}
+		}
+	})
 }
 
 func TestStreamingThinkingResponse(t *testing.T) {
@@ -1833,6 +1888,159 @@ func TestStreamingError(t *testing.T) {
 	if !strings.Contains(err.Error(), "stream connection lost") {
 		t.Errorf("expected stream error message, got: %v", err)
 	}
+}
+
+type timedStreamingProvider struct {
+	chunks []llm.StreamChunk
+	delays []time.Duration
+}
+
+func (p *timedStreamingProvider) Generate(ctx context.Context, req *llm.GenerateRequest) (*llm.GenerateResponse, error) {
+	return nil, fmt.Errorf("use stream")
+}
+func (p *timedStreamingProvider) GenerateStream(ctx context.Context, req *llm.GenerateRequest) (<-chan llm.StreamChunk, <-chan error) {
+	chunksCh := make(chan llm.StreamChunk, len(p.chunks)+1)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(chunksCh)
+		defer close(errCh)
+		for i, c := range p.chunks {
+			if i < len(p.delays) && p.delays[i] > 0 {
+				time.Sleep(p.delays[i])
+			}
+			chunksCh <- c
+		}
+	}()
+	return chunksCh, errCh
+}
+func (p *timedStreamingProvider) ModelName() string { return "timed-stream" }
+func (p *timedStreamingProvider) Close() error      { return nil }
+
+func TestStreamingDebounceTimingAndSize(t *testing.T) {
+	t.Run("debouncing collapses chunks across flush windows", func(t *testing.T) {
+		provider := &timedStreamingProvider{
+			chunks: []llm.StreamChunk{
+				{TextDelta: "first"}, // emitted immediately (TTFT)
+				{TextDelta: "A"},     // window 1
+				{TextDelta: "B"},     // window 1
+				{TextDelta: "C"},     // window 2
+				{TextDelta: "D"},     // window 2
+				{Done: true, FinishReason: "stop"},
+			},
+			delays: []time.Duration{
+				0,
+				0,
+				0,
+				50 * time.Millisecond, // pause to let window 1 flush at 30ms
+				0,
+				50 * time.Millisecond, // pause to let window 2 flush at 30ms
+			},
+		}
+
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		reg := tools.NewRegistry(nil, logger)
+
+		var streamingSteps []*pb.StepUpdate
+		eng := NewEngine(Config{
+			Provider:            provider,
+			ToolRegistry:        reg,
+			ConversationID:      "test-debounce-timing",
+			TrajectoryID:        "test-traj",
+			BrainDir:            t.TempDir(),
+			Logger:              logger,
+			StreamFlushInterval: 30 * time.Millisecond,
+		})
+		eng.stepCB = func(step *pb.StepUpdate) {
+			if step.State == pb.StepUpdate_STATE_STREAMING {
+				streamingSteps = append(streamingSteps, step)
+			}
+		}
+
+		err := eng.Run(context.Background(), "Hello")
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
+		}
+
+		// Expected:
+		// Step 0: "first" (TTFT immediate)
+		// Step 1: "AB" (window 1 flush)
+		// Step 2: "CD" (window 2 flush or done flush)
+		if len(streamingSteps) != 3 {
+			var deltas []string
+			for _, s := range streamingSteps {
+				deltas = append(deltas, s.TextDelta)
+			}
+			t.Fatalf("expected 3 debounced streaming steps, got %d: %v", len(streamingSteps), deltas)
+		}
+		if streamingSteps[0].TextDelta != "first" {
+			t.Errorf("step 0: expected 'first', got %q", streamingSteps[0].TextDelta)
+		}
+		if streamingSteps[1].TextDelta != "AB" {
+			t.Errorf("step 1: expected 'AB', got %q", streamingSteps[1].TextDelta)
+		}
+		if streamingSteps[2].TextDelta != "CD" {
+			t.Errorf("step 2: expected 'CD', got %q", streamingSteps[2].TextDelta)
+		}
+	})
+
+	t.Run("flushes immediately when buffer exceeds maxPendingStreamBytes without waiting for timer", func(t *testing.T) {
+		largeChunk1 := strings.Repeat("x", 300)
+		largeChunk2 := strings.Repeat("y", 300) // 300 + 300 = 600 bytes >= 512 maxPendingStreamBytes
+		provider := &mockStreamingProvider{
+			streamChunks: []llm.StreamChunk{
+				{TextDelta: "start"}, // TTFT immediate
+				{TextDelta: largeChunk1},
+				{TextDelta: largeChunk2}, // triggers size-based flush
+				{TextDelta: "end"},
+				{Done: true, FinishReason: "stop"},
+			},
+		}
+
+		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+		reg := tools.NewRegistry(nil, logger)
+
+		var streamingSteps []*pb.StepUpdate
+		eng := NewEngine(Config{
+			Provider:            provider,
+			ToolRegistry:        reg,
+			ConversationID:      "test-debounce-size",
+			TrajectoryID:        "test-traj",
+			BrainDir:            t.TempDir(),
+			Logger:              logger,
+			StreamFlushInterval: 10 * time.Second, // very long timer so only size triggers flush
+		})
+		eng.stepCB = func(step *pb.StepUpdate) {
+			if step.State == pb.StepUpdate_STATE_STREAMING {
+				streamingSteps = append(streamingSteps, step)
+			}
+		}
+
+		start := time.Now()
+		err := eng.Run(context.Background(), "Hello")
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
+		}
+		elapsed := time.Since(start)
+		if elapsed > 2*time.Second {
+			t.Errorf("expected size-based flush to avoid waiting for 10s timer, but took %v", elapsed)
+		}
+
+		// Step 0: "start"
+		// Step 1: largeChunk1 + largeChunk2 (600 bytes)
+		// Step 2: "end" (flushed on Done)
+		if len(streamingSteps) != 3 {
+			t.Fatalf("expected 3 steps, got %d", len(streamingSteps))
+		}
+		if streamingSteps[0].TextDelta != "start" {
+			t.Errorf("step 0 mismatch: %q", streamingSteps[0].TextDelta)
+		}
+		if streamingSteps[1].TextDelta != largeChunk1+largeChunk2 {
+			t.Errorf("step 1 length: expected 600, got %d", len(streamingSteps[1].TextDelta))
+		}
+		if streamingSteps[2].TextDelta != "end" {
+			t.Errorf("step 2 mismatch: %q", streamingSteps[2].TextDelta)
+		}
+	})
 }
 
 func TestEngineInitialHistory(t *testing.T) {

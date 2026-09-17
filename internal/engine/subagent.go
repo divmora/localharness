@@ -445,6 +445,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			BrainDir:             childBrainDir,
 			AppDataDir:           e.appDataDir,
 			Logger:               e.logger.With("subagent", inv.TypeName, "role", inv.Role),
+			StreamFlushInterval:  e.streamFlushInterval,
 			HostToolHandler:      e.hostToolHandler,
 			HostToolNames:        e.hostToolNames,
 			HostToolDecls:        e.hostToolDecls,

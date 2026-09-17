@@ -192,6 +192,7 @@ func (e *Engine) executeDesktopSubagent(ctx context.Context, tc llm.ToolCall, st
 		BrainDir:             childBrainDir,
 		AppDataDir:           e.appDataDir,
 		Logger:               e.logger.With("subagent", "desktop", "role", "Desktop Agent"),
+		StreamFlushInterval:  e.streamFlushInterval,
 		HostToolHandler:      e.hostToolHandler,
 		HostToolNames:        e.hostToolNames,
 		HostToolDecls:        e.hostToolDecls,
