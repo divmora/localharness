@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -280,6 +281,72 @@ func TestPersistentTerminalUnknown(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown terminal")
 	}
+}
+
+func TestPersistentTerminal_FastStartup(t *testing.T) {
+	tm := NewTaskManager(testLogger(), 5)
+	defer tm.Shutdown()
+
+	ctx := context.Background()
+	start := time.Now()
+	termID, stdout, exitCode, err := tm.RunInTerminal(ctx, "echo instant", "", "", nil, 5000, nil)
+	duration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("RunInTerminal failed: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode)
+	}
+	if !contains(stdout, "instant") {
+		t.Errorf("expected stdout 'instant', got %q", stdout)
+	}
+	if termID == "" {
+		t.Error("expected non-empty terminal ID")
+	}
+
+	t.Logf("Terminal startup + execution took %v", duration)
+}
+
+func TestPersistentTerminal_StreamingEmitter(t *testing.T) {
+	tm := NewTaskManager(testLogger(), 5)
+	defer tm.Shutdown()
+
+	var emittedUpdates []*pb.StepUpdate
+	var emitMu sync.Mutex
+	tm.SetStepEmitter(func(step *pb.StepUpdate) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		emittedUpdates = append(emittedUpdates, step)
+	})
+
+	ctx := context.Background()
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_RunCommand{
+			RunCommand: &pb.ActionRunCommand{
+				Command: "for i in 1 2 3; do echo count $i; sleep 0.15; done",
+			},
+		},
+	}
+
+	termID, stdout, exitCode, err := tm.RunInTerminal(ctx, "for i in 1 2 3; do echo count $i; sleep 0.15; done", "", "", nil, 5000, step)
+	if err != nil {
+		t.Fatalf("RunInTerminal failed: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", exitCode)
+	}
+	if !contains(stdout, "count 1") || !contains(stdout, "count 2") || !contains(stdout, "count 3") {
+		t.Errorf("expected output to contain all counts, got %q", stdout)
+	}
+	if termID == "" {
+		t.Error("expected non-empty termID")
+	}
+
+	emitMu.Lock()
+	count := len(emittedUpdates)
+	emitMu.Unlock()
+	t.Logf("emitted updates count: %d", count)
 }
 
 // ─── Run Command Background Mode Tests ─────────────────────────────────

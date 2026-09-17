@@ -532,14 +532,48 @@ func (tm *TaskManager) createTerminal(cwd string, env map[string]string) (*Persi
 		close(term.done)
 	}()
 
+	// Synchronize with bash startup instead of arbitrary sleeping
+	readyMarker := "__LH_READY_" + shortID() + "__"
+	readyCmd := fmt.Sprintf("echo '%s'\n", readyMarker)
+	if _, err := term.stdin.Write([]byte(readyCmd)); err != nil {
+		cancel()
+		return nil, fmt.Errorf("task_manager: terminal handshake write: %w", err)
+	}
+
+	notifyCh := term.output.Subscribe()
+	defer term.output.Unsubscribe(notifyCh)
+
+	readyBytes := []byte(readyMarker)
+	readyTimer := time.NewTimer(2 * time.Second)
+	defer readyTimer.Stop()
+
+startupLoop:
+	for {
+		if term.output.Contains(readyBytes) {
+			break startupLoop
+		}
+		select {
+		case <-notifyCh:
+			if term.output.Contains(readyBytes) {
+				break startupLoop
+			}
+		case <-term.done:
+			cancel()
+			return nil, fmt.Errorf("task_manager: terminal process exited prematurely")
+		case <-readyTimer.C:
+			cancel()
+			return nil, fmt.Errorf("task_manager: terminal startup timed out")
+		}
+	}
+
+	// Clean startup handshake from buffer so it doesn't pollute command output
+	term.output.Reset()
+
 	tm.mu.Lock()
 	tm.terminals[termID] = term
 	tm.mu.Unlock()
 
 	tm.logger.Info("created persistent terminal", "terminal_id", termID, "cwd", cwd)
-
-	// Give bash a moment to initialize
-	time.Sleep(100 * time.Millisecond)
 
 	return term, nil
 }
@@ -561,6 +595,11 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 	markerID := util.NewUUID()
 	beginMarker := terminalMarkerPrefix + "BEGIN_" + markerID + "__"
 	endMarker := terminalMarkerPrefix + "END_" + markerID + "__"
+	endMarkerBytes := []byte(endMarker)
+
+	// Subscribe to output write notifications before writing command
+	notifyCh := term.output.Subscribe()
+	defer term.output.Unsubscribe(notifyCh)
 
 	// Write the command sequence:
 	// 1. Echo BEGIN marker
@@ -578,11 +617,15 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 	}
 	deadline := time.After(time.Duration(timeoutMs) * time.Millisecond)
 
-	// Poll for the end marker in output
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
 	var lastEmit time.Time
+
+	// Check if already finished (e.g. ultra-fast command whose output is already buffered)
+	if term.output.Contains(endMarkerBytes) {
+		allOutput := term.output.String()
+		cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
+		code := parseExitCodeAfterMarker(allOutput, endMarker)
+		return term.ID, cmdOutput, code, nil
+	}
 
 	for {
 		select {
@@ -598,24 +641,26 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 			allOutput := term.output.String()
 			cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
 			return term.ID, cmdOutput, -1, nil
-		case <-ticker.C:
-			allOutput := term.output.String()
-			cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
+		case <-notifyCh:
+			// Marker inspection occurs only when new data is written to the terminal pipe!
+			if term.output.Contains(endMarkerBytes) {
+				allOutput := term.output.String()
+				cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
+				code := parseExitCodeAfterMarker(allOutput, endMarker)
+				return term.ID, cmdOutput, code, nil
+			}
 
+			// Stream intermediate progress if stepEmitter is enabled (throttled to 200ms)
 			if tm.stepEmitter != nil && step != nil && time.Since(lastEmit) > 200*time.Millisecond {
 				lastEmit = time.Now()
+				allOutput := term.output.String()
+				cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
 				clonedStep := proto.Clone(step).(*pb.StepUpdate)
 				if rc, ok := clonedStep.Action.(*pb.StepUpdate_RunCommand); ok {
 					rc.RunCommand.Stdout = truncateOutput(cmdOutput, 100000)
 					clonedStep.State = pb.StepUpdate_STATE_STREAMING
 					tm.stepEmitter(clonedStep)
 				}
-			}
-
-			if endIdx := strings.Index(allOutput, endMarker); endIdx >= 0 {
-				// Found end marker — extract command output and exit code
-				code := parseExitCodeAfterMarker(allOutput, endMarker)
-				return term.ID, cmdOutput, code, nil
 			}
 		}
 	}

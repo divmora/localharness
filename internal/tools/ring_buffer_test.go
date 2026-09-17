@@ -287,3 +287,109 @@ func TestTruncateOutputFunc(t *testing.T) {
 		t.Logf("truncated result length: %d", len(result))
 	}
 }
+
+func TestRingBuffer_Subscribe(t *testing.T) {
+	rb := NewRingBuffer(100)
+
+	ch := rb.Subscribe()
+	defer rb.Unsubscribe(ch)
+
+	// Channel should have nothing initially
+	select {
+	case <-ch:
+		t.Fatal("expected empty channel initially")
+	default:
+	}
+
+	// Write should notify
+	_, _ = rb.Write([]byte("hello"))
+	select {
+	case <-ch:
+		// success
+	default:
+		t.Fatal("expected notification after write")
+	}
+
+	// Multiple writes should not block even if channel is not drained
+	for i := 0; i < 5; i++ {
+		_, _ = rb.Write([]byte("data"))
+	}
+	// Channel should have 1 notification
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected notification after multiple writes")
+	}
+
+	// Unsubscribe should stop notifications
+	rb.Unsubscribe(ch)
+	_, _ = rb.Write([]byte("after unsubscribe"))
+	select {
+	case <-ch:
+		t.Fatal("unexpected notification after unsubscribe")
+	default:
+	}
+}
+
+func TestRingBuffer_Contains(t *testing.T) {
+	t.Run("empty and not full", func(t *testing.T) {
+		rb := NewRingBuffer(20)
+		if !rb.Contains([]byte("")) {
+			t.Error("empty query should always return true")
+		}
+		if rb.Contains([]byte("foo")) {
+			t.Error("empty buffer should not contain 'foo'")
+		}
+
+		_, _ = rb.Write([]byte("hello world"))
+		if !rb.Contains([]byte("hello")) {
+			t.Error("should contain 'hello'")
+		}
+		if !rb.Contains([]byte("world")) {
+			t.Error("should contain 'world'")
+		}
+		if !rb.Contains([]byte("lo wo")) {
+			t.Error("should contain 'lo wo'")
+		}
+		if rb.Contains([]byte("missing")) {
+			t.Error("should not contain 'missing'")
+		}
+		if rb.Contains([]byte(strings.Repeat("a", 30))) {
+			t.Error("should return false for query longer than buffer size")
+		}
+	})
+
+	t.Run("wrapped buffer contains", func(t *testing.T) {
+		// Buffer size 10
+		rb := NewRingBuffer(10)
+		// Write 8 bytes: [0..7] = "12345678", pos=8
+		_, _ = rb.Write([]byte("12345678"))
+		// Write 5 bytes: wraps around
+		// Remaining = 2, so "ab" at [8..9], "cde" at [0..2], pos=3, full=true
+		// Chronological contents: "345678abcde" (last 10 bytes: "45678abcde")
+		_, _ = rb.Write([]byte("abcde"))
+
+		if !rb.Contains([]byte("45678")) {
+			t.Error("should contain part in first half '45678'")
+		}
+		if !rb.Contains([]byte("cde")) {
+			t.Error("should contain part in second half 'cde'")
+		}
+		// Test boundary match: "8abc" spans from index 7/8/9 to index 0/1/2
+		if !rb.Contains([]byte("8abc")) {
+			t.Error("should contain cross-boundary sequence '8abc'")
+		}
+		if !rb.Contains([]byte("78ab")) {
+			t.Error("should contain cross-boundary sequence '78ab'")
+		}
+		if !rb.Contains([]byte("abcde")) {
+			t.Error("should contain 'abcde'")
+		}
+		if rb.Contains([]byte("1234")) {
+			t.Error("overwritten data '1234' should not be found")
+		}
+		if rb.Contains([]byte("xyz")) {
+			t.Error("should not contain 'xyz'")
+		}
+	})
+}
