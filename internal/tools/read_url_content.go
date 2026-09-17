@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
@@ -17,9 +16,7 @@ var (
 	// MockFetchFunc allows unit tests to mock url fetches
 	MockFetchFunc func(url string) (string, string, error)
 
-	webFetchClient = &http.Client{
-		Timeout: 15 * time.Second,
-	}
+	webFetchClient = newSafeHTTPClient()
 )
 
 func registerWebFetch(r *Registry) {
@@ -54,9 +51,9 @@ func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		return fmt.Errorf("read_url_content: url is required")
 	}
 
-	// Simple scheme validation
-	if !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
-		return fmt.Errorf("read_url_content: invalid scheme, only http and https are supported")
+	// Validate URL scheme and protect against SSRF
+	if _, err := validateURLForSSRF(targetURL); err != nil {
+		return err
 	}
 
 	r.Logger().Info("executing web fetch", "url", targetURL)
