@@ -236,11 +236,12 @@ type Config struct {
 	ProjectRegistry *ProjectRegistry
 
 	// Multi-agent coordination
-	AgentBus             *AgentBus             // Shared pub/sub bus (root creates, children inherit)
-	ConversationManager  *conversation.Manager // For creating child conversations
-	ParentConversationID string                // Parent's conv ID (empty for root)
-	AgentRole            string                // Human-readable role: "developer", "reviewer"
-	AgentTypeName        string                // Type name: "research", "self", etc.
+	AgentBus             *AgentBus                  // Shared pub/sub bus (root creates, children inherit)
+	ConversationManager  *conversation.Manager      // For creating child conversations
+	Conversation         *conversation.Conversation // Active conversation for state & token usage tracking
+	ParentConversationID string                     // Parent's conv ID (empty for root)
+	AgentRole            string                     // Human-readable role: "developer", "reviewer"
+	AgentTypeName        string                     // Type name: "research", "self", etc.
 }
 
 // NewEngine creates a new agentic engine.
@@ -441,6 +442,7 @@ func NewEngine(cfg Config) *Engine {
 		projectRegistry:          cfg.ProjectRegistry,
 		agentBus:                 bus,
 		convMgr:                  cfg.ConversationManager,
+		conv:                     cfg.Conversation,
 		workspaces:               cfg.Workspaces,
 		workspaceInfos:           cfg.WorkspaceInfos,
 		userRules:                cfg.UserRules,
@@ -923,6 +925,17 @@ drained:
 			e.lastRealTokenCount = resp.Usage.TotalTokens
 		}
 
+		// Accumulate generation usage into conversation total exactly once per LLM call
+		if e.conv != nil && (resp.Usage.TotalTokens > 0 || resp.Usage.PromptTokens > 0) {
+			e.conv.AddUsage(&pb.UsageMetadata{
+				PromptTokens:     int32(resp.Usage.PromptTokens),
+				CompletionTokens: int32(resp.Usage.CompletionTokens),
+				ThinkingTokens:   int32(resp.Usage.ThinkingTokens),
+				TotalTokens:      int32(resp.Usage.TotalTokens),
+				CachedTokens:     int32(resp.Usage.CachedTokens),
+			})
+		}
+
 		// Handle max_tokens with empty content — the model exhausted its
 		// output budget (usually on thinking) without producing any content
 		// or tool calls. Instead of returning nothing, inject a recovery
@@ -1130,10 +1143,6 @@ func (e *Engine) handleFinalResponse(resp *llm.GenerateResponse) error {
 		},
 	}
 
-	if e.conv != nil {
-		e.conv.AddUsage(step.Usage)
-	}
-
 	e.emitStep(step)
 
 	// Add to history
@@ -1202,7 +1211,7 @@ func (e *Engine) isConcurrentReadOnlyTool(tc llm.ToolCall) bool {
 
 // executeReadOnlyTool executes a single read-only tool call without modifying e.history.
 // Returns the resulting llm.Message (success or error) to be appended deterministically by executeTools.
-func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp *llm.GenerateResponse) (llm.Message, error) {
+func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, usage *pb.UsageMetadata) (llm.Message, error) {
 	stepIdx := e.nextStepIndex()
 
 	// Create step with tool action (STATE_ACTIVE)
@@ -1210,18 +1219,6 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp 
 	step.State = pb.StepUpdate_STATE_ACTIVE
 	step.Source = pb.StepUpdate_SOURCE_MODEL
 	step.Target = pb.StepUpdate_TARGET_INTERNAL
-
-	toolUsage := &pb.UsageMetadata{
-		PromptTokens:     int32(resp.Usage.PromptTokens),
-		CompletionTokens: int32(resp.Usage.CompletionTokens),
-		ThinkingTokens:   int32(resp.Usage.ThinkingTokens),
-		TotalTokens:      int32(resp.Usage.TotalTokens),
-		CachedTokens:     int32(resp.Usage.CachedTokens),
-	}
-
-	if e.conv != nil {
-		e.conv.AddUsage(toolUsage)
-	}
 
 	e.emitStep(step)
 
@@ -1232,6 +1229,7 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp 
 			Message: reason,
 			Code:    "PLANNING_REQUIRED",
 		}
+		step.Usage = usage
 		e.emitStep(step)
 		return toolResultMsg(tc, reason, true), nil
 	}
@@ -1273,6 +1271,7 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp 
 			Message: err.Error(),
 			Code:    "TOOL_ERROR",
 		}
+		step.Usage = usage
 		e.emitStep(step)
 		return toolResultMsg(tc, fmt.Sprintf("Error: %v", err), true), nil
 	}
@@ -1280,7 +1279,7 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp 
 	// Emit completed step (STATE_DONE) with usage attached if not already done
 	if step.State != pb.StepUpdate_STATE_DONE {
 		step.State = pb.StepUpdate_STATE_DONE
-		step.Usage = toolUsage
+		step.Usage = usage
 		e.emitStep(step)
 	}
 
@@ -1294,6 +1293,17 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp 
 // up to e.maxConcurrentToolWorkers, while mutating or interactive tool calls
 // are executed sequentially with synchronization barriers.
 func (e *Engine) executeTools(ctx context.Context, toolCalls []llm.ToolCall, resp *llm.GenerateResponse) error {
+	var turnUsage *pb.UsageMetadata
+	if resp != nil && (resp.Usage.TotalTokens > 0 || resp.Usage.PromptTokens > 0) {
+		turnUsage = &pb.UsageMetadata{
+			PromptTokens:     int32(resp.Usage.PromptTokens),
+			CompletionTokens: int32(resp.Usage.CompletionTokens),
+			ThinkingTokens:   int32(resp.Usage.ThinkingTokens),
+			TotalTokens:      int32(resp.Usage.TotalTokens),
+			CachedTokens:     int32(resp.Usage.CachedTokens),
+		}
+	}
+
 	i := 0
 	for i < len(toolCalls) {
 		tc := toolCalls[i]
@@ -1308,7 +1318,11 @@ func (e *Engine) executeTools(ctx context.Context, toolCalls []llm.ToolCall, res
 
 			if len(batch) == 1 {
 				// Single read-only tool — run directly
-				msg, err := e.executeReadOnlyTool(ctx, batch[0], resp)
+				var u *pb.UsageMetadata
+				if start == 0 {
+					u = turnUsage
+				}
+				msg, err := e.executeReadOnlyTool(ctx, batch[0], u)
 				if err != nil {
 					e.logger.Error("tool execution failed", "tool", batch[0].Name, "error", err)
 					e.history = append(e.history, toolResultMsg(batch[0], fmt.Sprintf("Error: %v", err), true))
@@ -1324,11 +1338,15 @@ func (e *Engine) executeTools(ctx context.Context, toolCalls []llm.ToolCall, res
 				for bIdx, bTC := range batch {
 					idx := bIdx
 					call := bTC
+					var u *pb.UsageMetadata
+					if start == 0 && bIdx == 0 {
+						u = turnUsage
+					}
 					g.Go(func() error {
 						if gCtx.Err() != nil {
 							return gCtx.Err()
 						}
-						msg, err := e.executeReadOnlyTool(gCtx, call, resp)
+						msg, err := e.executeReadOnlyTool(gCtx, call, u)
 						if err != nil {
 							e.logger.Error("concurrent tool execution failed", "tool", call.Name, "error", err)
 							results[idx] = toolResultMsg(call, fmt.Sprintf("Error: %v", err), true)
@@ -1348,7 +1366,11 @@ func (e *Engine) executeTools(ctx context.Context, toolCalls []llm.ToolCall, res
 			}
 		} else {
 			// Mutating or sequential tool — execute with sequential barrier
-			if err := e.executeTool(ctx, tc, resp); err != nil {
+			var u *pb.UsageMetadata
+			if i == 0 {
+				u = turnUsage
+			}
+			if err := e.executeTool(ctx, tc, u); err != nil {
 				e.logger.Error("tool execution failed", "tool", tc.Name, "error", err)
 				e.history = append(e.history, toolResultMsg(tc, fmt.Sprintf("Error: %v", err), true))
 			}
@@ -1359,7 +1381,7 @@ func (e *Engine) executeTools(ctx context.Context, toolCalls []llm.ToolCall, res
 }
 
 // executeTool dispatches a single tool call and streams step updates.
-func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.GenerateResponse) error {
+func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.UsageMetadata) error {
 	stepIdx := e.nextStepIndex()
 
 	// Create step with tool action (STATE_ACTIVE)
@@ -1367,19 +1389,6 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 	step.State = pb.StepUpdate_STATE_ACTIVE
 	step.Source = pb.StepUpdate_SOURCE_MODEL
 	step.Target = pb.StepUpdate_TARGET_INTERNAL
-	// Usage is deferred to STATE_DONE to avoid the SDK counting it multiple
-	// times across sub-step updates (Active → Permission → Done).
-	toolUsage := &pb.UsageMetadata{
-		PromptTokens:     int32(resp.Usage.PromptTokens),
-		CompletionTokens: int32(resp.Usage.CompletionTokens),
-		ThinkingTokens:   int32(resp.Usage.ThinkingTokens),
-		TotalTokens:      int32(resp.Usage.TotalTokens),
-		CachedTokens:     int32(resp.Usage.CachedTokens),
-	}
-
-	if e.conv != nil {
-		e.conv.AddUsage(toolUsage)
-	}
 
 	e.emitStep(step)
 
@@ -1537,6 +1546,7 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 			Message: err.Error(),
 			Code:    "TOOL_ERROR",
 		}
+		step.Usage = usage
 		e.emitStep(step)
 		return err
 	}
@@ -1557,7 +1567,7 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 
 	// Emit completed step (STATE_DONE) with usage attached
 	step.State = pb.StepUpdate_STATE_DONE
-	step.Usage = toolUsage
+	step.Usage = usage
 	e.emitStep(step)
 
 	// Build tool result for history

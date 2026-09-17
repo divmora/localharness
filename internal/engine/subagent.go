@@ -502,10 +502,10 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			WorkspaceInfos:           e.workspaceInfos,
 			UserRules:                e.userRules,
 			YoloMode:                 e.yoloMode,
+			Conversation:             childConv,
 			Skills:                   e.msgCtx.Skills,
 			Plugins:                  e.msgCtx.Plugins,
 		})
-		childEngine.conv = childConv
 
 		// Register instance in tracker
 		childCtx, cancel := context.WithCancel(ctx)

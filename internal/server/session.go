@@ -699,6 +699,7 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 	}
 
 	s.engine = engine.NewEngine(engine.Config{
+		Conversation:           s.conv,
 		Provider:               provider,
 		ToolRegistry:           toolRegistry,
 		SystemPrompt:           cfg.SystemInstructions,

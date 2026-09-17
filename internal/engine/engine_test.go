@@ -13,6 +13,7 @@ import (
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/conversation"
 	"github.com/divmora/localharness/internal/llm"
 	"github.com/divmora/localharness/internal/tools"
 	"github.com/divmora/localharness/internal/workspace"
@@ -3044,5 +3045,138 @@ func TestConcurrentReadOnlyTools_PermissionBarrierClassification(t *testing.T) {
 		Args: map[string]interface{}{},
 	}) {
 		t.Error("expected desktop_screenshot to NOT be concurrent read-only")
+	}
+}
+
+func TestTokenUsageDeduplication_MultiToolTurn(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatalf("workspace.NewManager failed: %v", err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(wsMgr, logger)
+
+	reg.Register("read_tool_1", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		step.Text = `{"result":"r1"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	reg.Register("read_tool_2", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		step.Text = `{"result":"r2"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	reg.Register("write_tool_1", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		step.Text = `{"result":"w1"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupWrite})
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			// Turn 0: 3 tool calls in a single generation
+			{
+				ToolCalls: []llm.ToolCall{
+					{ID: "c1", Name: "read_tool_1", Args: map[string]interface{}{}},
+					{ID: "c2", Name: "read_tool_2", Args: map[string]interface{}{}},
+					{ID: "c3", Name: "write_tool_1", Args: map[string]interface{}{}},
+				},
+				Usage: llm.Usage{
+					PromptTokens:     100,
+					CompletionTokens: 20,
+					TotalTokens:      120,
+				},
+				FinishReason: "tool_calls",
+			},
+			// Turn 1: Final text response
+			{
+				Content: "All tools executed successfully.",
+				Usage: llm.Usage{
+					PromptTokens:     150,
+					CompletionTokens: 30,
+					TotalTokens:      180,
+				},
+				FinishReason: "stop",
+			},
+		},
+	}
+
+	convMgr, err := conversation.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("conversation.NewManager failed: %v", err)
+	}
+	conv, err := convMgr.Create(&pb.HarnessConfig{})
+	if err != nil {
+		t.Fatalf("convMgr.Create failed: %v", err)
+	}
+	defer conv.Close()
+
+	var mu sync.Mutex
+	var doneSteps []*pb.StepUpdate
+	onStep := func(step *pb.StepUpdate) {
+		if step.State == pb.StepUpdate_STATE_DONE {
+			mu.Lock()
+			doneSteps = append(doneSteps, step)
+			mu.Unlock()
+		}
+	}
+
+	eng := NewEngine(Config{
+		Provider:                 provider,
+		ToolRegistry:             reg,
+		ConversationID:           conv.ID,
+		TrajectoryID:             "test-traj-usage",
+		Conversation:             conv,
+		OnStep:                   onStep,
+		Logger:                   logger,
+		Workspaces:               []string{wsDir},
+		MaxConcurrentToolWorkers: 4,
+	})
+
+	if err := eng.Run(context.Background(), "Execute tools"); err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	// 1. Verify Conversation.State.TotalUsage
+	if conv.State.TotalUsage == nil {
+		t.Fatal("expected TotalUsage to be non-nil")
+	}
+
+	expectedPrompt := int32(100 + 150)
+	expectedCompletion := int32(20 + 30)
+	expectedTotal := int32(120 + 180)
+
+	if conv.State.TotalUsage.PromptTokens != expectedPrompt {
+		t.Errorf("expected PromptTokens %d, got %d", expectedPrompt, conv.State.TotalUsage.PromptTokens)
+	}
+	if conv.State.TotalUsage.CompletionTokens != expectedCompletion {
+		t.Errorf("expected CompletionTokens %d, got %d", expectedCompletion, conv.State.TotalUsage.CompletionTokens)
+	}
+	if conv.State.TotalUsage.TotalTokens != expectedTotal {
+		t.Errorf("expected TotalTokens %d (deduplicated across tool calls), got %d", expectedTotal, conv.State.TotalUsage.TotalTokens)
+	}
+
+	// 2. Verify StepUpdate Usage distribution:
+	// Turn 0 had 3 tool calls. Exactly ONE of them should have Usage != nil (with 120 total tokens).
+	// Turn 1 had 1 final response with Usage != nil (with 180 total tokens).
+	mu.Lock()
+	defer mu.Unlock()
+
+	var stepsWithUsage []*pb.StepUpdate
+	for _, s := range doneSteps {
+		if s.Usage != nil {
+			stepsWithUsage = append(stepsWithUsage, s)
+		}
+	}
+
+	if len(stepsWithUsage) != 2 {
+		t.Fatalf("expected exactly 2 steps with Usage (1 for turn 0 tool batch, 1 for turn 1 final response), got %d", len(stepsWithUsage))
+	}
+
+	if stepsWithUsage[0].Usage.TotalTokens != 120 {
+		t.Errorf("expected first usage step to have 120 tokens, got %d", stepsWithUsage[0].Usage.TotalTokens)
+	}
+	if stepsWithUsage[1].Usage.TotalTokens != 180 {
+		t.Errorf("expected second usage step to have 180 tokens, got %d", stepsWithUsage[1].Usage.TotalTokens)
 	}
 }

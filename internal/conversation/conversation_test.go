@@ -647,7 +647,10 @@ func TestConversation_Flush_FullQueueNoDeadlock(t *testing.T) {
 
 	// Concurrently invoke operations that require conv.mu while Flush() is running
 	doneCh := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-doneCh:
@@ -672,11 +675,13 @@ func TestConversation_Flush_FullQueueNoDeadlock(t *testing.T) {
 	select {
 	case err := <-flushErrCh:
 		close(doneCh)
+		wg.Wait()
 		if err == nil {
 			t.Errorf("expected error from Flush on invalid StepsDir, got nil")
 		}
 	case <-time.After(5 * time.Second):
 		close(doneCh)
+		wg.Wait()
 		t.Fatalf("deadlock detected: Flush() did not return within 5 seconds when stepQueue was full and writes failed")
 	}
 }

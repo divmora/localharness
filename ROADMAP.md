@@ -61,8 +61,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Add first-class `AccessMode` enum to proto, workspace manager, and engine to enable general-purpose OS administration, devops, and desktop automation alongside sandboxed project agents.
 - [ ] **Multi-Chunk Replacement Line-Shift Offset Adjustment** (#45)
   - Add line delta tracking or bottom-to-top chunk ordering in `replace_file_content` to prevent line shifting corruption across sequential chunks.
-- [ ] **Turn Token Usage Deduplication Across Parallel Tool Executions** (#46)
-  - Ensure LLM response usage is accumulated once per generation rather than multiplied by (N+1) across individual tool steps.
 - [ ] **TaskManager Context Cancellation During `waitMs` Window** (#47)
   - Observe `ctx.Done()` during initial task wait window and default empty `cwd` safely to the workspace.
 - [ ] **Deterministic Tool Call Dispatch in OpenAI Streaming Parser** (#48)
