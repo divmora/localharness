@@ -24,6 +24,7 @@ import (
 	mcpbridge "github.com/divmora/localharness/internal/mcp"
 	"github.com/divmora/localharness/internal/tools"
 	"github.com/divmora/localharness/internal/util"
+	"golang.org/x/sync/errgroup"
 )
 
 // StepCallback is called whenever a step update should be sent to the client.
@@ -64,43 +65,49 @@ const DefaultStreamFlushInterval = 30 * time.Millisecond
 // maxPendingStreamBytes is the buffer size limit triggering an immediate flush before the interval timer.
 const maxPendingStreamBytes = 512
 
+// defaultMaxConcurrentToolWorkers is the maximum number of concurrent workers
+// used to execute read-only tools within a single turn.
+const defaultMaxConcurrentToolWorkers = 8
+
 // Engine orchestrates the agentic loop.
 type Engine struct {
-	provider             llm.Provider
-	toolRegistry         *tools.Registry
-	logger               *slog.Logger
-	stepCB               StepCallback
-	trajCB               TrajectoryCallback
-	stepIndex            atomic.Int32
-	trajectoryID         string
-	convID               string
-	sysPrompt            string
-	history              []llm.Message
-	streamFlushInterval  time.Duration
-	maxTurns             int // Safety limit on agentic loop iterations
-	compactionThreshold  int // Token threshold for context compaction (0 = disabled)
-	keepRecentMessages   int // Messages to preserve during compaction
-	lastRealTokenCount   int // Most recent real token count from LLM provider
-	tracer               *Tracer
-	brainDir             string                     // For child engine tracing
-	appDataDir           string                     // Root data dir (for subagent inheritance)
-	enablePlanningMode   bool                       // Planning guard: block workspace writes until plan exists
-	researchToolCount    int                        // Tracks research tool calls (view_file, list_dir, search_dir)
-	hostToolHandler      HostToolHandler            // Called for SDK-registered tools
-	hostToolNames        map[string]bool            // Fast lookup of host tool names
-	hostToolDecls        []llm.FunctionDeclaration  // Host tool schemas for LLM
-	permissionHandler    PermissionHandler          // Called before tool execution for policy checks
-	permissionGrants     []PermissionGrant          // Grants from ask_permission (session-scoped)
-	questionHandler      QuestionHandler            // Called for ask_question tool
-	mcpMgr               *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
-	msgCtx               MessageContextConfig       // Per-message context enrichment config
-	notifyCh             <-chan tools.SystemMessage // System notifications (timers, task completions)
-	notifySendCh         chan<- tools.SystemMessage // Channel to forward notifications from subagents
-	hasBrowserConfig     bool                       // Explicit browser configuration flag
-	hasDesktopConfig     bool                       // Explicit desktop configuration flag
-	pendingSyntheticMsgs []string                   // Buffered synthetic notifications to include on next turn
-	running              atomic.Int32               // 1 = engine is running a turn, 0 = idle
-	preCompletionHook    func()                     // Called before TRAJ_IDLE so session can save state
+	provider                 llm.Provider
+	toolRegistry             *tools.Registry
+	logger                   *slog.Logger
+	stepCB                   StepCallback
+	stepMu                   sync.Mutex // Serializes stepCB invocations across concurrent tool executions
+	trajCB                   TrajectoryCallback
+	stepIndex                atomic.Int32
+	trajectoryID             string
+	convID                   string
+	sysPrompt                string
+	history                  []llm.Message
+	streamFlushInterval      time.Duration
+	maxConcurrentToolWorkers int // Max concurrent workers for parallel read-only tools
+	maxTurns                 int // Safety limit on agentic loop iterations
+	compactionThreshold      int // Token threshold for context compaction (0 = disabled)
+	keepRecentMessages       int // Messages to preserve during compaction
+	lastRealTokenCount       int // Most recent real token count from LLM provider
+	tracer                   *Tracer
+	brainDir                 string                     // For child engine tracing
+	appDataDir               string                     // Root data dir (for subagent inheritance)
+	enablePlanningMode       bool                       // Planning guard: block workspace writes until plan exists
+	researchToolCount        atomic.Int32               // Tracks research tool calls (view_file, list_dir, search_dir)
+	hostToolHandler          HostToolHandler            // Called for SDK-registered tools
+	hostToolNames            map[string]bool            // Fast lookup of host tool names
+	hostToolDecls            []llm.FunctionDeclaration  // Host tool schemas for LLM
+	permissionHandler        PermissionHandler          // Called before tool execution for policy checks
+	permissionGrants         []PermissionGrant          // Grants from ask_permission (session-scoped)
+	questionHandler          QuestionHandler            // Called for ask_question tool
+	mcpMgr                   *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
+	msgCtx                   MessageContextConfig       // Per-message context enrichment config
+	notifyCh                 <-chan tools.SystemMessage // System notifications (timers, task completions)
+	notifySendCh             chan<- tools.SystemMessage // Channel to forward notifications from subagents
+	hasBrowserConfig         bool                       // Explicit browser configuration flag
+	hasDesktopConfig         bool                       // Explicit desktop configuration flag
+	pendingSyntheticMsgs     []string                   // Buffered synthetic notifications to include on next turn
+	running                  atomic.Int32               // 1 = engine is running a turn, 0 = idle
+	preCompletionHook        func()                     // Called before TRAJ_IDLE so session can save state
 
 	// Interruption API channels
 	pauseCh  chan struct{}
@@ -217,6 +224,10 @@ type Config struct {
 	// Defaults to DefaultStreamFlushInterval (30ms) if 0. Set to <0 to disable batching.
 	StreamFlushInterval time.Duration
 
+	// MaxConcurrentToolWorkers is the maximum number of workers for parallel read-only tool execution.
+	// Defaults to defaultMaxConcurrentToolWorkers (8) if 0. Set to 1 to force strictly sequential execution.
+	MaxConcurrentToolWorkers int
+
 	// Knowledge Items — project registry for workspace → project UUID mapping.
 	ProjectRegistry *ProjectRegistry
 
@@ -251,6 +262,11 @@ func NewEngine(cfg Config) *Engine {
 		flushInterval = DefaultStreamFlushInterval
 	} else if flushInterval < 0 {
 		flushInterval = 0 // disabled
+	}
+
+	maxWorkers := cfg.MaxConcurrentToolWorkers
+	if maxWorkers <= 0 {
+		maxWorkers = defaultMaxConcurrentToolWorkers
 	}
 
 	// Build subagent registry (merge built-in + SDK types)
@@ -343,31 +359,32 @@ func NewEngine(cfg Config) *Engine {
 	}
 
 	eng := &Engine{
-		provider:            cfg.Provider,
-		toolRegistry:        cfg.ToolRegistry,
-		logger:              cfg.Logger,
-		stepCB:              cfg.OnStep,
-		trajCB:              cfg.OnTrajectory,
-		trajectoryID:        cfg.TrajectoryID,
-		convID:              cfg.ConversationID,
-		sysPrompt:           sysPrompt,
-		streamFlushInterval: flushInterval,
-		maxTurns:            cfg.MaxTurns,
-		compactionThreshold: cfg.CompactionThreshold,
-		keepRecentMessages:  cfg.KeepRecentMessages,
-		tracer:              NewTracer(cfg.BrainDir, cfg.Logger),
-		brainDir:            cfg.BrainDir,
-		appDataDir:          cfg.AppDataDir,
-		enablePlanningMode:  cfg.EnablePlanningMode,
-		hostToolHandler:     cfg.HostToolHandler,
-		hostToolNames:       cfg.HostToolNames,
-		hostToolDecls:       cfg.HostToolDecls,
-		permissionHandler:   cfg.PermissionHandler,
-		questionHandler:     cfg.QuestionHandler,
-		history:             cfg.InitialHistory,
-		mcpMgr:              cfg.MCPManager,
-		pauseCh:             make(chan struct{}, 1),
-		resumeCh:            make(chan string, 1),
+		provider:                 cfg.Provider,
+		toolRegistry:             cfg.ToolRegistry,
+		logger:                   cfg.Logger,
+		stepCB:                   cfg.OnStep,
+		trajCB:                   cfg.OnTrajectory,
+		trajectoryID:             cfg.TrajectoryID,
+		convID:                   cfg.ConversationID,
+		sysPrompt:                sysPrompt,
+		streamFlushInterval:      flushInterval,
+		maxConcurrentToolWorkers: maxWorkers,
+		maxTurns:                 cfg.MaxTurns,
+		compactionThreshold:      cfg.CompactionThreshold,
+		keepRecentMessages:       cfg.KeepRecentMessages,
+		tracer:                   NewTracer(cfg.BrainDir, cfg.Logger),
+		brainDir:                 cfg.BrainDir,
+		appDataDir:               cfg.AppDataDir,
+		enablePlanningMode:       cfg.EnablePlanningMode,
+		hostToolHandler:          cfg.HostToolHandler,
+		hostToolNames:            cfg.HostToolNames,
+		hostToolDecls:            cfg.HostToolDecls,
+		permissionHandler:        cfg.PermissionHandler,
+		questionHandler:          cfg.QuestionHandler,
+		history:                  cfg.InitialHistory,
+		mcpMgr:                   cfg.MCPManager,
+		pauseCh:                  make(chan struct{}, 1),
+		resumeCh:                 make(chan string, 1),
 		msgCtx: MessageContextConfig{
 			ConversationID: cfg.ConversationID,
 			AppDataDir:     cfg.AppDataDir,
@@ -635,7 +652,7 @@ func (e *Engine) RunWithContext(ctx context.Context, userMessage string, hostCtx
 	}()
 
 	// Reset planning guard state for this turn
-	e.researchToolCount = 0
+	e.researchToolCount.Store(0)
 
 	// Notify trajectory running
 	e.emitTrajectoryState(pb.TrajectoryState_TRAJ_RUNNING)
@@ -947,13 +964,15 @@ drained:
 		}
 		e.history = append(e.history, modelMsg)
 
-		// Execute each tool call
-		for _, tc := range resp.ToolCalls {
-			if err := e.executeTool(ctx, tc, resp); err != nil {
-				e.logger.Error("tool execution failed", "tool", tc.Name, "error", err)
-				// Add error result to history so LLM can recover
-				e.history = append(e.history, toolResultMsg(tc, fmt.Sprintf("Error: %v", err), true))
-			}
+		// Execute tool calls (concurrently for read-only batches, sequentially with barriers for mutating tools)
+		if err := e.executeTools(ctx, resp.ToolCalls, resp); err != nil {
+			e.emitErrorStep(fmt.Sprintf("Tool execution error: %v", err))
+			e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
+			return errors.Wrap(err, errors.ErrCodeToolExecution,
+				"tool execution failed").
+				WithContext("trajectory_id", e.trajectoryID).
+				WithContext("conversation_id", e.convID).
+				WithComponent("engine")
 		}
 
 		// Check if finish was called
@@ -1102,6 +1121,211 @@ func (e *Engine) handleFinalResponse(resp *llm.GenerateResponse) error {
 	return nil
 }
 
+// toolRequiresPermission returns true if the tool call requires user or policy approval.
+func (e *Engine) toolRequiresPermission(tc llm.ToolCall) bool {
+	if e.permissionHandler == nil {
+		return false
+	}
+	if e.yoloMode {
+		return false
+	}
+	if isAlwaysAllowedTool(tc.Name) {
+		return false
+	}
+	if e.isAppDataDirPath(tc) {
+		return false
+	}
+	if isReadOnlyFileTool(tc.Name) {
+		targetPath := extractToolPath(tc)
+		if e.isPathInsideWorkspaceOrAppData(targetPath) {
+			return false
+		}
+		return !e.isPermissionGranted(tc)
+	}
+	return !e.isPermissionGranted(tc)
+}
+
+// isConcurrentReadOnlyTool returns true if tc is a read-only tool that can safely
+// execute concurrently with other read-only tools in the same turn.
+func (e *Engine) isConcurrentReadOnlyTool(tc llm.ToolCall) bool {
+	if e.toolRegistry == nil || !e.toolRegistry.IsReadOnly(tc.Name) {
+		return false
+	}
+	// Exclude desktop automation and interactive tools
+	if strings.HasPrefix(tc.Name, "desktop_") {
+		return false
+	}
+	switch tc.Name {
+	case "ask_question", "ask_permission", "finish", "invoke_subagent",
+		"define_subagent", "manage_subagents", "send_message", "browser_subagent",
+		"desktop_subagent", "manage_task", "publish":
+		return false
+	}
+	// If the tool requires interactive permission evaluation, run sequentially
+	if e.toolRequiresPermission(tc) {
+		return false
+	}
+	return true
+}
+
+// executeReadOnlyTool executes a single read-only tool call without modifying e.history.
+// Returns the resulting llm.Message (success or error) to be appended deterministically by executeTools.
+func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, resp *llm.GenerateResponse) (llm.Message, error) {
+	stepIdx := e.nextStepIndex()
+
+	// Create step with tool action (STATE_ACTIVE)
+	step := e.buildToolStep(tc, stepIdx)
+	step.State = pb.StepUpdate_STATE_ACTIVE
+	step.Source = pb.StepUpdate_SOURCE_MODEL
+	step.Target = pb.StepUpdate_TARGET_INTERNAL
+
+	toolUsage := &pb.UsageMetadata{
+		PromptTokens:     int32(resp.Usage.PromptTokens),
+		CompletionTokens: int32(resp.Usage.CompletionTokens),
+		ThinkingTokens:   int32(resp.Usage.ThinkingTokens),
+		TotalTokens:      int32(resp.Usage.TotalTokens),
+		CachedTokens:     int32(resp.Usage.CachedTokens),
+	}
+
+	if e.conv != nil {
+		e.conv.AddUsage(toolUsage)
+	}
+
+	e.emitStep(step)
+
+	// Planning guard check (tracks research tools)
+	if denied, reason := e.checkPlanningGuard(tc); denied {
+		step.State = pb.StepUpdate_STATE_ERROR
+		step.ErrorInfo = &pb.ErrorInfo{
+			Message: reason,
+			Code:    "PLANNING_REQUIRED",
+		}
+		e.emitStep(step)
+		return toolResultMsg(tc, reason, true), nil
+	}
+
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = errors.New(errors.ErrCodeToolExecution,
+					"tool panicked").
+					WithContext("tool", tc.Name).
+					WithContext("panic", r).
+					WithContext("trajectory_id", e.trajectoryID).
+					WithContext("conversation_id", e.convID).
+					WithComponent("engine")
+				e.logger.Error("tool panic recovered", "tool", tc.Name, "panic", r)
+			}
+		}()
+
+		switch tc.Name {
+		case "codegraph_search":
+			err = e.executeCodeGraphSearch(ctx, tc, step)
+		case "codegraph_find_references":
+			err = e.executeCodeGraphFindReferences(ctx, tc, step)
+		case "codegraph_call_hierarchy":
+			err = e.executeCodeGraphCallHierarchy(ctx, tc, step)
+		case "codegraph_get_impact":
+			err = e.executeCodeGraphGetImpact(ctx, tc, step)
+		case "codegraph_diff_branches":
+			err = e.executeCodeGraphDiffBranches(ctx, tc, step)
+		default:
+			err = e.toolRegistry.Execute(ctx, tc.Name, step)
+		}
+	}()
+
+	if err != nil {
+		step.State = pb.StepUpdate_STATE_ERROR
+		step.ErrorInfo = &pb.ErrorInfo{
+			Message: err.Error(),
+			Code:    "TOOL_ERROR",
+		}
+		e.emitStep(step)
+		return toolResultMsg(tc, fmt.Sprintf("Error: %v", err), true), nil
+	}
+
+	// Emit completed step (STATE_DONE) with usage attached if not already done
+	if step.State != pb.StepUpdate_STATE_DONE {
+		step.State = pb.StepUpdate_STATE_DONE
+		step.Usage = toolUsage
+		e.emitStep(step)
+	}
+
+	// Build tool result for history
+	resultJSON := e.extractToolResult(step)
+	return toolResultMsg(tc, resultJSON, false), nil
+}
+
+// executeTools dispatches tool calls emitted in a turn.
+// Contiguous sequences of read-only tool calls are executed concurrently
+// up to e.maxConcurrentToolWorkers, while mutating or interactive tool calls
+// are executed sequentially with synchronization barriers.
+func (e *Engine) executeTools(ctx context.Context, toolCalls []llm.ToolCall, resp *llm.GenerateResponse) error {
+	i := 0
+	for i < len(toolCalls) {
+		tc := toolCalls[i]
+
+		// If this tool starts a concurrent read-only batch
+		if e.maxConcurrentToolWorkers > 1 && e.isConcurrentReadOnlyTool(tc) {
+			start := i
+			for i < len(toolCalls) && e.isConcurrentReadOnlyTool(toolCalls[i]) {
+				i++
+			}
+			batch := toolCalls[start:i]
+
+			if len(batch) == 1 {
+				// Single read-only tool — run directly
+				msg, err := e.executeReadOnlyTool(ctx, batch[0], resp)
+				if err != nil {
+					e.logger.Error("tool execution failed", "tool", batch[0].Name, "error", err)
+					e.history = append(e.history, toolResultMsg(batch[0], fmt.Sprintf("Error: %v", err), true))
+				} else {
+					e.history = append(e.history, msg)
+				}
+			} else {
+				// Multiple read-only tools — run concurrently in worker pool
+				results := make([]llm.Message, len(batch))
+				g, gCtx := errgroup.WithContext(ctx)
+				g.SetLimit(e.maxConcurrentToolWorkers)
+
+				for bIdx, bTC := range batch {
+					idx := bIdx
+					call := bTC
+					g.Go(func() error {
+						if gCtx.Err() != nil {
+							return gCtx.Err()
+						}
+						msg, err := e.executeReadOnlyTool(gCtx, call, resp)
+						if err != nil {
+							e.logger.Error("concurrent tool execution failed", "tool", call.Name, "error", err)
+							results[idx] = toolResultMsg(call, fmt.Sprintf("Error: %v", err), true)
+						} else {
+							results[idx] = msg
+						}
+						return nil
+					})
+				}
+
+				if err := g.Wait(); err != nil {
+					return err
+				}
+
+				// Append all results to conversation history in deterministic order
+				e.history = append(e.history, results...)
+			}
+		} else {
+			// Mutating or sequential tool — execute with sequential barrier
+			if err := e.executeTool(ctx, tc, resp); err != nil {
+				e.logger.Error("tool execution failed", "tool", tc.Name, "error", err)
+				e.history = append(e.history, toolResultMsg(tc, fmt.Sprintf("Error: %v", err), true))
+			}
+			i++
+		}
+	}
+	return nil
+}
+
 // executeTool dispatches a single tool call and streams step updates.
 func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.GenerateResponse) error {
 	stepIdx := e.nextStepIndex()
@@ -1128,35 +1352,7 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, resp *llm.Gen
 	e.emitStep(step)
 
 	// ── Permission check (if handler registered) ──
-	// Policy:
-	// 1. YOLO mode: bypass all prompts.
-	// 2. Non-file / interactive / web tools: always allowed without prompts.
-	// 3. Agent internal AppData paths (brain/knowledge artifacts): always allowed without prompts.
-	// 4. Read-only file tools: auto-approved ONLY if target is inside workspace or AppDataDir (~/.divmora).
-	//    If viewing/reading outside workspaces & outside ~/.divmora, prompt user for permission!
-	// 5. Mutating tools (write, edit, command): always prompt unless YOLO mode.
-	requiresPermission := true
-	if e.yoloMode {
-		requiresPermission = false
-	} else if isAlwaysAllowedTool(tc.Name) {
-		requiresPermission = false
-	} else if e.isAppDataDirPath(tc) {
-		requiresPermission = false
-	} else if isReadOnlyFileTool(tc.Name) {
-		targetPath := extractToolPath(tc)
-		if e.isPathInsideWorkspaceOrAppData(targetPath) {
-			requiresPermission = false
-		} else {
-			requiresPermission = true
-		}
-	}
-
-	// 5. Global settings (~/.divmora/config/settings.json) & Conversation grants
-	if requiresPermission && e.isPermissionGranted(tc) {
-		requiresPermission = false
-	}
-
-	if e.permissionHandler != nil && requiresPermission {
+	if e.toolRequiresPermission(tc) {
 		approved, reason, err := e.requestPermission(ctx, tc, step)
 
 		if err != nil {
@@ -1992,7 +2188,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 	// Track research tool calls
 	switch tc.Name {
 	case "view_file", "list_dir", "grep_search", "find_file":
-		e.researchToolCount++
+		e.researchToolCount.Add(1)
 		return false, ""
 	}
 
@@ -2026,7 +2222,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 	// Research heuristic: only block if the agent has done 2+ research calls.
 	// If the agent goes straight to writing without research, it's a simple
 	// fix that doesn't need a plan.
-	if e.researchToolCount < 2 {
+	if e.researchToolCount.Load() < 2 {
 		return false, ""
 	}
 
@@ -2287,8 +2483,11 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 	return string(b)
 }
 
-// emitStep sends a step update to the client.
+// emitStep sends a step update to the client. Serialized with stepMu
+// to protect against race conditions when multiple read-only tools run concurrently.
 func (e *Engine) emitStep(step *pb.StepUpdate) {
+	e.stepMu.Lock()
+	defer e.stepMu.Unlock()
 	if e.stepCB != nil {
 		e.stepCB(step)
 	}

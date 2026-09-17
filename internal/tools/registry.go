@@ -131,6 +131,14 @@ func (r *Registry) HasTool(name string) bool {
 	return ok
 }
 
+// IsReadOnly returns true if the tool is registered with ToolGroupRead.
+func (r *Registry) IsReadOnly(name string) bool {
+	if s, ok := r.schemas[name]; ok {
+		return s.Group == ToolGroupRead
+	}
+	return false
+}
+
 // Shutdown cleans up all background tasks and persistent terminals.
 // Should be called when the session disconnects.
 func (r *Registry) Shutdown() {

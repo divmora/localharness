@@ -2098,7 +2098,8 @@ func TestEngineInitialHistory(t *testing.T) {
 // ─── Planning Guard Tests ────────────────────────────────────────────────
 
 func TestCheckPlanningGuard_Disabled(t *testing.T) {
-	eng := &Engine{enablePlanningMode: false, researchToolCount: 10}
+	eng := &Engine{enablePlanningMode: false}
+	eng.researchToolCount.Store(10)
 
 	denied, _ := eng.checkPlanningGuard(llm.ToolCall{
 		Name: "write_to_file",
@@ -2114,7 +2115,6 @@ func TestCheckPlanningGuard_AllowsSimpleFix(t *testing.T) {
 	eng := &Engine{
 		enablePlanningMode: true,
 		brainDir:           brainDir,
-		researchToolCount:  0, // No research done — simple fix
 	}
 
 	// Agent goes straight to edit without researching — should be allowed
@@ -2127,7 +2127,7 @@ func TestCheckPlanningGuard_AllowsSimpleFix(t *testing.T) {
 	}
 
 	// Even create_file with 1 research call should be allowed
-	eng.researchToolCount = 1
+	eng.researchToolCount.Store(1)
 	denied, _ = eng.checkPlanningGuard(llm.ToolCall{
 		Name: "write_to_file",
 		Args: map[string]interface{}{"path": "/workspace/new_file.go"},
@@ -2142,15 +2142,14 @@ func TestCheckPlanningGuard_BlocksAfterResearch(t *testing.T) {
 	eng := &Engine{
 		enablePlanningMode: true,
 		brainDir:           brainDir,
-		researchToolCount:  0,
 	}
 
 	// Simulate 2 research calls
 	eng.checkPlanningGuard(llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"path": "/workspace/main.go"}})
 	eng.checkPlanningGuard(llm.ToolCall{Name: "list_dir", Args: map[string]interface{}{"path": "/workspace"}})
 
-	if eng.researchToolCount != 2 {
-		t.Errorf("expected researchToolCount=2, got %d", eng.researchToolCount)
+	if eng.researchToolCount.Load() != 2 {
+		t.Errorf("expected researchToolCount=2, got %d", eng.researchToolCount.Load())
 	}
 
 	// Now workspace writes should be blocked
@@ -2183,8 +2182,8 @@ func TestCheckPlanningGuard_AllowsBrainDirWrites(t *testing.T) {
 	eng := &Engine{
 		enablePlanningMode: true,
 		brainDir:           brainDir,
-		researchToolCount:  5, // Lots of research
 	}
+	eng.researchToolCount.Store(5) // Lots of research
 
 	// Write to brain dir (artifacts) should be allowed even after research
 	planPath := filepath.Join(brainDir, "implementation_plan.md")
@@ -2212,8 +2211,8 @@ func TestCheckPlanningGuard_AllowsAfterPlanExists(t *testing.T) {
 	eng := &Engine{
 		enablePlanningMode: true,
 		brainDir:           brainDir,
-		researchToolCount:  10, // Heavy research
 	}
+	eng.researchToolCount.Store(10) // Heavy research
 
 	// Create the plan file
 	planPath := filepath.Join(brainDir, "implementation_plan.md")
@@ -2233,8 +2232,8 @@ func TestCheckPlanningGuard_AllowsNonWriteTools(t *testing.T) {
 	eng := &Engine{
 		enablePlanningMode: true,
 		brainDir:           t.TempDir(),
-		researchToolCount:  10, // Even with heavy research
 	}
+	eng.researchToolCount.Store(10) // Even with heavy research
 
 	// Non-write tools should never be blocked
 	for _, tool := range []string{"search_web", "run_command"} {
@@ -2261,8 +2260,8 @@ func TestCheckPlanningGuard_ResearchCountIncrement(t *testing.T) {
 			Name: tool,
 			Args: map[string]interface{}{"path": "/workspace"},
 		})
-		if eng.researchToolCount != i+1 {
-			t.Errorf("after %s, expected researchToolCount=%d, got %d", tool, i+1, eng.researchToolCount)
+		if eng.researchToolCount.Load() != int32(i+1) {
+			t.Errorf("after %s, expected researchToolCount=%d, got %d", tool, i+1, eng.researchToolCount.Load())
 		}
 	}
 }
@@ -2658,5 +2657,370 @@ func TestConversationAndGlobalPermissionGrants(t *testing.T) {
 	}
 	if !eng.isPermissionGranted(tcQuotedAmpersand) {
 		t.Error("expected 'git status && npm run build' to be granted")
+	}
+}
+
+// ─── Concurrent Read-Only Tools Tests ────────────────────────────────────
+
+func TestConcurrentReadOnlyTools_ParallelExecutionAndOrder(t *testing.T) {
+	var (
+		mu              sync.Mutex
+		activeCount     int
+		peakConcurrency int
+		completedOrder  []string
+		writeCompleted  bool
+	)
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call_r1", Name: "mock_read_1", Args: map[string]interface{}{}},
+					{ID: "call_r2", Name: "mock_read_2", Args: map[string]interface{}{}},
+					{ID: "call_r3", Name: "mock_read_3", Args: map[string]interface{}{}},
+					{ID: "call_w1", Name: "mock_write_1", Args: map[string]interface{}{}},
+					{ID: "call_r4", Name: "mock_read_4", Args: map[string]interface{}{}},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "All done",
+			},
+		},
+	}
+
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(wsMgr, logger)
+
+	makeReadTool := func(name string, delay time.Duration) tools.ToolFunc {
+		return func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+			mu.Lock()
+			activeCount++
+			if activeCount > peakConcurrency {
+				peakConcurrency = activeCount
+			}
+			mu.Unlock()
+
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+
+			mu.Lock()
+			activeCount--
+			completedOrder = append(completedOrder, name)
+			mu.Unlock()
+
+			step.Text = fmt.Sprintf(`{"result":"%s_done"}`, name)
+			return nil
+		}
+	}
+
+	// Tool 1: 60ms delay
+	// Tool 2: 30ms delay (finishes before 1 even though started in parallel)
+	// Tool 3: 60ms delay
+	reg.Register("mock_read_1", makeReadTool("mock_read_1", 60*time.Millisecond), tools.ToolSchema{Group: tools.ToolGroupRead})
+	reg.Register("mock_read_2", makeReadTool("mock_read_2", 30*time.Millisecond), tools.ToolSchema{Group: tools.ToolGroupRead})
+	reg.Register("mock_read_3", makeReadTool("mock_read_3", 60*time.Millisecond), tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	reg.Register("mock_write_1", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		mu.Lock()
+		// Verify all 3 read tools in the first batch have finished before write starts (barrier)
+		if len(completedOrder) != 3 {
+			t.Errorf("expected 3 completed read tools before write barrier, got %d", len(completedOrder))
+		}
+		mu.Unlock()
+
+		time.Sleep(20 * time.Millisecond)
+
+		mu.Lock()
+		writeCompleted = true
+		completedOrder = append(completedOrder, "mock_write_1")
+		mu.Unlock()
+
+		step.Text = `{"result":"write_done"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupWrite})
+
+	reg.Register("mock_read_4", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		mu.Lock()
+		if !writeCompleted {
+			t.Error("mock_read_4 started before mock_write_1 completed")
+		}
+		completedOrder = append(completedOrder, "mock_read_4")
+		mu.Unlock()
+
+		step.Text = `{"result":"mock_read_4_done"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	brainDir := t.TempDir()
+	eng := NewEngine(Config{
+		Provider:                 provider,
+		ToolRegistry:             reg,
+		SystemPrompt:             "Test concurrent execution",
+		ConversationID:           "test-conv",
+		TrajectoryID:             "test-traj",
+		BrainDir:                 brainDir,
+		Logger:                   logger,
+		MaxConcurrentToolWorkers: 4,
+	})
+
+	err = eng.Run(context.Background(), "Start prompt")
+	if err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// 1. Peak concurrency for read batch (mock_read_1, 2, 3) must be at least 2 (parallel execution)
+	if peakConcurrency < 2 {
+		t.Errorf("expected peakConcurrency >= 2, got %d", peakConcurrency)
+	}
+
+	// 2. Because mock_read_2 has shorter delay (30ms vs 60ms), it completes before mock_read_1
+	if len(completedOrder) != 5 {
+		t.Fatalf("expected 5 tools in completedOrder, got %d: %v", len(completedOrder), completedOrder)
+	}
+	if completedOrder[0] != "mock_read_2" {
+		t.Errorf("expected mock_read_2 to finish first due to shorter duration, but first was %s", completedOrder[0])
+	}
+
+	// 3. Crucial: History order MUST preserve LLM tool call order:
+	// call_r1 (mock_read_1), call_r2 (mock_read_2), call_r3 (mock_read_3), call_w1 (mock_write_1), call_r4 (mock_read_4)
+	var toolResultIDs []string
+	for _, msg := range eng.history {
+		if msg.Role == "tool" && msg.ToolResult != nil {
+			toolResultIDs = append(toolResultIDs, msg.ToolResult.CallID)
+		}
+	}
+
+	expectedIDs := []string{"call_r1", "call_r2", "call_r3", "call_w1", "call_r4"}
+	if len(toolResultIDs) != len(expectedIDs) {
+		t.Fatalf("expected %d tool results in history, got %d: %v", len(expectedIDs), len(toolResultIDs), toolResultIDs)
+	}
+	for i, expected := range expectedIDs {
+		if toolResultIDs[i] != expected {
+			t.Errorf("history[%d] CallID = %s, want %s (out of order!)", i, toolResultIDs[i], expected)
+		}
+	}
+}
+
+func TestConcurrentReadOnlyTools_WorkerPoolLimit(t *testing.T) {
+	var (
+		mu              sync.Mutex
+		activeCount     int
+		peakConcurrency int
+	)
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "c1", Name: "t1", Args: map[string]interface{}{}},
+					{ID: "c2", Name: "t2", Args: map[string]interface{}{}},
+					{ID: "c3", Name: "t3", Args: map[string]interface{}{}},
+					{ID: "c4", Name: "t4", Args: map[string]interface{}{}},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Done",
+			},
+		},
+	}
+
+	wsDir := t.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(wsMgr, logger)
+
+	makeWorker := func() tools.ToolFunc {
+		return func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+			mu.Lock()
+			activeCount++
+			if activeCount > peakConcurrency {
+				peakConcurrency = activeCount
+			}
+			mu.Unlock()
+
+			time.Sleep(40 * time.Millisecond)
+
+			mu.Lock()
+			activeCount--
+			mu.Unlock()
+
+			step.Text = `{"ok":true}`
+			return nil
+		}
+	}
+
+	reg.Register("t1", makeWorker(), tools.ToolSchema{Group: tools.ToolGroupRead})
+	reg.Register("t2", makeWorker(), tools.ToolSchema{Group: tools.ToolGroupRead})
+	reg.Register("t3", makeWorker(), tools.ToolSchema{Group: tools.ToolGroupRead})
+	reg.Register("t4", makeWorker(), tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	eng := NewEngine(Config{
+		Provider:                 provider,
+		ToolRegistry:             reg,
+		SystemPrompt:             "Test worker limit",
+		ConversationID:           "test-conv",
+		TrajectoryID:             "test-traj",
+		BrainDir:                 t.TempDir(),
+		Logger:                   logger,
+		MaxConcurrentToolWorkers: 2, // Limit pool to 2 workers
+	})
+
+	err := eng.Run(context.Background(), "Run limit test")
+	if err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if peakConcurrency > 2 {
+		t.Errorf("expected peakConcurrency <= 2, got %d", peakConcurrency)
+	}
+}
+
+func TestConcurrentReadOnlyTools_ErrorHandling(t *testing.T) {
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "err_c1", Name: "read_ok_1", Args: map[string]interface{}{}},
+					{ID: "err_c2", Name: "read_fail", Args: map[string]interface{}{}},
+					{ID: "err_c3", Name: "read_ok_2", Args: map[string]interface{}{}},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Handled error",
+			},
+		},
+	}
+
+	wsDir := t.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(wsMgr, logger)
+
+	reg.Register("read_ok_1", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		time.Sleep(20 * time.Millisecond)
+		step.Text = `{"status":"ok1"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	reg.Register("read_fail", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		time.Sleep(10 * time.Millisecond)
+		return fmt.Errorf("read file not found")
+	}, tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	reg.Register("read_ok_2", func(ctx context.Context, step *pb.StepUpdate, r *tools.Registry) error {
+		time.Sleep(20 * time.Millisecond)
+		step.Text = `{"status":"ok2"}`
+		return nil
+	}, tools.ToolSchema{Group: tools.ToolGroupRead})
+
+	eng := NewEngine(Config{
+		Provider:                 provider,
+		ToolRegistry:             reg,
+		SystemPrompt:             "Test error handling",
+		ConversationID:           "test-conv",
+		TrajectoryID:             "test-traj",
+		BrainDir:                 t.TempDir(),
+		Logger:                   logger,
+		MaxConcurrentToolWorkers: 4,
+	})
+
+	err := eng.Run(context.Background(), "Run error test")
+	if err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	var results []*llm.ToolCallResult
+	for _, msg := range eng.history {
+		if msg.Role == "tool" && msg.ToolResult != nil {
+			results = append(results, msg.ToolResult)
+		}
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 tool results, got %d", len(results))
+	}
+
+	if results[0].CallID != "err_c1" || results[0].IsError {
+		t.Errorf("result 0 mismatch: %+v", results[0])
+	}
+	if results[1].CallID != "err_c2" || !results[1].IsError || !strings.Contains(results[1].Content, "read file not found") {
+		t.Errorf("result 1 mismatch: %+v", results[1])
+	}
+	if results[2].CallID != "err_c3" || results[2].IsError {
+		t.Errorf("result 2 mismatch: %+v", results[2])
+	}
+}
+
+func TestConcurrentReadOnlyTools_PermissionBarrierClassification(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(wsMgr, logger)
+	tools.RegisterBuiltinTools(reg, nil)
+
+	eng := NewEngine(Config{
+		ToolRegistry:   reg,
+		ConversationID: "test-conv",
+		TrajectoryID:   "test-traj",
+		BrainDir:       t.TempDir(),
+		Logger:         logger,
+		Workspaces:     []string{wsDir},
+		PermissionHandler: func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+			return true, "", nil
+		},
+	})
+
+	// 1. Read-only tool inside workspace -> concurrent read-only
+	inWsPath := filepath.Join(wsDir, "file.txt")
+	if !eng.isConcurrentReadOnlyTool(llm.ToolCall{
+		Name: "view_file",
+		Args: map[string]interface{}{"path": inWsPath},
+	}) {
+		t.Error("expected view_file inside workspace to be concurrent read-only")
+	}
+
+	// 2. Read-only tool outside workspace -> requires permission check, NOT concurrent read-only
+	outWsPath := "/etc/passwd"
+	if eng.isConcurrentReadOnlyTool(llm.ToolCall{
+		Name: "view_file",
+		Args: map[string]interface{}{"path": outWsPath},
+	}) {
+		t.Error("expected view_file outside workspace to NOT be concurrent read-only (permission barrier)")
+	}
+
+	// 3. Mutating tool inside workspace -> NOT concurrent read-only
+	if eng.isConcurrentReadOnlyTool(llm.ToolCall{
+		Name: "write_to_file",
+		Args: map[string]interface{}{"path": inWsPath},
+	}) {
+		t.Error("expected write_to_file to NOT be concurrent read-only")
+	}
+
+	// 4. Desktop tool -> NOT concurrent read-only
+	if eng.isConcurrentReadOnlyTool(llm.ToolCall{
+		Name: "desktop_screenshot",
+		Args: map[string]interface{}{},
+	}) {
+		t.Error("expected desktop_screenshot to NOT be concurrent read-only")
 	}
 }

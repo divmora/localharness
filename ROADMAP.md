@@ -12,8 +12,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Implement real-time filesystem watching to allow auto-reactive agent loops triggered on file creation, deletion, or modification within watched directories.
 - [ ] **Interval & Cron Triggers (`Every(duration, fn)`)**
   - Add native interval and recurring cron triggers within the harness daemon for scheduled audits, periodic syncs, and background agent routines.
-- [ ] **Parallel Execution of Read-Only Tools**
-  - Classify tools by side-effects and dispatch read-only tool calls (`view_file`, `grep_search`, `list_dir`, `find_file`, `read_url_content`) concurrently using an `errgroup` worker pool when the LLM returns multiple tool calls in a single turn, reducing turn latency by 3x–5x.
 - [ ] **Crash-Resilient Subagent Reconciliation**
   - Sweep and reconcile orphaned subagent processes on daemon restart, marking interrupted subagents cleanly in conversation state and enabling checkpoint-based resumption.
 
