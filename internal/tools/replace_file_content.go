@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -87,16 +88,55 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 	oldFileContent := string(rawBytes)
 	content := rawBytes
-	var diffParts []string
+	type indexedChunk struct {
+		origIndex int
+		chunk     *pb.EditChunk
+	}
 
-	// Apply each chunk — process in order, working directly on the byte buffer.
-	// We use line-range scoping: only search within [start_line, end_line].
+	// Prepare indexed chunks for execution.
+	// When multiple chunks are provided, sorting them by start_line in descending order (bottom-to-top)
+	// ensures that line modifications (additions/deletions) lower in the file never shift or invalidate
+	// the line numbers of earlier/higher chunks.
+	orderedChunks := make([]indexedChunk, len(ef.Chunks))
 	for i, chunk := range ef.Chunks {
+		cloned := &pb.EditChunk{
+			StartLine:     chunk.StartLine,
+			EndLine:       chunk.EndLine,
+			TargetContent: chunk.TargetContent,
+			Replacement:   chunk.Replacement,
+			AllowMultiple: chunk.AllowMultiple,
+		}
+		orderedChunks[i] = indexedChunk{origIndex: i, chunk: cloned}
+	}
+
+	sort.SliceStable(orderedChunks, func(i, j int) bool {
+		c1 := orderedChunks[i].chunk
+		c2 := orderedChunks[j].chunk
+		if c1.StartLine > 0 && c2.StartLine > 0 {
+			if c1.StartLine != c2.StartLine {
+				return c1.StartLine > c2.StartLine // Descending: higher line numbers first (bottom-to-top)
+			}
+			return orderedChunks[i].origIndex < orderedChunks[j].origIndex
+		}
+		if c1.StartLine > 0 && c2.StartLine <= 0 {
+			return true // Chunks with specific line ranges run before whole-file chunks
+		}
+		if c1.StartLine <= 0 && c2.StartLine > 0 {
+			return false
+		}
+		return orderedChunks[i].origIndex < orderedChunks[j].origIndex
+	})
+
+	diffParts := make([]string, len(ef.Chunks))
+
+	// Apply each chunk in bottom-to-top order
+	for idx, item := range orderedChunks {
+		chunk := item.chunk
 		target := chunk.TargetContent
 		replacement := chunk.Replacement
 
 		if target == "" {
-			return fmt.Errorf("replace_file_content: chunk %d: target_content is required", i)
+			return fmt.Errorf("replace_file_content: chunk %d: target_content is required", item.origIndex)
 		}
 
 		targetBytes := []byte(target)
@@ -116,10 +156,10 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 		// Validate range
 		if startLine > totalLines {
-			return fmt.Errorf("replace_file_content: chunk %d: start_line %d exceeds file length %d", i, startLine, totalLines)
+			return fmt.Errorf("replace_file_content: chunk %d: start_line %d exceeds file length %d", item.origIndex, startLine, totalLines)
 		}
 		if startLine > endLine {
-			return fmt.Errorf("replace_file_content: chunk %d: start_line %d > end_line %d", i, startLine, endLine)
+			return fmt.Errorf("replace_file_content: chunk %d: start_line %d > end_line %d", item.origIndex, startLine, endLine)
 		}
 
 		// Extract the scoped region byte range
@@ -163,13 +203,15 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 					scopedBytes = content
 					count = 1
 				} else {
-					return fmt.Errorf("replace_file_content: chunk %d: target_content not found within lines %d-%d", i, startLine, endLine)
+					return fmt.Errorf("replace_file_content: chunk %d: target_content not found within lines %d-%d", item.origIndex, startLine, endLine)
 				}
 			}
 		}
 		if count > 1 && !chunk.AllowMultiple {
-			return fmt.Errorf("replace_file_content: chunk %d: target_content found %d times in lines %d-%d (set allow_multiple=true to replace all)", i, count, startLine, endLine)
+			return fmt.Errorf("replace_file_content: chunk %d: target_content found %d times in lines %d-%d (set allow_multiple=true to replace all)", item.origIndex, count, startLine, endLine)
 		}
+
+		linesBefore := totalLines
 
 		// Perform replacement within the scoped region
 		var newScopedBytes []byte
@@ -186,11 +228,24 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		newContent = append(newContent, content[scopeEnd:]...)
 		content = newContent
 
+		linesAfter := countFileLines(content)
+		delta := linesAfter - linesBefore
+
+		// If this replacement changed the line count, adjust any remaining chunks that overlap this range
+		if delta != 0 {
+			for i := idx + 1; i < len(orderedChunks); i++ {
+				rem := &orderedChunks[i]
+				if rem.chunk.EndLine >= int32(startLine) {
+					rem.chunk.EndLine = int32(int(rem.chunk.EndLine) + delta)
+				}
+			}
+		}
+
 		// Build diff
-		diffParts = append(diffParts, fmt.Sprintf("--- chunk %d (lines %d-%d) ---\n- %s\n+ %s",
-			i+1, startLine, endLine,
+		diffParts[item.origIndex] = fmt.Sprintf("--- chunk %d (lines %d-%d) ---\n- %s\n+ %s",
+			item.origIndex+1, startLine, endLine,
 			truncateForDiff(target, 200),
-			truncateForDiff(replacement, 200)))
+			truncateForDiff(replacement, 200))
 	}
 
 	// Write back modified content

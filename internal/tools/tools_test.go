@@ -713,6 +713,134 @@ func TestEditFileMultipleChunks(t *testing.T) {
 	}
 }
 
+func TestEditFile_MultiChunkLineShifts(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// 1. Expanding multi-chunk edit with non-unique targets
+	// Build a 100-line file with identical "shared_marker" at line 10, line 50, and line 80.
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	lines[9] = "shared_marker"  // line 10 (1-indexed)
+	lines[49] = "shared_marker" // line 50 (1-indexed)
+	lines[79] = "shared_marker" // line 80 (1-indexed)
+
+	testFile := filepath.Join(wsDir, "line_shifts.txt")
+	_ = os.WriteFile(testFile, []byte(strings.Join(lines, "\n")+"\n"), 0644)
+
+	// Chunk 0 at line 10 adds 25 extra lines (+24 delta).
+	// Chunk 1 at line 50 replaces with 1 line.
+	// Chunk 2 at line 80 replaces with 1 line.
+	expandedReplacement := "REPLACED_CHUNK_0\n"
+	for i := 1; i <= 24; i++ {
+		expandedReplacement += fmt.Sprintf("extra_line_%d\n", i)
+	}
+	expandedReplacement = strings.TrimSuffix(expandedReplacement, "\n")
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReplaceFileContent{
+			ReplaceFileContent: &pb.ActionReplaceFileContent{
+				Path: testFile,
+				Chunks: []*pb.EditChunk{
+					{
+						StartLine:     8,
+						EndLine:       12,
+						TargetContent: "shared_marker",
+						Replacement:   expandedReplacement,
+					},
+					{
+						StartLine:     48,
+						EndLine:       52,
+						TargetContent: "shared_marker",
+						Replacement:   "REPLACED_CHUNK_1",
+					},
+					{
+						StartLine:     78,
+						EndLine:       82,
+						TargetContent: "shared_marker",
+						Replacement:   "REPLACED_CHUNK_2",
+					},
+				},
+			},
+		},
+	}
+
+	err := reg.Execute(ctx, "replace_file_content", step)
+	if err != nil {
+		t.Fatalf("multi-chunk edit with line expansion failed: %v", err)
+	}
+
+	resultBytes, _ := os.ReadFile(testFile)
+	result := string(resultBytes)
+
+	if !strings.Contains(result, "REPLACED_CHUNK_0") {
+		t.Error("expected REPLACED_CHUNK_0 in result")
+	}
+	if !strings.Contains(result, "REPLACED_CHUNK_1") {
+		t.Error("expected REPLACED_CHUNK_1 in result")
+	}
+	if !strings.Contains(result, "REPLACED_CHUNK_2") {
+		t.Error("expected REPLACED_CHUNK_2 in result")
+	}
+	if strings.Contains(result, "shared_marker") {
+		t.Error("all shared_marker instances should have been replaced")
+	}
+
+	// 2. Shrinking multi-chunk edit
+	shrinkFile := filepath.Join(wsDir, "shrink.txt")
+	shrinkLines := make([]string, 60)
+	for i := range shrinkLines {
+		shrinkLines[i] = fmt.Sprintf("content_%d", i+1)
+	}
+	_ = os.WriteFile(shrinkFile, []byte(strings.Join(shrinkLines, "\n")+"\n"), 0644)
+
+	// Chunk 0 shrinks lines 10-20 to 1 line (-10 delta).
+	// Chunk 1 modifies line 50.
+	toDelete := ""
+	for i := 10; i <= 20; i++ {
+		toDelete += fmt.Sprintf("content_%d\n", i)
+	}
+	toDelete = strings.TrimSuffix(toDelete, "\n")
+
+	shrinkStep := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReplaceFileContent{
+			ReplaceFileContent: &pb.ActionReplaceFileContent{
+				Path: shrinkFile,
+				Chunks: []*pb.EditChunk{
+					{
+						StartLine:     10,
+						EndLine:       20,
+						TargetContent: toDelete,
+						Replacement:   "SHRUNK_REGION",
+					},
+					{
+						StartLine:     48,
+						EndLine:       52,
+						TargetContent: "content_50",
+						Replacement:   "CONTENT_FIFTY_UPDATED",
+					},
+				},
+			},
+		},
+	}
+
+	err = reg.Execute(ctx, "replace_file_content", shrinkStep)
+	if err != nil {
+		t.Fatalf("multi-chunk edit with line shrink failed: %v", err)
+	}
+
+	shrinkResultBytes, _ := os.ReadFile(shrinkFile)
+	shrinkResult := string(shrinkResultBytes)
+	if !strings.Contains(shrinkResult, "SHRUNK_REGION") {
+		t.Error("expected SHRUNK_REGION in shrink result")
+	}
+	if !strings.Contains(shrinkResult, "CONTENT_FIFTY_UPDATED") {
+		t.Error("expected CONTENT_FIFTY_UPDATED in shrink result")
+	}
+}
+
 func TestEditFileTargetNotFound(t *testing.T) {
 	reg, wsDir := testRegistry(t)
 	ctx := context.Background()
