@@ -68,6 +68,8 @@ type BackgroundTask struct {
 // variables across command invocations.
 type PersistentTerminal struct {
 	ID     string
+	cwd    string
+	env    map[string]string
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	output *RingBuffer
@@ -481,65 +483,97 @@ func (tm *TaskManager) RunInTerminal(ctx context.Context, command, cwd, terminal
 // createTerminal starts a new persistent bash session.
 func (tm *TaskManager) createTerminal(cwd string, env map[string]string) (*PersistentTerminal, error) {
 	termID := "term-" + shortID()
+	term := &PersistentTerminal{
+		ID:  termID,
+		cwd: cwd,
+		env: env,
+	}
+
+	if err := tm.startTerminalProcess(term); err != nil {
+		return nil, err
+	}
+
+	tm.mu.Lock()
+	tm.terminals[termID] = term
+	tm.mu.Unlock()
+
+	tm.logger.Info("created persistent terminal", "terminal_id", termID, "cwd", cwd)
+
+	return term, nil
+}
+
+// startTerminalProcess launches or restarts the underlying bash process for a persistent terminal.
+func (tm *TaskManager) startTerminalProcess(term *PersistentTerminal) error {
+	// Clean up previous process resources if restarting
+	if term.cancel != nil {
+		term.cancel()
+	}
+	if term.stdin != nil {
+		_ = term.stdin.Close()
+	}
+	if term.cmd != nil && term.cmd.Process != nil {
+		_ = killProcessGroup(term.cmd.Process.Pid)
+	}
 
 	termCtx, cancel := context.WithCancel(context.Background())
 	// Use non-interactive bash to avoid prompt noise
 	cmd := exec.CommandContext(termCtx, "bash", "--norc", "--noprofile")
-	if cwd != "" {
-		cmd.Dir = cwd
+	if term.cwd != "" {
+		cmd.Dir = term.cwd
 	}
 
 	// Build environment
 	cmdEnv := cmd.Environ()
 	cmdEnv = append(cmdEnv, "PAGER=cat", "GIT_TERMINAL_PROMPT=0")
-	for k, v := range env {
+	for k, v := range term.env {
 		k = strings.ReplaceAll(k, "\n", "")
 		v = strings.ReplaceAll(v, "\n", "")
 		cmdEnv = append(cmdEnv, k+"="+v)
 	}
 	cmd.Env = cmdEnv
 
-	output := NewRingBuffer(outputBufferSize)
-	cmd.Stdout = output
-	cmd.Stderr = output
+	if term.output == nil {
+		term.output = NewRingBuffer(outputBufferSize)
+	} else {
+		term.output.Reset()
+	}
+	cmd.Stdout = term.output
+	cmd.Stderr = term.output
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("task_manager: terminal stdin: %w", err)
+		return fmt.Errorf("task_manager: terminal stdin: %w", err)
 	}
 
 	setProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("task_manager: terminal start: %w", err)
+		return fmt.Errorf("task_manager: terminal start: %w", err)
 	}
 
-	term := &PersistentTerminal{
-		ID:     termID,
-		cmd:    cmd,
-		stdin:  stdinPipe,
-		output: output,
-		cancel: cancel,
-		done:   make(chan struct{}),
-	}
+	done := make(chan struct{})
+	term.cmd = cmd
+	term.stdin = stdinPipe
+	term.cancel = cancel
+	term.done = done
 
 	// Monitor terminal process
 	go func() {
 		_ = cmd.Wait()
-		if term.stdin != nil {
-			_ = term.stdin.Close()
+		if stdinPipe != nil {
+			_ = stdinPipe.Close()
 		}
-		close(term.done)
+		close(done)
 	}()
 
-	// Synchronize with bash startup instead of arbitrary sleeping
+	// Synchronize with bash startup and configure signal trap for graceful interrupts
 	readyMarker := "__LH_READY_" + shortID() + "__"
-	readyCmd := fmt.Sprintf("echo '%s'\n", readyMarker)
+	readyCmd := fmt.Sprintf("trap : INT TERM\necho '%s'\n", readyMarker)
 	if _, err := term.stdin.Write([]byte(readyCmd)); err != nil {
 		cancel()
-		return nil, fmt.Errorf("task_manager: terminal handshake write: %w", err)
+		return fmt.Errorf("task_manager: terminal handshake write: %w", err)
 	}
 
 	notifyCh := term.output.Subscribe()
@@ -561,23 +595,17 @@ startupLoop:
 			}
 		case <-term.done:
 			cancel()
-			return nil, fmt.Errorf("task_manager: terminal process exited prematurely")
+			return fmt.Errorf("task_manager: terminal process exited prematurely")
 		case <-readyTimer.C:
 			cancel()
-			return nil, fmt.Errorf("task_manager: terminal startup timed out")
+			return fmt.Errorf("task_manager: terminal startup timed out")
 		}
 	}
 
 	// Clean startup handshake from buffer so it doesn't pollute command output
 	term.output.Reset()
 
-	tm.mu.Lock()
-	tm.terminals[termID] = term
-	tm.mu.Unlock()
-
-	tm.logger.Info("created persistent terminal", "terminal_id", termID, "cwd", cwd)
-
-	return term, nil
+	return nil
 }
 
 // execInTerminal runs a command in an existing persistent terminal and captures output.
@@ -585,10 +613,17 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 	term.mu.Lock()
 	defer term.mu.Unlock()
 
-	// Check terminal is still alive
+	// Check if caller context is already canceled
+	if err := ctx.Err(); err != nil {
+		return term.ID, "", -1, err
+	}
+
+	// Check terminal is still alive, auto-restart if previously exited
 	select {
 	case <-term.done:
-		return term.ID, "", -1, fmt.Errorf("terminal %s has exited", term.ID)
+		if err := tm.startTerminalProcess(term); err != nil {
+			return term.ID, "", -1, fmt.Errorf("terminal %s has exited and failed to restart: %w", term.ID, err)
+		}
 	default:
 	}
 
@@ -632,6 +667,7 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 	for {
 		select {
 		case <-ctx.Done():
+			tm.interruptAndRecover(term, beginMarker, endMarker, notifyCh)
 			return term.ID, "", -1, ctx.Err()
 		case <-term.done:
 			// Terminal died — return whatever output we have
@@ -639,7 +675,8 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 			cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
 			return term.ID, cmdOutput, -1, fmt.Errorf("terminal exited unexpectedly")
 		case <-deadline:
-			// Timed out waiting for end marker
+			// Timed out waiting for end marker — interrupt foreground process and recover terminal
+			tm.interruptAndRecover(term, beginMarker, endMarker, notifyCh)
 			allOutput := term.output.String()
 			cmdOutput := extractBetweenMarkers(allOutput, beginMarker, endMarker)
 			return term.ID, cmdOutput, -1, nil
@@ -666,6 +703,93 @@ func (tm *TaskManager) execInTerminal(ctx context.Context, term *PersistentTermi
 			}
 		}
 	}
+}
+
+// interruptAndRecover stops the currently running foreground command in a persistent terminal
+// after a timeout or context cancellation, ensuring the terminal is responsive for subsequent commands.
+func (tm *TaskManager) interruptAndRecover(term *PersistentTerminal, beginMarker, endMarker string, notifyCh <-chan struct{}) {
+	endMarkerBytes := []byte(endMarker)
+
+	// Step 1: Send Ctrl+C / \x03 to stdin and SIGINT to the process group
+	if term.stdin != nil {
+		_, _ = term.stdin.Write([]byte("\x03\n"))
+	}
+	if term.cmd != nil && term.cmd.Process != nil {
+		_ = interruptProcessGroup(term.cmd.Process.Pid)
+	}
+
+	// Step 2: Wait for bash to finish the current command sequence and emit the end marker
+	sigintWait := time.After(300 * time.Millisecond)
+	for {
+		if term.output.Contains(endMarkerBytes) {
+			return
+		}
+		select {
+		case <-notifyCh:
+			if term.output.Contains(endMarkerBytes) {
+				return
+			}
+		case <-term.done:
+			return
+		case <-sigintWait:
+			goto escalateTerm
+		}
+	}
+
+escalateTerm:
+	// Step 3: If still not finished, escalate to SIGTERM
+	if term.cmd != nil && term.cmd.Process != nil {
+		_ = terminateProcessGroup(term.cmd.Process.Pid)
+	}
+
+	sigtermWait := time.After(300 * time.Millisecond)
+	for {
+		if term.output.Contains(endMarkerBytes) {
+			return
+		}
+		select {
+		case <-notifyCh:
+			if term.output.Contains(endMarkerBytes) {
+				return
+			}
+		case <-term.done:
+			return
+		case <-sigtermWait:
+			goto probeRecovery
+		}
+	}
+
+probeRecovery:
+	// Step 4: The end marker wasn't produced (e.g. stdin was consumed or command ignored INT/TERM).
+	// Probe whether bash itself is alive and responsive by sending a recovery marker.
+	recMarker := terminalMarkerPrefix + "REC_" + shortID() + "__"
+	recBytes := []byte(recMarker)
+	if term.stdin != nil {
+		_, _ = term.stdin.Write([]byte("\x03\n\necho '" + recMarker + "'\n"))
+	}
+
+	recWait := time.After(300 * time.Millisecond)
+	for {
+		if term.output.Contains(recBytes) {
+			return
+		}
+		select {
+		case <-notifyCh:
+			if term.output.Contains(recBytes) {
+				return
+			}
+		case <-term.done:
+			return
+		case <-recWait:
+			goto forceRestart
+		}
+	}
+
+forceRestart:
+	// Step 5: Bash is wedged in an infinite loop or unkillable state.
+	// Force restart the terminal session so subsequent commands do not hang.
+	tm.logger.Warn("persistent terminal wedged; restarting process", "terminal_id", term.ID)
+	_ = tm.startTerminalProcess(term)
 }
 
 // extractBetweenMarkers extracts text between begin and end markers.

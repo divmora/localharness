@@ -11,6 +11,10 @@ func setProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+func interruptProcessGroup(pid int) error {
+	return syscall.Kill(-pid, syscall.SIGINT)
+}
+
 func killProcessGroup(pid int) error {
 	return syscall.Kill(-pid, syscall.SIGKILL)
 }

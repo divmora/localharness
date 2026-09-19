@@ -100,6 +100,9 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		rc.Stdout = truncateOutput(stdout, 100000)
 		rc.ExitCode = int32(exitCode)
 		rc.AssignedTerminalId = termID
+		if exitCode == -1 {
+			rc.TimedOut = true
+		}
 		return nil
 	}
 

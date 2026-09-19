@@ -12,6 +12,10 @@ func setProcessGroup(cmd *exec.Cmd) {
 	// We could use CREATE_NEW_PROCESS_GROUP via SysProcAttr on Windows, but standard process killing works fine for now.
 }
 
+func interruptProcessGroup(pid int) error {
+	return terminateProcessGroup(pid)
+}
+
 func killProcessGroup(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {

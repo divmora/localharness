@@ -63,8 +63,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Add line delta tracking or bottom-to-top chunk ordering in `replace_file_content` to prevent line shifting corruption across sequential chunks.
 - [ ] **Windows Ripgrep Drive Letter Path Parsing** (#49)
   - Properly parse Windows paths containing drive letters (`C:\...`) in `grep_search` to prevent corrupted filenames and zeroed line numbers.
-- [ ] **Persistent Terminal Foreground Interrupt on Timeout/Cancel** (#50)
-  - Send `SIGINT` / `Ctrl+C` to persistent terminals on command timeout or cancellation to prevent background commands from wedging the terminal session.
 - [ ] **Thread-Safe Desktop Driver Lazy Initialization** (#52)
   - Guard `globalDesktopDriver` initialization with `sync.Once` to eliminate concurrent data races across subagents.
 - [ ] **Subagent Isolated Environment Variables Without `os.Setenv`** (#53)

@@ -377,6 +377,137 @@ func TestPersistentTerminal_StreamingEmitter(t *testing.T) {
 	t.Logf("emitted updates count: %d", count)
 }
 
+func TestPersistentTerminal_TimeoutRecovery(t *testing.T) {
+	tm := NewTaskManager(testLogger(), 5)
+	defer tm.Shutdown()
+
+	ctx := context.Background()
+
+	// 1. Run a long-running command with a short timeout (200ms)
+	start := time.Now()
+	termID, _, exitCode, err := tm.RunInTerminal(ctx, "sleep 30", "", "", nil, 200, nil)
+	firstDuration := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("first command failed with unexpected error: %v", err)
+	}
+	if exitCode != -1 {
+		t.Errorf("expected exitCode -1 for timed out command, got %d", exitCode)
+	}
+	if termID == "" {
+		t.Fatal("expected non-empty termID")
+	}
+	if firstDuration > 5*time.Second {
+		t.Errorf("first command took too long to time out: %v", firstDuration)
+	}
+
+	// 2. Immediately execute a subsequent command in the same terminal
+	start2 := time.Now()
+	termID2, stdout2, exitCode2, err := tm.RunInTerminal(ctx, "echo recovered_123", "", termID, nil, 5000, nil)
+	secondDuration := time.Since(start2)
+
+	if err != nil {
+		t.Fatalf("subsequent command failed: %v", err)
+	}
+	if termID2 != termID {
+		t.Errorf("expected same terminal ID %q, got %q", termID, termID2)
+	}
+	if exitCode2 != 0 {
+		t.Errorf("expected exitCode 0 for subsequent command, got %d", exitCode2)
+	}
+	if !contains(stdout2, "recovered_123") {
+		t.Errorf("expected stdout to contain 'recovered_123', got %q", stdout2)
+	}
+	if secondDuration > 3*time.Second {
+		t.Errorf("subsequent command took too long (%v), foreground command was likely not interrupted", secondDuration)
+	}
+}
+
+func TestPersistentTerminal_CancelRecovery(t *testing.T) {
+	tm := NewTaskManager(testLogger(), 5)
+	defer tm.Shutdown()
+
+	// First create a terminal
+	termID, _, _, err := tm.RunInTerminal(context.Background(), "echo ready", "", "", nil, 5000, nil)
+	if err != nil {
+		t.Fatalf("setup command failed: %v", err)
+	}
+
+	// Run long-running command with cancellable context
+	ctxCancel, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, _, _, err = tm.RunInTerminal(ctxCancel, "sleep 30", "", termID, nil, 10000, nil)
+	duration := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error on cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if duration > 5*time.Second {
+		t.Errorf("cancelled command took too long: %v", duration)
+	}
+
+	// Immediately execute a subsequent command in the same terminal with fresh context
+	ctx := context.Background()
+	start2 := time.Now()
+	termID2, stdout2, exitCode2, err := tm.RunInTerminal(ctx, "echo cancel_recovered_456", "", termID, nil, 5000, nil)
+	secondDuration := time.Since(start2)
+
+	if err != nil {
+		t.Fatalf("subsequent command failed after cancellation: %v", err)
+	}
+	if termID2 != termID {
+		t.Errorf("expected same terminal ID %q, got %q", termID, termID2)
+	}
+	if exitCode2 != 0 {
+		t.Errorf("expected exitCode 0, got %d", exitCode2)
+	}
+	if !contains(stdout2, "cancel_recovered_456") {
+		t.Errorf("expected stdout to contain 'cancel_recovered_456', got %q", stdout2)
+	}
+	if secondDuration > 3*time.Second {
+		t.Errorf("subsequent command took too long (%v), foreground command was not interrupted", secondDuration)
+	}
+}
+
+func TestPersistentTerminal_WedgedLoopRecovery(t *testing.T) {
+	tm := NewTaskManager(testLogger(), 5)
+	defer tm.Shutdown()
+
+	ctx := context.Background()
+
+	// Run an infinite loop in bash with short timeout
+	termID, _, exitCode, err := tm.RunInTerminal(ctx, "while true; do :; done", "", "", nil, 200, nil)
+	if err != nil {
+		t.Fatalf("loop command failed with error: %v", err)
+	}
+	if exitCode != -1 {
+		t.Errorf("expected exitCode -1 for timed out loop, got %d", exitCode)
+	}
+
+	// Run subsequent command; terminal should have auto-restarted and recover cleanly
+	termID2, stdout2, exitCode2, err := tm.RunInTerminal(ctx, "echo wedged_recovered_789", "", termID, nil, 5000, nil)
+	if err != nil {
+		t.Fatalf("subsequent command failed after wedged loop: %v", err)
+	}
+	if termID2 != termID {
+		t.Errorf("expected same terminal ID %q, got %q", termID, termID2)
+	}
+	if exitCode2 != 0 {
+		t.Errorf("expected exitCode 0, got %d", exitCode2)
+	}
+	if !contains(stdout2, "wedged_recovered_789") {
+		t.Errorf("expected stdout to contain 'wedged_recovered_789', got %q", stdout2)
+	}
+}
+
 // ─── Run Command Background Mode Tests ─────────────────────────────────
 
 func TestRunCommandBackground(t *testing.T) {
