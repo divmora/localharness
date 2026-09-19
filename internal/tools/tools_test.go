@@ -279,6 +279,125 @@ func TestViewFile(t *testing.T) {
 	}
 }
 
+func TestViewFile_SourceCodeNotBinary(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	files := map[string]string{
+		"schema.proto": `syntax = "proto3";
+package example;
+message Test {
+    string id = 1;
+}`,
+		"config.yaml": `version: '3'
+services:
+  app:
+    image: golang:1.25`,
+		"main.rs": `fn main() {
+    println!("Hello, 🌍!");
+}`,
+		"app.ts": `interface User {
+    id: string;
+    name: string;
+}
+export const u: User = { id: "1", name: "Alice" };`,
+		"Cargo.toml": `[package]
+name = "demo"
+version = "0.1.0"
+edition = "2021"`,
+		"script_no_ext": `#!/bin/bash
+echo "running custom runner"
+exit 0`,
+	}
+
+	for name, content := range files {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(wsDir, name)
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatalf("failed to write file %s: %v", name, err)
+			}
+
+			step := &pb.StepUpdate{
+				Action: &pb.StepUpdate_ViewFile{
+					ViewFile: &pb.ActionViewFile{Path: path},
+				},
+			}
+
+			if err := reg.Execute(ctx, "view_file", step); err != nil {
+				t.Fatalf("view_file failed for %s: %v", name, err)
+			}
+
+			vf := step.GetViewFile()
+			if vf.IsBinary {
+				t.Errorf("file %s was falsely classified as binary", name)
+			}
+			if !strings.Contains(vf.Content, strings.Split(content, "\n")[0]) {
+				t.Errorf("expected content of %s to be returned, got %q", name, vf.Content)
+			}
+		})
+	}
+}
+
+func TestViewFile_BinaryFileDetection(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// File with NUL byte
+	binPath := filepath.Join(wsDir, "data.bin")
+	binData := []byte{0x7f, 'E', 'L', 'F', 0x00, 0x01, 0x02, 0x03}
+	if err := os.WriteFile(binPath, binData, 0644); err != nil {
+		t.Fatalf("failed to write binary file: %v", err)
+	}
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ViewFile{
+			ViewFile: &pb.ActionViewFile{Path: binPath},
+		},
+	}
+	if err := reg.Execute(ctx, "view_file", step); err != nil {
+		t.Fatalf("view_file failed: %v", err)
+	}
+	vf := step.GetViewFile()
+	if !vf.IsBinary {
+		t.Errorf("expected data.bin to be classified as binary")
+	}
+	if !strings.Contains(vf.Content, "[Binary file:") {
+		t.Errorf("expected binary file metadata string, got %q", vf.Content)
+	}
+}
+
+func TestIsBinaryFile(t *testing.T) {
+	tests := []struct {
+		path     string
+		header   []byte
+		expected bool
+	}{
+		{"main.go", []byte("package main\nfunc main() {}\n"), false},
+		{"service.proto", []byte("syntax = \"proto3\";\n"), false},
+		{"values.yaml", []byte("replicaCount: 1\n"), false},
+		{"index.ts", []byte("import { Component } from '@angular/core';\n"), false},
+		{"lib.rs", []byte("pub fn run() {}\n"), false},
+		{"Dockerfile", []byte("FROM alpine:3.19\n"), false},
+		{"Makefile", []byte("all:\n\t@echo hi\n"), false},
+		{"run.sh", []byte("#!/bin/sh\necho hi\n"), false},
+		{"notes.md", []byte("# Header\nSome markdown text.\n"), false},
+		{"image.png", []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), true},
+		{"archive.zip", []byte("PK\x03\x04\x14\x00\x00\x00\x08\x00"), true},
+		{"program.exe", []byte("MZ\x90\x00\x03\x00\x00\x00\x04\x00"), true},
+		{"app.wasm", []byte("\x00asm\x01\x00\x00\x00"), true},
+		{"corrupt_go.go", []byte("package\x00main"), true},
+		{"unknown_text.xyz", []byte("plain text without standard extension\n"), false},
+		{"unknown_bin.xyz", []byte("some data\x00with nulls\n"), true},
+	}
+
+	for _, tc := range tests {
+		got := isBinaryFile(tc.path, tc.header)
+		if got != tc.expected {
+			t.Errorf("isBinaryFile(%q) = %v, expected %v", tc.path, got, tc.expected)
+		}
+	}
+}
+
 func TestViewFileWithLineRange(t *testing.T) {
 	reg, wsDir := testRegistry(t)
 	ctx := context.Background()

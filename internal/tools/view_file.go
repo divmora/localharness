@@ -2,10 +2,12 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -92,16 +94,13 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 	defer f.Close()
 
-	// Read first 512 bytes for MIME detection
-	header := make([]byte, 512)
+	// Read first 1024 bytes for binary detection
+	header := make([]byte, 1024)
 	n, _ := f.Read(header)
-	contentType := http.DetectContentType(header[:n])
-	isBinary := !strings.HasPrefix(contentType, "text/") &&
-		contentType != "application/json" &&
-		contentType != "application/xml" &&
-		contentType != "application/javascript"
+	sample := header[:n]
 
-	if isBinary {
+	if isBinaryFile(path, sample) {
+		contentType := http.DetectContentType(sample)
 		vf.Content = fmt.Sprintf("[Binary file: %s, size: %d bytes, type: %s]", path, info.Size(), contentType)
 		vf.TotalBytes = info.Size()
 		vf.IsBinary = true
@@ -191,4 +190,88 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 
 	return nil
+}
+
+// knownTextExts contains file extensions (with leading dot, lowercase) that are always text/source files.
+var knownTextExts = map[string]bool{
+	// Go
+	".go": true,
+	// Python
+	".py": true, ".pyi": true,
+	// JavaScript / TypeScript / Web
+	".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".cjs": true,
+	".html": true, ".htm": true, ".xhtml": true, ".xml": true, ".svg": true,
+	".css": true, ".scss": true, ".sass": true, ".less": true,
+	// Systems languages
+	".rs": true, ".c": true, ".cpp": true, ".cc": true, ".cxx": true,
+	".h": true, ".hpp": true, ".hxx": true, ".zig": true, ".nim": true,
+	// JVM languages
+	".java": true, ".kt": true, ".kts": true, ".scala": true, ".groovy": true, ".clj": true, ".cljs": true,
+	// Other languages
+	".swift": true, ".rb": true, ".php": true, ".cs": true, ".fs": true, ".vb": true,
+	".r": true, ".m": true, ".mm": true, ".lua": true, ".pl": true, ".pm": true,
+	".dart": true, ".elm": true, ".erl": true, ".ex": true, ".exs": true, ".hs": true,
+	// Shell scripting
+	".sh": true, ".bash": true, ".zsh": true, ".fish": true, ".bat": true, ".cmd": true, ".ps1": true, ".psm1": true,
+	// Config, data & schemas
+	".json": true, ".jsonc": true, ".json5": true, ".yaml": true, ".yml": true,
+	".toml": true, ".ini": true, ".cfg": true, ".conf": true, ".properties": true,
+	".env": true, ".proto": true, ".sql": true, ".graphql": true, ".gql": true,
+	".csv": true, ".tsv": true,
+	// Documentation
+	".md": true, ".markdown": true, ".rst": true, ".txt": true, ".text": true,
+	".log": true, ".tex": true, ".diff": true, ".patch": true,
+	// Containers & build
+	".dockerfile": true,
+}
+
+// knownTextFiles contains exact filenames (lowercase) that are always text files.
+var knownTextFiles = map[string]bool{
+	"dockerfile": true, "makefile": true, "gnumakefile": true,
+	"containerfile": true, "vagrantfile": true, "rakefile": true,
+	"gemfile": true, "pipfile": true, "brewfile": true, "procfile": true,
+	"license": true, "licence": true, "notice": true, "readme": true,
+	"changelog": true, "authors": true, "contributing": true,
+	".gitignore": true, ".gitattributes": true, ".dockerignore": true,
+	".editorconfig": true, ".env": true, ".env.example": true,
+}
+
+// isBinaryFile determines whether a file should be treated as binary or text.
+// It uses a combination of known text extensions/filenames, NUL-byte scanning
+// (standard Git/Unix heuristic), known binary extensions, and specific binary MIME types.
+func isBinaryFile(path string, header []byte) bool {
+	// NUL byte detection: valid UTF-8/ASCII text never contains \x00.
+	if bytes.IndexByte(header, 0) != -1 {
+		return true
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	base := strings.ToLower(filepath.Base(path))
+
+	// Known text extensions and filenames take precedence
+	if knownTextExts[ext] || knownTextFiles[base] {
+		return false
+	}
+
+	// Known binary extensions
+	if isBinaryExtension(ext) {
+		return true
+	}
+
+	// For unrecognized extensions, sniff content type but DO NOT treat application/octet-stream as binary
+	// unless it matched specific binary prefixes (image/, audio/, video/, font/, pdf, zip, etc.)
+	if len(header) > 0 {
+		contentType := http.DetectContentType(header)
+		if strings.HasPrefix(contentType, "image/") ||
+			strings.HasPrefix(contentType, "audio/") ||
+			strings.HasPrefix(contentType, "video/") ||
+			strings.HasPrefix(contentType, "font/") ||
+			contentType == "application/pdf" ||
+			contentType == "application/zip" ||
+			contentType == "application/x-gzip" {
+			return true
+		}
+	}
+
+	return false
 }

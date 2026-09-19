@@ -65,8 +65,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Guard `globalDesktopDriver` initialization with `sync.Once` to eliminate concurrent data races across subagents.
 - [ ] **Subagent Isolated Environment Variables Without `os.Setenv`** (#53)
   - Pass subagent environment variables to child process descriptors rather than mutating process-wide state via `os.Setenv`.
-- [ ] **Heuristic Binary File Classification in `view_file`** (#55)
-  - Replace naive `http.DetectContentType` with NUL byte detection and source extension matching to prevent false binary classifications on code files.
 - [ ] **Cross-Platform Shell Resolver for Windows**
   - Detect availability of `bash`, and gracefully fallback to `powershell.exe`, `pwsh`, or `cmd.exe` in `run_command` and `task_manager`, preventing execution failures on Windows environments where Git Bash is not in `%PATH%`.
 - [ ] **URL & Domain Allowlist Policy Engine**
