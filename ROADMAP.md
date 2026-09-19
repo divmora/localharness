@@ -61,8 +61,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Add first-class `AccessMode` enum to proto, workspace manager, and engine to enable general-purpose OS administration, devops, and desktop automation alongside sandboxed project agents.
 - [ ] **Multi-Chunk Replacement Line-Shift Offset Adjustment** (#45)
   - Add line delta tracking or bottom-to-top chunk ordering in `replace_file_content` to prevent line shifting corruption across sequential chunks.
-- [ ] **Windows Ripgrep Drive Letter Path Parsing** (#49)
-  - Properly parse Windows paths containing drive letters (`C:\...`) in `grep_search` to prevent corrupted filenames and zeroed line numbers.
 - [ ] **Thread-Safe Desktop Driver Lazy Initialization** (#52)
   - Guard `globalDesktopDriver` initialization with `sync.Once` to eliminate concurrent data races across subagents.
 - [ ] **Subagent Isolated Environment Variables Without `os.Setenv`** (#53)

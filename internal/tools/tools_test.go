@@ -1542,6 +1542,44 @@ func TestParseRipgrepLine(t *testing.T) {
 	if fileMatch == nil || fileMatch.Filename != "pkg/main.go" {
 		t.Errorf("expected pkg/main.go, got %v", fileMatch)
 	}
+
+	// Windows path with drive letter (backslash)
+	winLine := `C:\project\main.go:42:fmt.Println("hello")`
+	winMatch := parseRipgrepLine(winLine, true)
+	if winMatch == nil {
+		t.Fatal("expected non-nil winMatch")
+	}
+	if winMatch.Filename != `C:\project\main.go` {
+		t.Errorf("expected filename C:\\project\\main.go, got %s", winMatch.Filename)
+	}
+	if winMatch.LineNumber != 42 {
+		t.Errorf("expected line number 42, got %d", winMatch.LineNumber)
+	}
+	if winMatch.LineContent != `fmt.Println("hello")` {
+		t.Errorf("expected line content fmt.Println(\"hello\"), got %s", winMatch.LineContent)
+	}
+
+	// Windows path with drive letter (forward slash) and colons in content
+	winSlashLine := `D:/project/src/lib.rs:105:pub fn run() -> Result<String, Error> { // key:value`
+	winSlashMatch := parseRipgrepLine(winSlashLine, true)
+	if winSlashMatch == nil {
+		t.Fatal("expected non-nil winSlashMatch")
+	}
+	if winSlashMatch.Filename != `D:/project/src/lib.rs` {
+		t.Errorf("expected filename D:/project/src/lib.rs, got %s", winSlashMatch.Filename)
+	}
+	if winSlashMatch.LineNumber != 105 {
+		t.Errorf("expected line number 105, got %d", winSlashMatch.LineNumber)
+	}
+	if winSlashMatch.LineContent != `pub fn run() -> Result<String, Error> { // key:value` {
+		t.Errorf("expected correct line content, got %s", winSlashMatch.LineContent)
+	}
+
+	// Windows path in file mode
+	winFileMatch := parseRipgrepLine(`C:\project\main.go`, false)
+	if winFileMatch == nil || winFileMatch.Filename != `C:\project\main.go` {
+		t.Errorf("expected C:\\project\\main.go, got %v", winFileMatch)
+	}
 }
 
 func TestNativeFindFile_HonorsGitIgnoreAndMaxResults(t *testing.T) {

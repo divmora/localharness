@@ -191,7 +191,16 @@ func parseRipgrepLine(line string, matchPerLine bool) *pb.SearchMatch {
 	}
 
 	// Line-level mode: format is "filename:linenum:content"
-	parts := strings.SplitN(line, ":", 3)
+	// On Windows, absolute paths start with a drive letter and colon (e.g. "C:\path\file.go:15:content" or "C:/path/file.go:15:content").
+	var prefix, rest string
+	if isWindowsDriveLetter(line) {
+		prefix = line[:2]
+		rest = line[2:]
+	} else {
+		rest = line
+	}
+
+	parts := strings.SplitN(rest, ":", 3)
 	if len(parts) < 3 {
 		return nil
 	}
@@ -200,10 +209,18 @@ func parseRipgrepLine(line string, matchPerLine bool) *pb.SearchMatch {
 	_, _ = fmt.Sscanf(parts[1], "%d", &lineNum)
 
 	return &pb.SearchMatch{
-		Filename:    parts[0],
+		Filename:    prefix + parts[0],
 		LineNumber:  int32(lineNum),
 		LineContent: truncateLineContent(parts[2]),
 	}
+}
+
+func isWindowsDriveLetter(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	c := s[0]
+	return (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) && s[1] == ':'
 }
 
 // nativeSearch is a pure Go fallback when ripgrep is unavailable.
