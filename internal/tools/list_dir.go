@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
@@ -79,8 +80,14 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 		dirEntries = dirEntries[:maxDirEntries]
 	}
 
-	var entries []*pb.DirEntry
-	for _, entry := range dirEntries {
+	type dirToCount struct {
+		index int
+		path  string
+	}
+	var dirsToCount []dirToCount
+
+	entries := make([]*pb.DirEntry, len(dirEntries))
+	for i, entry := range dirEntries {
 		de := &pb.DirEntry{
 			Name:  entry.Name(),
 			IsDir: entry.IsDir(),
@@ -88,7 +95,10 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 
 		if entry.IsDir() {
 			if !listDirSkipNames[entry.Name()] {
-				de.ChildCount = int32(shallowChildCount(filepath.Join(dirPath, entry.Name())))
+				dirsToCount = append(dirsToCount, dirToCount{
+					index: i,
+					path:  filepath.Join(dirPath, entry.Name()),
+				})
 			}
 		} else {
 			if fi, err := entry.Info(); err == nil {
@@ -96,7 +106,40 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 			}
 		}
 
-		entries = append(entries, de)
+		entries[i] = de
+	}
+
+	if len(dirsToCount) == 1 {
+		entries[dirsToCount[0].index].ChildCount = int32(shallowChildCount(dirsToCount[0].path))
+	} else if len(dirsToCount) > 1 {
+		numWorkers := 8
+		if numWorkers > len(dirsToCount) {
+			numWorkers = len(dirsToCount)
+		}
+
+		workCh := make(chan dirToCount, len(dirsToCount))
+		for _, d := range dirsToCount {
+			workCh <- d
+		}
+		close(workCh)
+
+		var wg sync.WaitGroup
+		for w := 0; w < numWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for d := range workCh {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+					cnt := shallowChildCount(d.path)
+					entries[d.index].ChildCount = int32(cnt)
+				}
+			}()
+		}
+		wg.Wait()
 	}
 
 	ld.Entries = entries
@@ -104,18 +147,40 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 }
 
 // listDirSkipNames defines directory names that should strictly skip child counting
-// to prevent synchronous disk storms on large dependency and VCS directories.
+// to prevent synchronous disk storms on large dependency, build, cache, and VCS directories.
 var listDirSkipNames = map[string]bool{
 	".git":         true,
 	"node_modules": true,
 	"vendor":       true,
+	".gemini":      true,
+	".divmora":     true,
+	"dist":         true,
+	"build":        true,
+	"target":       true,
+	"bin":          true,
+	"__pycache__":  true,
+	".venv":        true,
+	".agents":      true,
+	".next":        true,
+	".turbo":       true,
+	".cache":       true,
 }
 
-// shallowChildCount counts immediate items in a directory without recursion.
+// shallowChildCount counts immediate items in a directory without allocating full DirEntry structs or sorting.
 func shallowChildCount(dir string) int {
-	entries, err := os.ReadDir(dir)
+	f, err := os.Open(dir)
 	if err != nil {
 		return 0
 	}
-	return len(entries)
+	defer f.Close()
+
+	count := 0
+	for {
+		names, err := f.Readdirnames(512)
+		count += len(names)
+		if err != nil || len(names) == 0 {
+			break
+		}
+	}
+	return count
 }

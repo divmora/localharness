@@ -1102,6 +1102,36 @@ func TestListDirEmpty(t *testing.T) {
 	}
 }
 
+func BenchmarkListDir(b *testing.B) {
+	wsDir := b.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := NewRegistry(wsMgr, logger)
+	RegisterBuiltinTools(reg, nil)
+
+	// Create 30 subdirectories with 30 files each
+	for i := 0; i < 30; i++ {
+		sub := filepath.Join(wsDir, fmt.Sprintf("sub_%d", i))
+		_ = os.MkdirAll(sub, 0755)
+		for j := 0; j < 30; j++ {
+			_ = os.WriteFile(filepath.Join(sub, fmt.Sprintf("file_%d.txt", j)), []byte("data"), 0644)
+		}
+	}
+
+	ctx := context.Background()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		step := &pb.StepUpdate{
+			Action: &pb.StepUpdate_ListDir{
+				ListDir: &pb.ActionListDir{Path: wsDir},
+			},
+		}
+		if err := reg.Execute(ctx, "list_dir", step); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // ─── Find File Tests ─────────────────────────────────────────────────────
 
 func TestFindFile(t *testing.T) {
@@ -1499,6 +1529,16 @@ func TestListDir_ShallowAndSkipLargeDirs(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(wsDir, "vendor", "mod1"), 0755)
 	_ = os.WriteFile(filepath.Join(wsDir, "vendor", "mod1", "lib.go"), []byte("package mod1"), 0644)
 
+	// Expanded skip dirs
+	skipDirs := []string{
+		".gemini", ".divmora", "dist", "build", "target", "bin",
+		"__pycache__", ".venv", ".agents", ".next", ".turbo", ".cache",
+	}
+	for _, sd := range skipDirs {
+		_ = os.MkdirAll(filepath.Join(wsDir, sd, "sub"), 0755)
+		_ = os.WriteFile(filepath.Join(wsDir, sd, "item.txt"), []byte("data"), 0644)
+	}
+
 	step := &pb.StepUpdate{
 		Action: &pb.StepUpdate_ListDir{
 			ListDir: &pb.ActionListDir{Path: wsDir},
@@ -1525,22 +1565,12 @@ func TestListDir_ShallowAndSkipLargeDirs(t *testing.T) {
 	}
 
 	// node_modules, .git, and vendor must have ChildCount == 0 (strictly skipped)
-	if nmEntry, ok := entryMap["node_modules"]; !ok {
-		t.Fatal("expected node_modules entry")
-	} else if nmEntry.ChildCount != 0 {
-		t.Errorf("expected childCount 0 for node_modules, got %d", nmEntry.ChildCount)
-	}
-
-	if gitEntry, ok := entryMap[".git"]; !ok {
-		t.Fatal("expected .git entry")
-	} else if gitEntry.ChildCount != 0 {
-		t.Errorf("expected childCount 0 for .git, got %d", gitEntry.ChildCount)
-	}
-
-	if vEntry, ok := entryMap["vendor"]; !ok {
-		t.Fatal("expected vendor entry")
-	} else if vEntry.ChildCount != 0 {
-		t.Errorf("expected childCount 0 for vendor, got %d", vEntry.ChildCount)
+	for _, skipped := range append([]string{"node_modules", ".git", "vendor"}, skipDirs...) {
+		if entry, ok := entryMap[skipped]; !ok {
+			t.Fatalf("expected %s entry", skipped)
+		} else if entry.ChildCount != 0 {
+			t.Errorf("expected childCount 0 for %s, got %d", skipped, entry.ChildCount)
+		}
 	}
 }
 

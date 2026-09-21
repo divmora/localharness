@@ -77,9 +77,7 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-- [ ] **Concurrent and Non-Allocating Directory Child Counting in `list_dir`** (#63)
-  - Replace synchronous full-directory `os.ReadDir` child counting with non-allocating directory descriptor queries (`Readdirnames`), execute inspection across subdirectories in parallel with a bounded worker pool, and expand ignored directory lists.
-
+(Active optimizations implemented across codegraph, diffing, transcript logging, websocket write pump, and tools)
 
 ---
 
