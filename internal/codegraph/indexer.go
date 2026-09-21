@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -71,7 +73,6 @@ func (idx *Indexer) IndexWorkspace(ctx context.Context, branch string) (*IndexSt
 
 	const batchSize = 250
 	batch := make([]IndexedFile, 0, batchSize)
-	knownBlobs := make(map[string]bool)
 
 	flushBatch := func() error {
 		if len(batch) == 0 {
@@ -83,6 +84,8 @@ func (idx *Indexer) IndexWorkspace(ctx context.Context, branch string) (*IndexSt
 		batch = batch[:0]
 		return nil
 	}
+
+	var toParse []fileParseJob
 
 	walkErr := filepath.WalkDir(idx.workspacePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -127,10 +130,9 @@ func (idx *Indexer) IndexWorkspace(ctx context.Context, branch string) (*IndexSt
 		mtimeNs := info.ModTime().UnixNano()
 		fileSize := info.Size()
 
-		// Check if file is unchanged based on mtime and size
+		// Fast path: file unchanged based on mtime and size
 		if cached, ok := fileCache[relPath]; ok && cached.MtimeNs == mtimeNs && cached.Size == fileSize && cached.BlobHash != "" {
-			if knownBlobs[cached.BlobHash] || idx.store.HasBlob(cached.BlobHash) {
-				knownBlobs[cached.BlobHash] = true
+			if idx.store.HasBlob(cached.BlobHash) {
 				batch = append(batch, IndexedFile{
 					FilePath: relPath,
 					BlobHash: cached.BlobHash,
@@ -147,54 +149,114 @@ func (idx *Indexer) IndexWorkspace(ctx context.Context, branch string) (*IndexSt
 			}
 		}
 
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		blobHash := ComputeBlobHash(content)
-
-		// Check if AST already cached in store or current run
-		if knownBlobs[blobHash] || idx.store.HasBlob(blobHash) {
-			knownBlobs[blobHash] = true
-			batch = append(batch, IndexedFile{
-				FilePath: relPath,
-				BlobHash: blobHash,
-				MtimeNs:  mtimeNs,
-				Size:     fileSize,
-			})
-			cachedFiles++
-		} else {
-			// Parse source file
-			nodes, edges, parseErr := ParseSourceFile(relPath, content)
-			if parseErr != nil {
-				// Best-effort: continue indexing other files
-				return nil
-			}
-
-			knownBlobs[blobHash] = true
-			batch = append(batch, IndexedFile{
-				FilePath: relPath,
-				BlobHash: blobHash,
-				MtimeNs:  mtimeNs,
-				Size:     fileSize,
-				Nodes:    nodes,
-				Edges:    edges,
-			})
-			parsedFiles++
-		}
-
-		if len(batch) >= batchSize {
-			if err := flushBatch(); err != nil {
-				return err
-			}
-		}
+		toParse = append(toParse, fileParseJob{
+			absPath:  path,
+			relPath:  relPath,
+			mtimeNs:  mtimeNs,
+			fileSize: fileSize,
+		})
 
 		return nil
 	})
 
 	if walkErr != nil {
 		return nil, fmt.Errorf("codegraph walk %s: %w", idx.workspacePath, walkErr)
+	}
+
+	if len(toParse) > 0 {
+		numWorkers := runtime.GOMAXPROCS(0)
+		if numWorkers > 8 {
+			numWorkers = 8
+		}
+		if numWorkers > len(toParse) {
+			numWorkers = len(toParse)
+		}
+		if numWorkers < 1 {
+			numWorkers = 1
+		}
+
+		jobs := make(chan fileParseJob, len(toParse))
+		for _, j := range toParse {
+			jobs <- j
+		}
+		close(jobs)
+
+		results := make(chan fileParseResult, len(toParse))
+		var wg sync.WaitGroup
+
+		for w := 0; w < numWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for job := range jobs {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					content, err := os.ReadFile(job.absPath)
+					if err != nil {
+						continue
+					}
+
+					blobHash := ComputeBlobHash(content)
+
+					if idx.store.HasBlob(blobHash) {
+						results <- fileParseResult{
+							file: IndexedFile{
+								FilePath: job.relPath,
+								BlobHash: blobHash,
+								MtimeNs:  job.mtimeNs,
+								Size:     job.fileSize,
+							},
+							isCached: true,
+						}
+						continue
+					}
+
+					nodes, edges, parseErr := ParseSourceFile(job.relPath, content)
+					if parseErr != nil {
+						continue
+					}
+
+					results <- fileParseResult{
+						file: IndexedFile{
+							FilePath: job.relPath,
+							BlobHash: blobHash,
+							MtimeNs:  job.mtimeNs,
+							Size:     job.fileSize,
+							Nodes:    nodes,
+							Edges:    edges,
+						},
+						isCached: false,
+					}
+				}
+			}()
+		}
+
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		for res := range results {
+			if res.isCached {
+				cachedFiles++
+			} else {
+				parsedFiles++
+			}
+			batch = append(batch, res.file)
+			if len(batch) >= batchSize {
+				if err := flushBatch(); err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 	}
 
 	if err := flushBatch(); err != nil {
@@ -304,4 +366,16 @@ func (idx *Indexer) DetectGitBranch() string {
 	}
 
 	return "main"
+}
+
+type fileParseJob struct {
+	absPath  string
+	relPath  string
+	mtimeNs  int64
+	fileSize int64
+}
+
+type fileParseResult struct {
+	file     IndexedFile
+	isCached bool
 }

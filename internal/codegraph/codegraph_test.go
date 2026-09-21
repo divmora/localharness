@@ -593,6 +593,41 @@ func BenchmarkGetCallHierarchy(b *testing.B) {
 	}
 }
 
+func BenchmarkIndexWorkspace(b *testing.B) {
+	tmpDir := b.TempDir()
+	wsDir := filepath.Join(tmpDir, "workspace")
+	_ = os.MkdirAll(wsDir, 0755)
+
+	const numFiles = 60
+	for i := 0; i < numFiles; i++ {
+		var filename, content string
+		switch i % 3 {
+		case 0:
+			filename = filepath.Join(wsDir, fmt.Sprintf("service_%d.go", i))
+			content = fmt.Sprintf("package main\n\nfunc Handler_%d() {\n\tprintln(%d)\n}\n", i, i)
+		case 1:
+			filename = filepath.Join(wsDir, fmt.Sprintf("module_%d.py", i))
+			content = fmt.Sprintf("def py_handler_%d():\n    pass\n", i)
+		case 2:
+			filename = filepath.Join(wsDir, fmt.Sprintf("comp_%d.ts", i))
+			content = fmt.Sprintf("export function tsHandler_%d(): void {}\n", i)
+		}
+		_ = os.WriteFile(filename, []byte(content), 0644)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dbPath := filepath.Join(tmpDir, fmt.Sprintf("cg_%d.db", i))
+		store := NewStore(dbPath)
+		indexer := NewIndexer(wsDir, store)
+		_, err := indexer.IndexWorkspace(context.Background(), "main")
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = store.Close()
+	}
+}
+
 func TestStore_AddFilesBatchAndFileCache(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "codegraph.duckdb")
@@ -723,5 +758,67 @@ func TestIndexer_IncrementalMtimeCache(t *testing.T) {
 	cache, _ := store.GetFileCache()
 	if _, ok := cache["file3.go"]; ok {
 		t.Errorf("expected deleted file3.go to be pruned from file_cache")
+	}
+}
+
+func TestIndexer_ParallelWorkerPool(t *testing.T) {
+	tmpDir := t.TempDir()
+	wsDir := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	const numFiles = 25
+	for i := 0; i < numFiles; i++ {
+		var filename, content string
+		switch i % 3 {
+		case 0:
+			filename = filepath.Join(wsDir, fmt.Sprintf("service_%d.go", i))
+			content = fmt.Sprintf("package main\n\nfunc Handler_%d() {\n\tprintln(%d)\n}\n", i, i)
+		case 1:
+			filename = filepath.Join(wsDir, fmt.Sprintf("module_%d.py", i))
+			content = fmt.Sprintf("def py_handler_%d():\n    pass\n", i)
+		case 2:
+			filename = filepath.Join(wsDir, fmt.Sprintf("comp_%d.ts", i))
+			content = fmt.Sprintf("export function tsHandler_%d(): void {}\n", i)
+		}
+		if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write %s: %v", filename, err)
+		}
+	}
+
+	dbPath := filepath.Join(tmpDir, "codegraph.duckdb")
+	store := NewStore(dbPath)
+	indexer := NewIndexer(wsDir, store)
+
+	stats, err := indexer.IndexWorkspace(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("IndexWorkspace with worker pool failed: %v", err)
+	}
+
+	if stats.TotalFiles != numFiles {
+		t.Errorf("expected %d total files, got %d", numFiles, stats.TotalFiles)
+	}
+	if stats.ParsedFiles != numFiles {
+		t.Errorf("expected %d parsed files, got %d", numFiles, stats.ParsedFiles)
+	}
+
+	nodes := store.GetBranchNodes("main")
+	if len(nodes) < numFiles {
+		t.Errorf("expected at least %d nodes indexed, got %d", numFiles, len(nodes))
+	}
+
+	// Verify symbol search works across concurrent parsed files
+	res0 := store.SearchSymbols("main", "Handler_0", "", 10)
+	if len(res0) == 0 || res0[0].Name != "Handler_0" {
+		t.Errorf("expected to find Handler_0, got %+v", res0)
+	}
+	resPy := store.SearchSymbols("main", "py_handler_1", "", 10)
+	if len(resPy) == 0 || resPy[0].Name != "py_handler_1" {
+		t.Errorf("expected to find py_handler_1, got %+v", resPy)
+	}
+	resTs := store.SearchSymbols("main", "tsHandler_2", "", 10)
+	if len(resTs) == 0 || resTs[0].Name != "tsHandler_2" {
+		t.Errorf("expected to find tsHandler_2, got %+v", resTs)
 	}
 }
