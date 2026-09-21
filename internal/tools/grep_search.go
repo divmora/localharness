@@ -241,9 +241,10 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 		}
 	}
 
-	searchQuery := sd.Query
+	queryBytes := []byte(sd.Query)
+	var queryBytesLower []byte
 	if sd.CaseInsensitive && !sd.IsRegex {
-		searchQuery = strings.ToLower(searchQuery)
+		queryBytesLower = bytes.ToLower(queryBytes)
 	}
 
 	baseDir := searchPath
@@ -323,17 +324,15 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 
 		for scanner.Scan() {
 			lineNum++
-			line := scanner.Text()
+			lineBytes := scanner.Bytes()
 
 			var isMatch bool
 			if re != nil {
-				isMatch = re.MatchString(line)
+				isMatch = re.Match(lineBytes)
+			} else if sd.CaseInsensitive {
+				isMatch = bytes.Contains(bytes.ToLower(lineBytes), queryBytesLower)
 			} else {
-				if sd.CaseInsensitive {
-					isMatch = strings.Contains(strings.ToLower(line), searchQuery)
-				} else {
-					isMatch = strings.Contains(line, sd.Query)
-				}
+				isMatch = bytes.Contains(lineBytes, queryBytes)
 			}
 
 			if isMatch {
@@ -344,8 +343,17 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 					matches = append(matches, &pb.SearchMatch{
 						Filename:    path,
 						LineNumber:  int32(lineNum),
-						LineContent: truncateLineContent(line),
+						LineContent: truncateLineContent(string(lineBytes)),
 					})
+				}
+
+				if !sd.MatchPerLine {
+					// Once a file matches in filename-only mode, skip scanning rest of this file
+					break
+				}
+
+				if totalCount > maxResults {
+					break
 				}
 			}
 		}
@@ -357,6 +365,10 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 			matches = append(matches, &pb.SearchMatch{
 				Filename: path,
 			})
+		}
+
+		if totalCount > maxResults {
+			return filepath.SkipAll
 		}
 
 		return nil

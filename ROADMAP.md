@@ -79,8 +79,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 - [ ] **Batch SQLite Transactions and Mtime-Based Incremental Indexing** (#56)
   - Batch AST node and edge inserts into chunks of 500-1000 per transaction, and skip re-reading/hashing unchanged files via an mtime/size manifest.
-- [ ] **Zero-Allocation Byte Scanning and Early Termination in Grep & Find** (#60)
-  - Eliminate short-lived string allocations in `nativeSearch` using `scanner.Bytes()`, pass `--max-count` to `rg`, and pre-compile regular expressions in web tools.
 
 ---
 

@@ -133,6 +133,7 @@ func nativeFindFile(ctx context.Context, pattern, searchPath string, maxResults 
 
 	var matches []string
 	gitignore := util.LoadGitIgnore(searchPath)
+	lowerPattern := strings.ToLower(pattern)
 
 	skipDirs := map[string]bool{
 		".git": true, "node_modules": true, "__pycache__": true,
@@ -174,7 +175,7 @@ func nativeFindFile(ctx context.Context, pattern, searchPath string, maxResults 
 		// Match by glob pattern
 		matched, _ := filepath.Match(pattern, d.Name())
 		// Also match if pattern is a substring of the filename (case-insensitive)
-		if !matched && strings.Contains(strings.ToLower(d.Name()), strings.ToLower(pattern)) {
+		if !matched && strings.Contains(strings.ToLower(d.Name()), lowerPattern) {
 			matched = true
 		}
 

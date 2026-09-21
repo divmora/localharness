@@ -17,6 +17,11 @@ var (
 	MockFetchFunc func(url string) (string, string, error)
 
 	webFetchClient = newSafeHTTPClient()
+
+	reScript = regexp.MustCompile(`(?i)<script[^>]*>[\s\S]*?<\/script>`)
+	reStyle  = regexp.MustCompile(`(?i)<style[^>]*>[\s\S]*?<\/style>`)
+	reBlock  = regexp.MustCompile(`(?i)</?(p|div|h[1-6]|li|br|tr|td)[^>]*>`)
+	reTags   = regexp.MustCompile(`<[^>]+>`)
 )
 
 func registerWebFetch(r *Registry) {
@@ -120,19 +125,15 @@ func isTextContentType(ct string) bool {
 
 func cleanHTMLContent(htmlStr string) string {
 	// 1. Remove script blocks
-	reScript := regexp.MustCompile(`(?i)<script[^>]*>[\s\S]*?<\/script>`)
 	htmlStr = reScript.ReplaceAllString(htmlStr, " ")
 
 	// 2. Remove style blocks
-	reStyle := regexp.MustCompile(`(?i)<style[^>]*>[\s\S]*?<\/style>`)
 	htmlStr = reStyle.ReplaceAllString(htmlStr, " ")
 
 	// 3. Replace structure tag closures with newlines to preserve paragraph/list flow
-	reBlock := regexp.MustCompile(`(?i)</?(p|div|h[1-6]|li|br|tr|td)[^>]*>`)
 	htmlStr = reBlock.ReplaceAllString(htmlStr, "\n")
 
 	// 4. Strip remaining HTML tags
-	reTags := regexp.MustCompile(`<[^>]+>`)
 	htmlStr = reTags.ReplaceAllString(htmlStr, " ")
 
 	// 5. Unescape HTML entities

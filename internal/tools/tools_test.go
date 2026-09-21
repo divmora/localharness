@@ -1759,6 +1759,61 @@ func TestGrepSearch_NativeSearchNoFDLeak(t *testing.T) {
 	}
 }
 
+func TestNativeSearch_EarlyTermination(t *testing.T) {
+	wsDir := t.TempDir()
+	ctx := context.Background()
+
+	// Create 30 files with matching lines
+	for i := 0; i < 30; i++ {
+		content := fmt.Sprintf("file %d content\nearly_termination_marker\n", i)
+		_ = os.WriteFile(filepath.Join(wsDir, fmt.Sprintf("file_%02d.txt", i)), []byte(content), 0644)
+	}
+
+	sd := &pb.ActionGrepSearch{
+		Query:        "early_termination_marker",
+		Path:         wsDir,
+		MatchPerLine: true,
+	}
+
+	maxResults := 5
+	matches, total, err := nativeSearch(ctx, sd, wsDir, maxResults)
+	if err != nil {
+		t.Fatalf("nativeSearch failed: %v", err)
+	}
+	if len(matches) != maxResults {
+		t.Fatalf("expected exactly %d matches capped by maxResults, got %d", maxResults, len(matches))
+	}
+	if total <= maxResults {
+		t.Fatalf("expected total count to exceed maxResults (%d), got %d", maxResults, total)
+	}
+}
+
+func TestNativeSearch_CaseInsensitiveBytes(t *testing.T) {
+	wsDir := t.TempDir()
+	ctx := context.Background()
+
+	content := "Line 1: Hello World\nLine 2: hello world\nLine 3: HELLO WORLD\nLine 4: Unrelated\n"
+	_ = os.WriteFile(filepath.Join(wsDir, "test.txt"), []byte(content), 0644)
+
+	sd := &pb.ActionGrepSearch{
+		Query:           "HeLLo WoRLd",
+		Path:            wsDir,
+		CaseInsensitive: true,
+		MatchPerLine:    true,
+	}
+
+	matches, total, err := nativeSearch(ctx, sd, wsDir, 10)
+	if err != nil {
+		t.Fatalf("nativeSearch failed: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("expected 3 case-insensitive matches, got %d", total)
+	}
+	if len(matches) != 3 {
+		t.Fatalf("expected 3 matches in result, got %d", len(matches))
+	}
+}
+
 func TestParseRipgrepLine(t *testing.T) {
 	// Line mode
 	line := "foo/bar.go:42:func TestMethod() {"
