@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -197,4 +198,91 @@ func TestExecuteBrowserSubagent_PersistentProfileAndIsolated(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
+}
+
+func TestExecuteBrowserSubagent_IsolatedEnv_NoGlobalMutation(t *testing.T) {
+	origVal, hadVal := os.LookupEnv("PLAYWRIGHT_RECORD_VIDEO_DIR")
+	_ = os.Unsetenv("PLAYWRIGHT_RECORD_VIDEO_DIR")
+	defer func() {
+		if hadVal {
+			_ = os.Setenv("PLAYWRIGHT_RECORD_VIDEO_DIR", origVal)
+		} else {
+			_ = os.Unsetenv("PLAYWRIGHT_RECORD_VIDEO_DIR")
+		}
+	}()
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{Content: "Browser subagent done", FinishReason: "stop"},
+		},
+	}
+	logger := slog.Default()
+	toolRegistry := tools.NewRegistry(nil, logger)
+	appDataDir := t.TempDir()
+
+	eng := NewEngine(Config{
+		Provider:         provider,
+		ToolRegistry:     toolRegistry,
+		SystemPrompt:     "Test",
+		SubagentsEnabled: true,
+		MaxSubagents:     5,
+		MaxDepth:         2,
+		Logger:           logger,
+		HasBrowserConfig: true,
+		AppDataDir:       appDataDir,
+		Env: map[string]string{
+			"PARENT_CUSTOM_ENV": "parent_val",
+		},
+	})
+
+	ctx := context.Background()
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_BrowserSubagent{
+			BrowserSubagent: &pb.ActionBrowserSubagent{},
+		},
+	}
+	tc := llm.ToolCall{
+		ID:   "call_env_test",
+		Name: "browser_subagent",
+		Args: map[string]interface{}{
+			"TaskName":      "Env Test Task",
+			"Task":          "Test env isolation",
+			"TaskSummary":   "testing env",
+			"RecordingName": "rec_env",
+		},
+	}
+
+	err := eng.executeBrowserSubagent(ctx, tc, step)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 1. Process-wide environment must NOT be mutated
+	if val, set := os.LookupEnv("PLAYWRIGHT_RECORD_VIDEO_DIR"); set {
+		t.Fatalf("PLAYWRIGHT_RECORD_VIDEO_DIR was mutated in process-wide environment: %q", val)
+	}
+
+	// 2. Child engine must have inherited the isolated environment
+	active := eng.subagentTracker.List()
+	if len(active) == 0 {
+		// If already finished, that's fine, but let's check step
+		if step.State != pb.StepUpdate_STATE_DONE {
+			t.Errorf("expected state DONE, got %v", step.State)
+		}
+	} else {
+		inst := active[0]
+		childEnv := inst.Engine.Env()
+		if childEnv["PARENT_CUSTOM_ENV"] != "parent_val" {
+			t.Errorf("expected PARENT_CUSTOM_ENV in child engine, got %v", childEnv["PARENT_CUSTOM_ENV"])
+		}
+		if childEnv["PLAYWRIGHT_RECORD_VIDEO_DIR"] == "" {
+			t.Error("expected PLAYWRIGHT_RECORD_VIDEO_DIR in child engine isolated env")
+		}
+	}
+
+	// Give subagent a moment to finish in background
+	deadline := time.Now().Add(1 * time.Second)
+	for len(eng.subagentTracker.List()) > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 }

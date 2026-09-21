@@ -217,6 +217,7 @@ func (e *Engine) executeDesktopSubagent(ctx context.Context, tc llm.ToolCall, st
 		Skills:                   e.msgCtx.Skills,
 		Plugins:                  e.msgCtx.Plugins,
 		NotifySendCh:             e.notifySendCh,
+		Env:                      e.Env(),
 	})
 	childEngine.conv = childConv
 

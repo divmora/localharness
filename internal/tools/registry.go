@@ -17,6 +17,38 @@ import (
 // The Registry is passed so tools can access workspace validation and logging.
 type ToolFunc func(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 
+// contextKey defines a private type for context values in the tools package.
+type contextKey string
+
+const (
+	envContextKey contextKey = "tool_env"
+)
+
+// WithEnvironment returns a new Context with the provided environment variables map attached.
+func WithEnvironment(ctx context.Context, env map[string]string) context.Context {
+	if len(env) == 0 {
+		return ctx
+	}
+	existing := EnvironmentFromContext(ctx)
+	merged := make(map[string]string, len(existing)+len(env))
+	for k, v := range existing {
+		merged[k] = v
+	}
+	for k, v := range env {
+		merged[k] = v
+	}
+	return context.WithValue(ctx, envContextKey, merged)
+}
+
+// EnvironmentFromContext extracts environment variables from context if present.
+func EnvironmentFromContext(ctx context.Context) map[string]string {
+	if ctx == nil {
+		return nil
+	}
+	env, _ := ctx.Value(envContextKey).(map[string]string)
+	return env
+}
+
 // ToolGroup classifies a tool's access level for subagent filtering.
 type ToolGroup string
 

@@ -1908,3 +1908,39 @@ func TestTaskManager_StdinPipesClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestWithEnvironment_RunCommandAndTaskManager(t *testing.T) {
+	cfg := &pb.BuiltinToolsConfig{RunCommand: true}
+	reg, wsDir := testRegistryWithConfig(t, cfg)
+
+	ctx := WithEnvironment(context.Background(), map[string]string{
+		"ISOLATED_TEST_VAR": "isolated_test_val_123",
+	})
+
+	envMap := EnvironmentFromContext(ctx)
+	if envMap["ISOLATED_TEST_VAR"] != "isolated_test_val_123" {
+		t.Fatalf("expected ISOLATED_TEST_VAR in context env, got %v", envMap)
+	}
+
+	// 1. run_command execution inherits context env
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_RunCommand{
+			RunCommand: &pb.ActionRunCommand{
+				Command: "echo -n $ISOLATED_TEST_VAR",
+				Cwd:     wsDir,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "run_command", step); err != nil {
+		t.Fatalf("run_command failed: %v", err)
+	}
+	rc := step.GetRunCommand()
+	if rc == nil || !strings.Contains(rc.Stdout, "isolated_test_val_123") {
+		t.Errorf("expected stdout to contain isolated_test_val_123, got %q", rc.Stdout)
+	}
+
+	// Process-wide env must NOT be mutated
+	if val := os.Getenv("ISOLATED_TEST_VAR"); val != "" {
+		t.Errorf("expected ISOLATED_TEST_VAR to NOT be set in process-wide env, got %q", val)
+	}
+}

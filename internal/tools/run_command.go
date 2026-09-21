@@ -77,6 +77,9 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	}
 	rc.Cwd = cwd
 
+	// Merge context-provided env vars (from subagent/engine) with user-specified env vars
+	mergedEnv := mergeContextEnv(ctx, rc.Env)
+
 	// ── Persistent terminal mode ──
 	if rc.Persistent {
 		if r.taskMgr == nil {
@@ -86,7 +89,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		}
 
 		termID, stdout, exitCode, err := r.taskMgr.RunInTerminal(
-			ctx, rc.Command, cwd, rc.TerminalId, rc.Env, int(rc.TimeoutMs), step,
+			ctx, rc.Command, cwd, rc.TerminalId, mergedEnv, int(rc.TimeoutMs), step,
 		)
 		if err != nil {
 			return errors.Wrap(err, errors.ErrCodeToolExecution,
@@ -115,7 +118,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		}
 
 		taskID, stdout, err := r.taskMgr.StartBackground(
-			ctx, rc.Command, cwd, rc.Env, int(rc.WaitMsBeforeAsync), step,
+			ctx, rc.Command, cwd, mergedEnv, int(rc.WaitMsBeforeAsync), step,
 		)
 		if err != nil {
 			return errors.Wrap(err, errors.ErrCodeToolExecution,
@@ -149,15 +152,15 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		cmd.Dir = cwd
 	}
 
-	// Build environment: inherit current env + add PAGER=cat + user env
+	// Build environment: inherit current env + add PAGER=cat + context & user env
 	env := cmd.Environ()
 	env = append(env, "PAGER=cat")
 
 	// Ensure GIT_TERMINAL_PROMPT=0 to prevent interactive git prompts
 	env = append(env, "GIT_TERMINAL_PROMPT=0")
 
-	// Add user-specified env vars
-	for k, v := range rc.Env {
+	// Add context and user-specified env vars
+	for k, v := range mergedEnv {
 		// Sanitize: no newlines in env vars
 		k = strings.ReplaceAll(k, "\n", "")
 		v = strings.ReplaceAll(v, "\n", "")
@@ -271,4 +274,19 @@ func (w *streamWriter) doEmitLocked() {
 
 	clonedStep.State = pb.StepUpdate_STATE_STREAMING
 	w.r.EmitStep(clonedStep)
+}
+
+func mergeContextEnv(ctx context.Context, explicit map[string]string) map[string]string {
+	ctxEnv := EnvironmentFromContext(ctx)
+	if len(ctxEnv) == 0 && len(explicit) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(ctxEnv)+len(explicit))
+	for k, v := range ctxEnv {
+		merged[k] = v
+	}
+	for k, v := range explicit {
+		merged[k] = v
+	}
+	return merged
 }

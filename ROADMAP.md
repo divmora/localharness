@@ -59,8 +59,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 - [ ] **General-Purpose Agent Access Modes (`ACCESS_MODE_WORKSPACE`, `ACCESS_MODE_SYSTEM`, `ACCESS_MODE_UNRESTRICTED`)** (#42)
   - Add first-class `AccessMode` enum to proto, workspace manager, and engine to enable general-purpose OS administration, devops, and desktop automation alongside sandboxed project agents.
-- [ ] **Subagent Isolated Environment Variables Without `os.Setenv`** (#53)
-  - Pass subagent environment variables to child process descriptors rather than mutating process-wide state via `os.Setenv`.
 - [ ] **Cross-Platform Shell Resolver for Windows**
   - Detect availability of `bash`, and gracefully fallback to `powershell.exe`, `pwsh`, or `cmd.exe` in `run_command` and `task_manager`, preventing execution failures on Windows environments where Git Bash is not in `%PATH%`.
 - [ ] **URL & Domain Allowlist Policy Engine**

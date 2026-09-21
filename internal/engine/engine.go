@@ -146,6 +146,7 @@ type Engine struct {
 	conv     *conversation.Conversation // Subagent's own conversation (nil for root — Session manages it)
 
 	mu             sync.RWMutex
+	env            map[string]string // Isolated environment variables for child processes/tools
 	workspaces     []string
 	workspaceInfos []WorkspaceInfo
 	userRules      []config.UserRule
@@ -231,6 +232,9 @@ type Config struct {
 	// MaxConcurrentToolWorkers is the maximum number of workers for parallel read-only tool execution.
 	// Defaults to defaultMaxConcurrentToolWorkers (8) if 0. Set to 1 to force strictly sequential execution.
 	MaxConcurrentToolWorkers int
+
+	// Env specifies isolated environment variables for child processes and tools launched by this engine.
+	Env map[string]string
 
 	// Knowledge Items — project registry for workspace → project UUID mapping.
 	ProjectRegistry *ProjectRegistry
@@ -450,11 +454,32 @@ func NewEngine(cfg Config) *Engine {
 		globalSettings:           config.LoadGlobalSettings(cfg.Logger),
 	}
 
+	if len(cfg.Env) > 0 {
+		eng.env = make(map[string]string, len(cfg.Env))
+		for k, v := range cfg.Env {
+			eng.env[k] = v
+		}
+	}
+
 	if eng.toolRegistry != nil {
 		eng.toolRegistry.SetStepEmitter(eng.emitStep)
 	}
 
 	return eng
+}
+
+// Env returns a copy of the engine's isolated environment variables.
+func (e *Engine) Env() map[string]string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if len(e.env) == 0 {
+		return nil
+	}
+	res := make(map[string]string, len(e.env))
+	for k, v := range e.env {
+		res[k] = v
+	}
+	return res
 }
 
 // SetYoloMode enables or disables YOLO mode (bypassing all permission checks).
@@ -1234,6 +1259,10 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, usage
 		return toolResultMsg(tc, reason, true), nil
 	}
 
+	if len(e.env) > 0 {
+		ctx = tools.WithEnvironment(ctx, e.env)
+	}
+
 	var err error
 	func() {
 		defer func() {
@@ -1523,6 +1552,10 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 	// Panic recovery: catch runtime panics (e.g. invalid slice bounds) so a
 	// single misbehaving tool doesn't crash the entire engine. The panic is
 	// logged and fed back to the LLM as a tool error.
+	if len(e.env) > 0 {
+		ctx = tools.WithEnvironment(ctx, e.env)
+	}
+
 	var err error
 	func() {
 		defer func() {

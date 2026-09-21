@@ -219,6 +219,15 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 
 	atomic.AddInt32(&e.activeSubagents, 1)
 
+	// Build isolated child environment
+	childEnv := make(map[string]string)
+	for k, v := range e.env {
+		childEnv[k] = v
+	}
+	if childBrainDir != "" {
+		childEnv["PLAYWRIGHT_RECORD_VIDEO_DIR"] = filepath.Join(childBrainDir, "scratch")
+	}
+
 	// Create child engine
 	childEngine := NewEngine(Config{
 		Provider:                 e.provider,
@@ -264,6 +273,7 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 		Skills:                   e.msgCtx.Skills,
 		Plugins:                  e.msgCtx.Plugins,
 		NotifySendCh:             e.notifySendCh,
+		Env:                      childEnv,
 	})
 	childEngine.conv = childConv
 
@@ -282,11 +292,6 @@ func (e *Engine) executeBrowserSubagent(ctx context.Context, tc llm.ToolCall, st
 	// Launch in background
 	go func(inst *SubagentInstance, prompt string) {
 		defer atomic.AddInt32(&e.activeSubagents, -1)
-
-		if e.appDataDir != "" {
-			// Suggest video recording location for playwright if they use it
-			os.Setenv("PLAYWRIGHT_RECORD_VIDEO_DIR", filepath.Join(inst.Engine.brainDir, "scratch"))
-		}
 
 		childErr := inst.Engine.Run(childCtx, prompt)
 

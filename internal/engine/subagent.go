@@ -505,6 +505,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			Conversation:             childConv,
 			Skills:                   e.msgCtx.Skills,
 			Plugins:                  e.msgCtx.Plugins,
+			Env:                      e.Env(),
 		})
 
 		// Register instance in tracker

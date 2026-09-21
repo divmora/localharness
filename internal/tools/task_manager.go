@@ -162,7 +162,7 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 	// Build environment
 	cmdEnv := cmd.Environ()
 	cmdEnv = append(cmdEnv, "PAGER=cat", "GIT_TERMINAL_PROMPT=0")
-	for k, v := range env {
+	for k, v := range mergeContextEnv(ctx, env) {
 		k = strings.ReplaceAll(k, "\n", "")
 		v = strings.ReplaceAll(v, "\n", "")
 		cmdEnv = append(cmdEnv, k+"="+v)
@@ -995,7 +995,7 @@ func (tm *TaskManager) runSync(ctx context.Context, command, cwd string, env map
 
 	cmdEnv := cmd.Environ()
 	cmdEnv = append(cmdEnv, "PAGER=cat", "GIT_TERMINAL_PROMPT=0")
-	for k, v := range env {
+	for k, v := range mergeContextEnv(ctx, env) {
 		k = strings.ReplaceAll(k, "\n", "")
 		v = strings.ReplaceAll(v, "\n", "")
 		cmdEnv = append(cmdEnv, k+"="+v)
