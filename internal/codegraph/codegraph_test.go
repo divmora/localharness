@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGoParser(t *testing.T) {
@@ -589,5 +590,138 @@ func BenchmarkGetCallHierarchy(b *testing.B) {
 		if len(hierarchy.Calls) == 0 {
 			b.Fatal("expected calls")
 		}
+	}
+}
+
+func TestStore_AddFilesBatchAndFileCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "codegraph.duckdb")
+	store := NewStore(dbPath)
+
+	files := []IndexedFile{
+		{
+			FilePath: "a.go",
+			BlobHash: "hash-a",
+			MtimeNs:  123456789,
+			Size:     100,
+			Nodes: []Node{
+				{SymbolID: "pkg:FuncA", Name: "FuncA", Kind: "function", FilePath: "a.go"},
+			},
+			Edges: []Edge{
+				{SourceSymbol: "pkg:FuncA", TargetSymbol: "pkg:FuncB", Relation: "calls", FilePath: "a.go", Line: 10},
+			},
+		},
+		{
+			FilePath: "b.go",
+			BlobHash: "hash-b",
+			MtimeNs:  987654321,
+			Size:     200,
+			Nodes: []Node{
+				{SymbolID: "pkg:FuncB", Name: "FuncB", Kind: "function", FilePath: "b.go"},
+			},
+		},
+	}
+
+	if err := store.AddFilesBatch("main", files); err != nil {
+		t.Fatalf("AddFilesBatch failed: %v", err)
+	}
+
+	cache, err := store.GetFileCache()
+	if err != nil {
+		t.Fatalf("GetFileCache failed: %v", err)
+	}
+
+	if len(cache) != 2 {
+		t.Fatalf("expected 2 cache entries, got %d", len(cache))
+	}
+	if entryA, ok := cache["a.go"]; !ok || entryA.MtimeNs != 123456789 || entryA.Size != 100 || entryA.BlobHash != "hash-a" {
+		t.Errorf("unexpected cache entry for a.go: %+v", entryA)
+	}
+	if entryB, ok := cache["b.go"]; !ok || entryB.MtimeNs != 987654321 || entryB.Size != 200 || entryB.BlobHash != "hash-b" {
+		t.Errorf("unexpected cache entry for b.go: %+v", entryB)
+	}
+
+	// Verify symbols query
+	resA := store.SearchSymbols("main", "FuncA", "", 10)
+	if len(resA) == 0 || resA[0].Name != "FuncA" {
+		t.Errorf("expected FuncA as top match, got %+v", resA)
+	}
+
+	// Remove a.go
+	store.RemoveFile("main", "a.go")
+	cacheAfterRemove, _ := store.GetFileCache()
+	if _, ok := cacheAfterRemove["a.go"]; ok {
+		t.Errorf("expected a.go to be removed from file_cache")
+	}
+}
+
+func TestIndexer_IncrementalMtimeCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	wsDir := filepath.Join(tmpDir, "workspace")
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	f1 := filepath.Join(wsDir, "file1.go")
+	f2 := filepath.Join(wsDir, "file2.go")
+	f3 := filepath.Join(wsDir, "file3.go")
+
+	_ = os.WriteFile(f1, []byte("package main\nfunc Alpha() {}\n"), 0644)
+	_ = os.WriteFile(f2, []byte("package main\nfunc Beta() {}\n"), 0644)
+	_ = os.WriteFile(f3, []byte("package main\nfunc Gamma() {}\n"), 0644)
+
+	dbPath := filepath.Join(tmpDir, "codegraph.duckdb")
+	store := NewStore(dbPath)
+	indexer := NewIndexer(wsDir, store)
+
+	// Run 1: initial indexing
+	stats1, err := indexer.IndexWorkspace(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("first index failed: %v", err)
+	}
+	if stats1.TotalFiles != 3 || stats1.ParsedFiles != 3 || stats1.CachedFiles != 0 {
+		t.Errorf("stats1 mismatch: %+v", stats1)
+	}
+
+	// Run 2: immediately re-index without modifications -> all 3 should hit mtime cache
+	stats2, err := indexer.IndexWorkspace(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("second index failed: %v", err)
+	}
+	if stats2.TotalFiles != 3 || stats2.ParsedFiles != 0 || stats2.CachedFiles != 3 {
+		t.Errorf("stats2 mismatch (expected all cached): %+v", stats2)
+	}
+
+	// Run 3: modify file2.go
+	time.Sleep(10 * time.Millisecond) // Ensure mtime changes
+	_ = os.WriteFile(f2, []byte("package main\nfunc BetaUpdated() {}\nfunc Delta() {}\n"), 0644)
+
+	stats3, err := indexer.IndexWorkspace(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("third index failed: %v", err)
+	}
+	if stats3.TotalFiles != 3 || stats3.ParsedFiles != 1 || stats3.CachedFiles != 2 {
+		t.Errorf("stats3 mismatch (expected 1 parsed, 2 cached): %+v", stats3)
+	}
+
+	resBeta := store.SearchSymbols("main", "BetaUpdated", "", 10)
+	if len(resBeta) != 1 || resBeta[0].Name != "BetaUpdated" {
+		t.Errorf("expected BetaUpdated to be indexed: %+v", resBeta)
+	}
+
+	// Run 4: delete file3.go
+	_ = os.Remove(f3)
+
+	stats4, err := indexer.IndexWorkspace(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("fourth index failed: %v", err)
+	}
+	if stats4.TotalFiles != 2 || stats4.ParsedFiles != 0 || stats4.CachedFiles != 2 {
+		t.Errorf("stats4 mismatch (expected 2 total, 0 parsed, 2 cached): %+v", stats4)
+	}
+
+	cache, _ := store.GetFileCache()
+	if _, ok := cache["file3.go"]; ok {
+		t.Errorf("expected deleted file3.go to be pruned from file_cache")
 	}
 }

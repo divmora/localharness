@@ -77,8 +77,9 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-- [ ] **Batch SQLite Transactions and Mtime-Based Incremental Indexing** (#56)
-  - Batch AST node and edge inserts into chunks of 500-1000 per transaction, and skip re-reading/hashing unchanged files via an mtime/size manifest.
+- [ ] **Parallel CodeGraph AST Parsing with Worker Pool**
+  - Distribute multi-file AST parsing across available CPU cores using a bounded worker pool during initial repository indexing.
+
 
 ---
 

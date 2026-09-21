@@ -195,6 +195,14 @@ func (s *Store) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_manifest_blob ON file_manifest(blob_hash);
 	CREATE INDEX IF NOT EXISTS idx_manifest_branch ON file_manifest(branch_name);
 
+	CREATE TABLE IF NOT EXISTS file_cache (
+		file_path TEXT PRIMARY KEY,
+		mtime_ns INTEGER NOT NULL,
+		size INTEGER NOT NULL,
+		blob_hash TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_file_cache_blob ON file_cache(blob_hash);
+
 	CREATE TABLE IF NOT EXISTS nodes (
 		blob_hash TEXT NOT NULL,
 		symbol_id TEXT NOT NULL,
@@ -463,103 +471,227 @@ func (s *Store) HasBlob(blobHash string) bool {
 	return err == nil && exists == 1
 }
 
-// AddFile registers or updates a file in the active branch.
-// It inserts new nodes and edges indexed by content blob hash (de-duplicated),
-// updates the branch file manifest, and updates in-memory caches.
+// GetFileCache returns all cached file modification times and sizes.
+func (s *Store) GetFileCache() (map[string]FileCacheEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if err := s.ensureDB(); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.db.Query("SELECT file_path, mtime_ns, size, blob_hash FROM file_cache")
+	if err != nil {
+		return nil, fmt.Errorf("query file_cache: %w", err)
+	}
+	defer rows.Close()
+
+	cache := make(map[string]FileCacheEntry)
+	for rows.Next() {
+		var entry FileCacheEntry
+		if err := rows.Scan(&entry.FilePath, &entry.MtimeNs, &entry.Size, &entry.BlobHash); err == nil {
+			cache[entry.FilePath] = entry
+		}
+	}
+	return cache, nil
+}
+
+// AddFile registers or updates a single file in the active branch.
 func (s *Store) AddFile(branch, filePath, blobHash string, nodes []Node, edges []Edge) {
+	_ = s.AddFilesBatch(branch, []IndexedFile{
+		{
+			FilePath: filePath,
+			BlobHash: blobHash,
+			Nodes:    nodes,
+			Edges:    edges,
+		},
+	})
+}
+
+// AddFilesBatch registers or updates multiple files in a single atomic transaction.
+// It inserts new nodes and edges, updates branch file manifests and file caches,
+// and incrementally synchronizes in-memory FTS and graph caches.
+func (s *Store) AddFilesBatch(branch string, files []IndexedFile) error {
+	if len(files) == 0 {
+		return nil
+	}
 	if branch == "" {
 		branch = s.ActiveBranch()
 	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if err := s.ensureDB(); err != nil {
-		return
+		return err
 	}
 
 	now := time.Now().UTC()
 
-	// Check old hash for incremental FTS update
-	var oldHash string
-	_ = s.db.QueryRow("SELECT blob_hash FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath).Scan(&oldHash)
-
 	tx, err := s.db.Begin()
 	if err != nil {
-		return
+		return fmt.Errorf("codegraph begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	_, _ = tx.Exec("INSERT OR IGNORE INTO branches(name, updated_at) VALUES(?, ?)", branch, now)
 	_, _ = tx.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", now, branch)
-	_, _ = tx.Exec("INSERT OR REPLACE INTO file_manifest(branch_name, file_path, blob_hash, updated_at) VALUES(?, ?, ?, ?)", branch, filePath, blobHash, now)
 
-	// Check if this blob hash is already known in nodes
-	var nodeCount int
-	_ = tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE blob_hash = ?", blobHash).Scan(&nodeCount)
+	manifestStmt, err := tx.Prepare(`INSERT OR REPLACE INTO file_manifest(branch_name, file_path, blob_hash, updated_at) VALUES(?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare manifest stmt: %w", err)
+	}
+	defer manifestStmt.Close()
 
-	if nodeCount == 0 && len(nodes) > 0 {
-		nodeStmt, err := tx.Prepare(`INSERT OR IGNORE INTO nodes(blob_hash, symbol_id, kind, name, file_path, start_line, end_line, signature, docstring, exported)
-			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-		if err == nil {
-			defer nodeStmt.Close()
-			ftsStmt, _ := tx.Prepare(`INSERT INTO fts_nodes(blob_hash, symbol_id, name, signature, docstring) VALUES(?, ?, ?, ?, ?)`)
-			if ftsStmt != nil {
-				defer ftsStmt.Close()
-			}
-			for _, n := range nodes {
-				_, _ = nodeStmt.Exec(blobHash, n.SymbolID, n.Kind, n.Name, n.FilePath, n.StartLine, n.EndLine, n.Signature, n.Docstring, n.Exported)
-				if ftsStmt != nil {
-					_, _ = ftsStmt.Exec(blobHash, n.SymbolID, n.Name, n.Signature, n.Docstring)
-				}
-			}
+	cacheStmt, err := tx.Prepare(`INSERT OR REPLACE INTO file_cache(file_path, mtime_ns, size, blob_hash) VALUES(?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare cache stmt: %w", err)
+	}
+	defer cacheStmt.Close()
+
+	var nodeStmt *sql.Stmt
+	var ftsStmt *sql.Stmt
+	var edgeStmt *sql.Stmt
+
+	hasNodeStmt, err := tx.Prepare(`SELECT COUNT(*) FROM nodes WHERE blob_hash = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare hasNode stmt: %w", err)
+	}
+	defer hasNodeStmt.Close()
+
+	hasEdgeStmt, err := tx.Prepare(`SELECT COUNT(*) FROM edges WHERE blob_hash = ?`)
+	if err != nil {
+		return fmt.Errorf("prepare hasEdge stmt: %w", err)
+	}
+	defer hasEdgeStmt.Close()
+
+	fts := s.ftsIndexes[branch]
+	hasGraph := s.branchGraphs[branch] != nil
+	graphInvalidated := false
+
+	var oldHashStmt *sql.Stmt
+	if fts != nil || hasGraph {
+		oldHashStmt, _ = tx.Prepare(`SELECT blob_hash FROM file_manifest WHERE branch_name = ? AND file_path = ?`)
+		if oldHashStmt != nil {
+			defer oldHashStmt.Close()
 		}
 	}
 
-	// Check if this blob hash is already known in edges
-	var edgeCount int
-	_ = tx.QueryRow("SELECT COUNT(*) FROM edges WHERE blob_hash = ?", blobHash).Scan(&edgeCount)
+	type ftsUpdate struct {
+		oldHash string
+		newHash string
+		nodes   []Node
+	}
+	var ftsUpdates []ftsUpdate
 
-	if edgeCount == 0 && len(edges) > 0 {
-		edgeStmt, err := tx.Prepare(`INSERT OR IGNORE INTO edges(blob_hash, source_symbol, target_symbol, relation, file_path, line)
-			VALUES(?, ?, ?, ?, ?, ?)`)
-		if err == nil {
-			defer edgeStmt.Close()
-			for _, e := range edges {
-				_, _ = edgeStmt.Exec(blobHash, e.SourceSymbol, e.TargetSymbol, e.Relation, e.FilePath, e.Line)
+	checkedBlobs := make(map[string]bool)
+
+	for _, file := range files {
+		var oldHash string
+		if oldHashStmt != nil {
+			_ = oldHashStmt.QueryRow(branch, file.FilePath).Scan(&oldHash)
+		}
+
+		if _, err := manifestStmt.Exec(branch, file.FilePath, file.BlobHash, now); err != nil {
+			return fmt.Errorf("insert manifest %s: %w", file.FilePath, err)
+		}
+
+		if file.MtimeNs > 0 {
+			if _, err := cacheStmt.Exec(file.FilePath, file.MtimeNs, file.Size, file.BlobHash); err != nil {
+				return fmt.Errorf("insert cache %s: %w", file.FilePath, err)
+			}
+		}
+
+		if !checkedBlobs[file.BlobHash] {
+			if len(file.Nodes) > 0 {
+				var nodeCount int
+				_ = hasNodeStmt.QueryRow(file.BlobHash).Scan(&nodeCount)
+				if nodeCount == 0 {
+					if nodeStmt == nil {
+						nodeStmt, err = tx.Prepare(`INSERT OR IGNORE INTO nodes(blob_hash, symbol_id, kind, name, file_path, start_line, end_line, signature, docstring, exported)
+							VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+						if err != nil {
+							return fmt.Errorf("prepare node stmt: %w", err)
+						}
+						defer nodeStmt.Close()
+						ftsStmt, _ = tx.Prepare(`INSERT INTO fts_nodes(blob_hash, symbol_id, name, signature, docstring) VALUES(?, ?, ?, ?, ?)`)
+						if ftsStmt != nil {
+							defer ftsStmt.Close()
+						}
+					}
+					for _, n := range file.Nodes {
+						_, _ = nodeStmt.Exec(file.BlobHash, n.SymbolID, n.Kind, n.Name, n.FilePath, n.StartLine, n.EndLine, n.Signature, n.Docstring, n.Exported)
+						if ftsStmt != nil {
+							_, _ = ftsStmt.Exec(file.BlobHash, n.SymbolID, n.Name, n.Signature, n.Docstring)
+						}
+					}
+				}
+			}
+
+			if len(file.Edges) > 0 {
+				var edgeCount int
+				_ = hasEdgeStmt.QueryRow(file.BlobHash).Scan(&edgeCount)
+				if edgeCount == 0 {
+					if edgeStmt == nil {
+						edgeStmt, err = tx.Prepare(`INSERT OR IGNORE INTO edges(blob_hash, source_symbol, target_symbol, relation, file_path, line)
+							VALUES(?, ?, ?, ?, ?, ?)`)
+						if err != nil {
+							return fmt.Errorf("prepare edge stmt: %w", err)
+						}
+						defer edgeStmt.Close()
+					}
+					for _, e := range file.Edges {
+						_, _ = edgeStmt.Exec(file.BlobHash, e.SourceSymbol, e.TargetSymbol, e.Relation, e.FilePath, e.Line)
+					}
+				}
+			}
+
+			checkedBlobs[file.BlobHash] = true
+		}
+
+		if oldHash == "" || oldHash != file.BlobHash {
+			if hasGraph {
+				graphInvalidated = true
+			}
+			if fts != nil {
+				ftsUpdates = append(ftsUpdates, ftsUpdate{
+					oldHash: oldHash,
+					newHash: file.BlobHash,
+					nodes:   file.Nodes,
+				})
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return
+		return fmt.Errorf("commit batch tx: %w", err)
 	}
 
-	// Incremental in-memory FTS update
-	if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
-		if oldHash != "" && oldHash != blobHash {
-			oldNodes := s.getNodesByBlobLocked(oldHash)
-			for _, n := range oldNodes {
-				fts.RemoveNode(n.SymbolID)
+	if fts != nil {
+		for _, u := range ftsUpdates {
+			if u.oldHash != "" {
+				for _, n := range s.getNodesByBlobLocked(u.oldHash) {
+					fts.RemoveNode(n.SymbolID)
+				}
 			}
-		}
-		if oldHash == "" || oldHash != blobHash {
-			newNodes := nodes
-			if len(newNodes) == 0 {
-				newNodes = s.getNodesByBlobLocked(blobHash)
+			nodes := u.nodes
+			if len(nodes) == 0 {
+				nodes = s.getNodesByBlobLocked(u.newHash)
 			}
-			for _, n := range newNodes {
+			for _, n := range nodes {
 				fts.IndexNode(n)
 			}
 		}
 	}
 
-	// Invalidate branchGraph cache on content change
-	if oldHash == "" || oldHash != blobHash {
+	if graphInvalidated {
 		delete(s.branchGraphs, branch)
 	}
+
+	return nil
 }
 
-// RemoveFile removes a file from a branch manifest.
+// RemoveFile removes a file from a branch manifest and file cache.
 func (s *Store) RemoveFile(branch, filePath string) {
 	if branch == "" {
 		branch = s.ActiveBranch()
@@ -575,19 +707,21 @@ func (s *Store) RemoveFile(branch, filePath string) {
 	_ = s.db.QueryRow("SELECT blob_hash FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath).Scan(&oldHash)
 
 	if oldHash != "" {
+		_, _ = s.db.Exec("DELETE FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath)
+		_, _ = s.db.Exec("DELETE FROM file_cache WHERE file_path = ?", filePath)
+		delete(s.branchGraphs, branch)
+		_, _ = s.db.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", time.Now().UTC(), branch)
+
 		if fts, ok := s.ftsIndexes[branch]; ok && fts != nil {
 			oldNodes := s.getNodesByBlobLocked(oldHash)
 			for _, n := range oldNodes {
 				fts.RemoveNode(n.SymbolID)
 			}
 		}
-		_, _ = s.db.Exec("DELETE FROM file_manifest WHERE branch_name = ? AND file_path = ?", branch, filePath)
-		delete(s.branchGraphs, branch)
-		_, _ = s.db.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", time.Now().UTC(), branch)
 	}
 }
 
-// PruneDeletedFiles removes manifest entries for files no longer in the active file list.
+// PruneDeletedFiles removes manifest entries and cache entries for files no longer in the active file list.
 func (s *Store) PruneDeletedFiles(branch string, activeFiles map[string]bool) {
 	if branch == "" {
 		branch = s.ActiveBranch()
@@ -636,21 +770,33 @@ func (s *Store) PruneDeletedFiles(branch string, activeFiles map[string]bool) {
 	if delStmt != nil {
 		defer delStmt.Close()
 	}
+	delCacheStmt, _ := tx.Prepare("DELETE FROM file_cache WHERE file_path = ?")
+	if delCacheStmt != nil {
+		defer delCacheStmt.Close()
+	}
 
 	for _, item := range deleted {
-		if fts != nil {
+		if delStmt != nil {
+			_, _ = delStmt.Exec(branch, item.path)
+		}
+		if delCacheStmt != nil {
+			_, _ = delCacheStmt.Exec(item.path)
+		}
+	}
+
+	_, _ = tx.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", time.Now().UTC(), branch)
+	if err := tx.Commit(); err != nil {
+		return
+	}
+
+	if fts != nil {
+		for _, item := range deleted {
 			oldNodes := s.getNodesByBlobLocked(item.hash)
 			for _, n := range oldNodes {
 				fts.RemoveNode(n.SymbolID)
 			}
 		}
-		if delStmt != nil {
-			_, _ = delStmt.Exec(branch, item.path)
-		}
 	}
-
-	_, _ = tx.Exec("UPDATE branches SET updated_at = ? WHERE name = ?", time.Now().UTC(), branch)
-	_ = tx.Commit()
 
 	delete(s.branchGraphs, branch)
 }
@@ -1122,6 +1268,13 @@ CREATE TABLE IF NOT EXISTS file_manifest (
     file_path VARCHAR,
     blob_hash VARCHAR,
     PRIMARY KEY (branch_name, file_path)
+);
+
+CREATE TABLE IF NOT EXISTS file_cache (
+    file_path VARCHAR PRIMARY KEY,
+    mtime_ns BIGINT NOT NULL,
+    size BIGINT NOT NULL,
+    blob_hash VARCHAR NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS nodes (

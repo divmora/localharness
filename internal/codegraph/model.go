@@ -36,6 +36,24 @@ type FileManifest struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// FileCacheEntry stores file modification time and size to skip disk reads on re-index.
+type FileCacheEntry struct {
+	FilePath string `json:"file_path"`
+	MtimeNs  int64  `json:"mtime_ns"`
+	Size     int64  `json:"size"`
+	BlobHash string `json:"blob_hash"`
+}
+
+// IndexedFile represents a parsed or cached file ready to be committed in a batch.
+type IndexedFile struct {
+	FilePath string
+	BlobHash string
+	MtimeNs  int64
+	Size     int64
+	Nodes    []Node
+	Edges    []Edge
+}
+
 // Branch represents a tracked git branch or workspace snapshot.
 type Branch struct {
 	Name       string    `json:"name"`
