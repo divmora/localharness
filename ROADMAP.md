@@ -75,7 +75,22 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ---
 
-## 5. Terminal User Interface (`lhctl` TUI) & Desktop GUI
+## 5. Performance & Scalability
+
+- [ ] **Batch SQLite Transactions and Mtime-Based Incremental Indexing** (#56)
+  - Batch AST node and edge inserts into chunks of 500-1000 per transaction, and skip re-reading/hashing unchanged files via an mtime/size manifest.
+- [ ] **Hunk-Scoped Unified Diff with Context Collapsing** (#57)
+  - Group diff lines into standard hunks (`@@ -start,len +start,len @@`) with a configurable context window, eliminating whole-file diff bloat and memory exhaustion.
+- [ ] **Asynchronous Buffered Transcript Logging** (#58)
+  - Decouple JSONL transcript writes from `c.mu` lock contention using a buffered write-behind channel to eliminate disk I/O stalls during streaming.
+- [ ] **Outbound WebSocket Write Pump & Serialization Buffer Pooling** (#59)
+  - Offload WebSocket writes to a dedicated write pump goroutine to prevent TCP socket backpressure from freezing `s.mu`, and reuse protobuf serialization buffers via `sync.Pool`.
+- [ ] **Zero-Allocation Byte Scanning and Early Termination in Grep & Find** (#60)
+  - Eliminate short-lived string allocations in `nativeSearch` using `scanner.Bytes()`, pass `--max-count` to `rg`, and pre-compile regular expressions in web tools.
+
+---
+
+## 6. Terminal User Interface (`lhctl` TUI) & Desktop GUI
 
 - [ ] **Collapsible Streaming Tool Execution Cards**
   - Interactive foldable tool blocks with live spinner indicators, execution duration timers, and collapsible stdout/stderr stream viewers.
@@ -98,7 +113,7 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ---
 
-## 6. Agent Integrations
+## 7. Agent Integrations
 
 - [ ] **Agent Auto-Discovery**
   - Automatically discover and build agent submodules under `agents/` without manual `go build` commands.
@@ -107,7 +122,7 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ---
 
-## 7. Voice & Realtime Audio Interaction
+## 8. Voice & Realtime Audio Interaction
 
 - [ ] **Full-Duplex Realtime Voice Agent Mode (`lhctl voice` / Live API)**
   - Bidirectional low-latency audio streaming via WebRTC / WebSocket connecting directly to Gemini 2.0 Flash Multimodal Live API or OpenAI Realtime API for natural, hands-free conversational pair-programming with interruption handling.
@@ -116,7 +131,7 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ---
 
-## 8. Model Management & LiteLLM Integration
+## 9. Model Management & LiteLLM Integration
 
 - [ ] **Dynamic Runtime Model Switching (`change model` / `/model <name>`)**
   - Support hot-swapping the active LLM model mid-session during interactive chat (`lhctl` TUI) and via daemon API/session updates without restarting the conversation or dropping session context.
