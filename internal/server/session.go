@@ -31,9 +31,10 @@ import (
 // Session manages a single WebSocket connection from an SDK client.
 type Session struct {
 	conn                   *websocket.Conn
+	wsWriter               *wsWriter
 	logger                 *slog.Logger
 	serverCfg              *config.ServerConfig
-	mu                     sync.Mutex // Protects writes to conn
+	mu                     sync.Mutex // Protects conn and wsWriter state
 	engine                 *engine.Engine
 	conv                   *conversation.Conversation
 	cancel                 context.CancelFunc // Session context cancel function (for teardown)
@@ -66,8 +67,13 @@ type Session struct {
 
 // NewSession creates a new session for a WebSocket connection.
 func NewSession(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *slog.Logger) *Session {
+	var writer *wsWriter
+	if conn != nil {
+		writer = newWSWriter(conn, logger)
+	}
 	return &Session{
 		conn:               conn,
+		wsWriter:           writer,
 		logger:             logger,
 		serverCfg:          serverCfg,
 		pendingToolResults: make(map[string]chan *pb.ToolResult),
@@ -127,26 +133,35 @@ const (
 // (timer fires, task completions). When the engine is idle and a notification arrives,
 // an auto-wake synthetic turn is started.
 func (s *Session) Run() {
-	defer s.conn.Close()
+	if s.conn != nil {
+		defer s.conn.Close()
+
+		// Configure WebSocket keepalive: server pings, client pongs.
+		// Set initial read deadline; the pong handler resets it on each pong.
+		_ = s.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		s.conn.SetPongHandler(func(string) error {
+			_ = s.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+			return nil
+		})
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	defer cancel()
 
-	// Configure WebSocket keepalive: server pings, client pongs.
-	// Set initial read deadline; the pong handler resets it on each pong.
-	_ = s.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
-	s.conn.SetPongHandler(func(string) error {
-		_ = s.conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
-		return nil
-	})
-
-	// Start ping sender goroutine
-	go s.pingLoop(ctx)
+	s.mu.Lock()
+	if s.wsWriter != nil {
+		go s.wsWriter.writePump()
+	}
+	s.mu.Unlock()
 
 	// Read WebSocket messages in a goroutine → channel
 	clientMsgs := make(chan *pb.ClientMessage, 10)
-	go s.readLoop(clientMsgs)
+	if s.conn != nil {
+		go s.readLoop(s.conn, clientMsgs)
+	} else {
+		close(clientMsgs)
+	}
 
 	for {
 		// If we have a notification channel (engine initialized), use select.
@@ -205,35 +220,12 @@ func (s *Session) Run() {
 	}
 }
 
-// pingLoop sends periodic WebSocket ping frames to keep the connection alive.
-// Without this, idle connections during long LLM calls (10-60s) can be dropped
-// by the OS TCP keepalive or intermediate proxies.
-func (s *Session) pingLoop(ctx context.Context) {
-	ticker := time.NewTicker(wsPingInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			err := s.conn.WriteMessage(websocket.PingMessage, []byte("keepalive"))
-			s.mu.Unlock()
-			if err != nil {
-				s.logger.Debug("ping write failed, connection likely closed", "error", err)
-				return
-			}
-		}
-	}
-}
-
 // readLoop reads WebSocket messages in a goroutine and sends them to a channel.
-func (s *Session) readLoop(ch chan<- *pb.ClientMessage) {
+func (s *Session) readLoop(conn *websocket.Conn, ch chan<- *pb.ClientMessage) {
 	defer close(ch)
 
 	for {
-		msgType, data, err := s.conn.ReadMessage()
+		msgType, data, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				s.logger.Error("WebSocket read error", "error", err)
@@ -411,6 +403,15 @@ func (s *Session) cleanup() {
 	}
 	if s.engine != nil {
 		_ = s.engine.Close()
+	}
+	s.mu.Lock()
+	writer := s.wsWriter
+	s.wsWriter = nil
+	s.conn = nil
+	s.mu.Unlock()
+
+	if writer != nil {
+		writer.Close()
 	}
 }
 
@@ -1536,20 +1537,31 @@ func (s *Session) sendServerMessage(msg *pb.ServerMessage) {
 		s.ringBuffer.Push(msg)
 	}
 
-	data, err := proto.Marshal(msg)
-	if err != nil {
-		s.logger.Error("protobuf marshal error", "error", err)
+	s.mu.Lock()
+	writer := s.wsWriter
+	detached := s.detached
+	s.mu.Unlock()
+
+	if writer == nil || detached {
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.sendServerMessageToWriter(writer, msg, isStreamingMessage(msg))
+}
 
-	if s.conn != nil && !s.detached {
-		if err := s.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-			s.logger.Error("WebSocket write error", "error", err)
-		}
+func (s *Session) sendServerMessageToWriter(w *wsWriter, msg *pb.ServerMessage, droppable bool) {
+	if w == nil {
+		return
 	}
+	buf := getProtoBuf()
+	var err error
+	*buf, err = proto.MarshalOptions{}.MarshalAppend(*buf, msg)
+	if err != nil {
+		putProtoBuf(buf)
+		s.logger.Error("protobuf marshal error", "error", err)
+		return
+	}
+	w.Send(buf, droppable)
 }
 
 // SetDaemon sets the daemon mode flag.
@@ -1562,16 +1574,19 @@ func (s *Session) SetDaemon(d bool) {
 // Attach connects a new client WebSocket connection to an active session.
 func (s *Session) Attach(conn *websocket.Conn) {
 	s.mu.Lock()
+	if s.wsWriter != nil {
+		s.wsWriter.Close()
+	}
 	s.conn = conn
+	s.wsWriter = newWSWriter(conn, s.logger)
 	s.detached = false
+	writer := s.wsWriter
+	go writer.writePump()
 
 	// Replay ring buffer
 	replayed := s.ringBuffer.All()
 	for _, msg := range replayed {
-		data, err := proto.Marshal(msg)
-		if err == nil {
-			_ = conn.WriteMessage(websocket.BinaryMessage, data)
-		}
+		s.sendServerMessageToWriter(writer, msg, false)
 	}
 
 	// Emit ReplayComplete
@@ -1582,8 +1597,7 @@ func (s *Session) Attach(conn *websocket.Conn) {
 			},
 		},
 	}
-	data, _ := proto.Marshal(replayComplete)
-	_ = conn.WriteMessage(websocket.BinaryMessage, data)
+	s.sendServerMessageToWriter(writer, replayComplete, false)
 
 	// Emit any pending approvals from queue
 	pendingList := s.approvalQueue.List()
@@ -1604,15 +1618,21 @@ func (s *Session) Attach(conn *websocket.Conn) {
 				},
 			},
 		}
-		pData, _ := proto.Marshal(permMsg)
-		_ = conn.WriteMessage(websocket.BinaryMessage, pData)
+		s.sendServerMessageToWriter(writer, permMsg, false)
 	}
 	s.mu.Unlock()
+
+	// Configure keepalive on attached conn
+	_ = conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		return nil
+	})
 
 	// Launch reader for this attached client
 	go func() {
 		clientMsgs := make(chan *pb.ClientMessage, 10)
-		go s.readLoop(clientMsgs)
+		go s.readLoop(conn, clientMsgs)
 		for msg := range clientMsgs {
 			s.dispatchClientMessage(context.Background(), msg)
 		}
@@ -1623,9 +1643,15 @@ func (s *Session) Attach(conn *websocket.Conn) {
 // Detach disconnects the current client without stopping background execution.
 func (s *Session) Detach() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.detached = true
+	writer := s.wsWriter
+	s.wsWriter = nil
 	s.conn = nil
+	s.detached = true
+	s.mu.Unlock()
+
+	if writer != nil {
+		writer.Close()
+	}
 	s.logger.Info("client detached, background execution continues")
 }
 

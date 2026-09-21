@@ -83,8 +83,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Group diff lines into standard hunks (`@@ -start,len +start,len @@`) with a configurable context window, eliminating whole-file diff bloat and memory exhaustion.
 - [ ] **Asynchronous Buffered Transcript Logging** (#58)
   - Decouple JSONL transcript writes from `c.mu` lock contention using a buffered write-behind channel to eliminate disk I/O stalls during streaming.
-- [ ] **Outbound WebSocket Write Pump & Serialization Buffer Pooling** (#59)
-  - Offload WebSocket writes to a dedicated write pump goroutine to prevent TCP socket backpressure from freezing `s.mu`, and reuse protobuf serialization buffers via `sync.Pool`.
 - [ ] **Zero-Allocation Byte Scanning and Early Termination in Grep & Find** (#60)
   - Eliminate short-lived string allocations in `nativeSearch` using `scanner.Bytes()`, pass `--max-count` to `rg`, and pre-compile regular expressions in web tools.
 
