@@ -79,8 +79,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 - [ ] **Batch SQLite Transactions and Mtime-Based Incremental Indexing** (#56)
   - Batch AST node and edge inserts into chunks of 500-1000 per transaction, and skip re-reading/hashing unchanged files via an mtime/size manifest.
-- [ ] **Hunk-Scoped Unified Diff with Context Collapsing** (#57)
-  - Group diff lines into standard hunks (`@@ -start,len +start,len @@`) with a configurable context window, eliminating whole-file diff bloat and memory exhaustion.
 - [ ] **Zero-Allocation Byte Scanning and Early Termination in Grep & Find** (#60)
   - Eliminate short-lived string allocations in `nativeSearch` using `scanner.Bytes()`, pass `--max-count` to `rg`, and pre-compile regular expressions in web tools.
 

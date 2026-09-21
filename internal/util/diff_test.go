@@ -104,6 +104,66 @@ func TestUnifiedDiff_LineEndings(t *testing.T) {
 	}
 }
 
+func TestUnifiedDiff_HunkCollapsing(t *testing.T) {
+	var oldLines, newLines []string
+	for i := 1; i <= 200; i++ {
+		line := fmt.Sprintf("line %03d content", i)
+		oldLines = append(oldLines, line)
+		newLines = append(newLines, line)
+	}
+
+	// Modify line 10 and line 190 (separated by 180 unchanged lines)
+	oldLines[9] = "line 010 original"
+	newLines[9] = "line 010 changed"
+
+	oldLines[189] = "line 190 original"
+	newLines[189] = "line 190 changed"
+
+	diff := UnifiedDiff("a/file.txt", "b/file.txt", strings.Join(oldLines, "\n"), strings.Join(newLines, "\n"))
+
+	// Should contain exactly 2 hunk headers
+	hunkHeaderCount := strings.Count(diff, "@@ ")
+	if hunkHeaderCount != 2 {
+		t.Fatalf("expected 2 hunk headers, got %d:\n%s", hunkHeaderCount, diff)
+	}
+
+	// Should NOT contain distant unchanged lines (e.g. line 100)
+	if strings.Contains(diff, "line 100 content") {
+		t.Fatalf("diff should have collapsed line 100, but found in diff:\n%s", diff)
+	}
+
+	// Should contain both changes
+	if !strings.Contains(diff, "-line 010 original") || !strings.Contains(diff, "+line 010 changed") {
+		t.Errorf("missing first change in diff: %s", diff)
+	}
+	if !strings.Contains(diff, "-line 190 original") || !strings.Contains(diff, "+line 190 changed") {
+		t.Errorf("missing second change in diff: %s", diff)
+	}
+}
+
+func TestUnifiedDiff_ConfigurableContext(t *testing.T) {
+	oldText := "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"
+	newText := "1\n2\n3\n4\nFIVE\n6\n7\n8\n9\n10\n"
+
+	// 1. With 1 line context
+	diff1 := UnifiedDiffWithContext("a/t.txt", "b/t.txt", oldText, newText, 1)
+	if !strings.Contains(diff1, " 4\n-5\n+FIVE\n 6") {
+		t.Errorf("expected 1 line context around change, got:\n%s", diff1)
+	}
+	if strings.Contains(diff1, " 3\n") || strings.Contains(diff1, " 7\n") {
+		t.Errorf("context 1 should not contain lines 3 or 7, got:\n%s", diff1)
+	}
+
+	// 2. With 0 line context
+	diff0 := UnifiedDiffWithContext("a/t.txt", "b/t.txt", oldText, newText, 0)
+	if strings.Contains(diff0, " 4\n") || strings.Contains(diff0, " 6\n") {
+		t.Errorf("context 0 should contain no context lines, got:\n%s", diff0)
+	}
+	if !strings.Contains(diff0, "-5\n+FIVE") {
+		t.Errorf("context 0 missing edit, got:\n%s", diff0)
+	}
+}
+
 func BenchmarkUnifiedDiff(b *testing.B) {
 	sizes := []int{500, 2000, 10000}
 

@@ -6,16 +6,35 @@ import (
 	"strings"
 )
 
+// DefaultDiffContextLines is the standard number of context lines included in unified diff hunks.
+const DefaultDiffContextLines = 3
+
 type diffOp struct {
 	op   byte // ' ', '-', '+'
 	line string
 }
 
-// UnifiedDiff generates a standard unified diff between oldText and newText using
-// common prefix/suffix trimming, patience anchor partitioning, and O(ND) Myers diff.
+type diffLine struct {
+	op      byte
+	text    string
+	oldLine int
+	newLine int
+}
+
+// UnifiedDiff generates a standard unified diff between oldText and newText with default 3-line context.
 func UnifiedDiff(oldName, newName, oldText, newText string) string {
+	return UnifiedDiffWithContext(oldName, newName, oldText, newText, DefaultDiffContextLines)
+}
+
+// UnifiedDiffWithContext generates a standard unified diff between oldText and newText
+// using common prefix/suffix trimming, patience anchor partitioning, O(ND) Myers diff,
+// and hunk-scoped context collapsing.
+func UnifiedDiffWithContext(oldName, newName, oldText, newText string, contextLines int) string {
 	if oldText == newText {
 		return ""
+	}
+	if contextLines < 0 {
+		contextLines = DefaultDiffContextLines
 	}
 
 	oldLines := splitLines(oldText)
@@ -52,20 +71,9 @@ func UnifiedDiff(oldName, newName, oldText, newText string) string {
 
 	midOps := patienceDiff(midA, midB)
 
-	// Combine prefix + midOps + suffix
-	totalOps := prefix + len(midOps) + suffix
-	ops := make([]diffOp, 0, totalOps)
-
-	for i := 0; i < prefix; i++ {
-		ops = append(ops, diffOp{op: ' ', line: oldLines[i]})
-	}
-	ops = append(ops, midOps...)
-	for i := m - suffix; i < m; i++ {
-		ops = append(ops, diffOp{op: ' ', line: oldLines[i]})
-	}
-
+	// Check if midOps contains any changes
 	hasChanges := false
-	for _, op := range ops {
+	for _, op := range midOps {
 		if op.op != ' ' {
 			hasChanges = true
 			break
@@ -75,15 +83,161 @@ func UnifiedDiff(oldName, newName, oldText, newText string) string {
 		return ""
 	}
 
+	// Build scoped line stream (lead context + midOps + trail context)
+	leadCount := min(prefix, contextLines)
+	leadStart := prefix - leadCount
+	trailCount := min(suffix, contextLines)
+
+	totalItems := leadCount + len(midOps) + trailCount
+	items := make([]diffLine, 0, totalItems)
+
+	currOld := leadStart + 1
+	currNew := leadStart + 1
+
+	for i := leadStart; i < prefix; i++ {
+		items = append(items, diffLine{
+			op:      ' ',
+			text:    oldLines[i],
+			oldLine: currOld,
+			newLine: currNew,
+		})
+		currOld++
+		currNew++
+	}
+
+	for _, op := range midOps {
+		dl := diffLine{
+			op:   op.op,
+			text: op.line,
+		}
+		switch op.op {
+		case ' ':
+			dl.oldLine = currOld
+			dl.newLine = currNew
+			currOld++
+			currNew++
+		case '-':
+			dl.oldLine = currOld
+			currOld++
+		case '+':
+			dl.newLine = currNew
+			currNew++
+		}
+		items = append(items, dl)
+	}
+
+	for i := 0; i < trailCount; i++ {
+		items = append(items, diffLine{
+			op:      ' ',
+			text:    oldLines[m-suffix+i],
+			oldLine: currOld,
+			newLine: currNew,
+		})
+		currOld++
+		currNew++
+	}
+
+	// Find changes and group into hunks
+	var changeIndices []int
+	for i, item := range items {
+		if item.op != ' ' {
+			changeIndices = append(changeIndices, i)
+		}
+	}
+	if len(changeIndices) == 0 {
+		return ""
+	}
+
+	type hunkRange struct {
+		start int
+		end   int
+	}
+	var hunks []hunkRange
+
+	curStart := max(0, changeIndices[0]-contextLines)
+	curEnd := min(len(items), changeIndices[0]+contextLines+1)
+
+	for i := 1; i < len(changeIndices); i++ {
+		ci := changeIndices[i]
+		if ci-contextLines <= curEnd {
+			// Overlapping or adjacent: extend current hunk
+			curEnd = min(len(items), ci+contextLines+1)
+		} else {
+			// Gap exceeds context: finalize hunk and begin next
+			hunks = append(hunks, hunkRange{start: curStart, end: curEnd})
+			curStart = max(0, ci-contextLines)
+			curEnd = min(len(items), ci+contextLines+1)
+		}
+	}
+	hunks = append(hunks, hunkRange{start: curStart, end: curEnd})
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("--- %s\n", oldName))
 	sb.WriteString(fmt.Sprintf("+++ %s\n", newName))
-	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", m, n))
-	for _, op := range ops {
-		sb.WriteString(fmt.Sprintf("%c%s\n", op.op, op.line))
+
+	for _, h := range hunks {
+		hunkItems := items[h.start:h.end]
+		var origCount, newCount int
+		origStart := -1
+		newStart := -1
+
+		for _, item := range hunkItems {
+			if item.op == ' ' || item.op == '-' {
+				origCount++
+				if origStart == -1 && item.oldLine > 0 {
+					origStart = item.oldLine
+				}
+			}
+			if item.op == ' ' || item.op == '+' {
+				newCount++
+				if newStart == -1 && item.newLine > 0 {
+					newStart = item.newLine
+				}
+			}
+		}
+
+		if origCount == 0 {
+			if h.start > 0 && items[h.start-1].oldLine > 0 {
+				origStart = items[h.start-1].oldLine
+			} else if len(hunkItems) > 0 && hunkItems[0].newLine > 1 {
+				origStart = hunkItems[0].newLine - 1
+			} else {
+				origStart = 0
+			}
+		}
+
+		if newCount == 0 {
+			if h.start > 0 && items[h.start-1].newLine > 0 {
+				newStart = items[h.start-1].newLine
+			} else if len(hunkItems) > 0 && hunkItems[0].oldLine > 1 {
+				newStart = hunkItems[0].oldLine - 1
+			} else {
+				newStart = 0
+			}
+		}
+
+		sb.WriteString(formatHunkHeader(origStart, origCount, newStart, newCount))
+		for _, item := range hunkItems {
+			sb.WriteString(fmt.Sprintf("%c%s\n", item.op, item.text))
+		}
 	}
 
 	return sb.String()
+}
+
+func formatHunkHeader(origStart, origCount, newStart, newCount int) string {
+	var origPart, newPart string
+	if origCount == 1 {
+		origPart = fmt.Sprintf("-%d", origStart)
+	} else {
+		origPart = fmt.Sprintf("-%d,%d", origStart, origCount)
+	}
+	if newCount == 1 {
+		newPart = fmt.Sprintf("+%d", newStart)
+	} else {
+		newPart = fmt.Sprintf("+%d,%d", newStart, newCount)
+	}
+	return fmt.Sprintf("@@ %s %s @@\n", origPart, newPart)
 }
 
 type matchItem struct {
