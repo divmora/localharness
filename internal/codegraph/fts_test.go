@@ -324,3 +324,27 @@ impl TokenVerifier for JwtService {
 		t.Errorf("failed rust symbol or relation extraction")
 	}
 }
+
+func BenchmarkTokenizeText(b *testing.B) {
+	text := "ValidateTokenAndCheckUser_id with cryptographic signature verification and JWT claims"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = TokenizeText(text)
+	}
+}
+
+func BenchmarkFTSIndexNode(b *testing.B) {
+	node := Node{
+		SymbolID:  "pkg/auth/jwt.go:ValidateTokenAndCheckUser",
+		Name:      "ValidateTokenAndCheckUser",
+		Kind:      "function",
+		FilePath:  "pkg/auth/jwt.go",
+		Signature: "func ValidateTokenAndCheckUser(ctx context.Context, token string, userID string) (*Claims, error)",
+		Docstring: "ValidateTokenAndCheckUser verifies cryptographic signatures and checks token expiration dates and user IDs.",
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fts := NewFTSIndex()
+		fts.IndexNode(node)
+	}
+}

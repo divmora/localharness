@@ -77,8 +77,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-- [ ] **Zero-Allocation CamelCase Tokenizer and Direct Term Weighting in FTS Index** (#62)
-  - Replace regular expressions in `splitCamelCase` with an inlined rune/byte scanner and accumulate weighted term frequencies directly into the inverted index to eliminate redundant string allocations.
 - [ ] **Concurrent and Non-Allocating Directory Child Counting in `list_dir`** (#63)
   - Replace synchronous full-directory `os.ReadDir` child counting with non-allocating directory descriptor queries (`Readdirnames`), execute inspection across subdirectories in parallel with a bounded worker pool, and expand ignored directory lists.
 
