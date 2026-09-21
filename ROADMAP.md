@@ -59,8 +59,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 - [ ] **General-Purpose Agent Access Modes (`ACCESS_MODE_WORKSPACE`, `ACCESS_MODE_SYSTEM`, `ACCESS_MODE_UNRESTRICTED`)** (#42)
   - Add first-class `AccessMode` enum to proto, workspace manager, and engine to enable general-purpose OS administration, devops, and desktop automation alongside sandboxed project agents.
-- [ ] **Thread-Safe Desktop Driver Lazy Initialization** (#52)
-  - Guard `globalDesktopDriver` initialization with `sync.Once` to eliminate concurrent data races across subagents.
 - [ ] **Subagent Isolated Environment Variables Without `os.Setenv`** (#53)
   - Pass subagent environment variables to child process descriptors rather than mutating process-wide state via `os.Setenv`.
 - [ ] **Cross-Platform Shell Resolver for Windows**

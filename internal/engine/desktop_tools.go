@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -14,13 +15,54 @@ import (
 	"github.com/divmora/localharness/internal/tools/desktop"
 )
 
-var globalDesktopDriver desktop.Driver
+var (
+	desktopDriverMu     sync.RWMutex
+	globalDesktopDriver desktop.Driver
+	desktopDriverOnce   = new(sync.Once)
+)
 
 func getDesktopDriver() desktop.Driver {
-	if globalDesktopDriver == nil {
-		globalDesktopDriver = desktop.NewDriver()
-	}
+	desktopDriverMu.RLock()
+	once := desktopDriverOnce
+	desktopDriverMu.RUnlock()
+
+	once.Do(func() {
+		desktopDriverMu.Lock()
+		if globalDesktopDriver == nil {
+			globalDesktopDriver = desktop.NewDriver()
+		}
+		desktopDriverMu.Unlock()
+	})
+
+	desktopDriverMu.RLock()
+	defer desktopDriverMu.RUnlock()
 	return globalDesktopDriver
+}
+
+// setDesktopDriverForTest sets the global desktop driver for testing purposes and returns a cleanup func.
+func setDesktopDriverForTest(d desktop.Driver) func() {
+	desktopDriverMu.Lock()
+	prevDriver := globalDesktopDriver
+	prevOnce := desktopDriverOnce
+	globalDesktopDriver = d
+	desktopDriverOnce = new(sync.Once)
+	desktopDriverOnce.Do(func() {}) // prevent NewDriver from being called
+	desktopDriverMu.Unlock()
+
+	return func() {
+		desktopDriverMu.Lock()
+		globalDesktopDriver = prevDriver
+		desktopDriverOnce = prevOnce
+		desktopDriverMu.Unlock()
+	}
+}
+
+// resetDesktopDriverForTest clears the cached desktop driver and once guard.
+func resetDesktopDriverForTest() {
+	desktopDriverMu.Lock()
+	globalDesktopDriver = nil
+	desktopDriverOnce = new(sync.Once)
+	desktopDriverMu.Unlock()
 }
 
 // desktopToolDeclarations returns the function declarations for desktop tools.
