@@ -21,6 +21,7 @@
 package conversation
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -203,10 +204,12 @@ func (m *Manager) newConversation(id string) *Conversation {
 		TasksDir:       filepath.Join(sysGen, "tasks"),
 		TranscriptPath: filepath.Join(sysGen, "logs", "transcript.jsonl"),
 
-		stepQueue: make(chan stepContentItem, 256),
+		stepQueue:       make(chan stepContentItem, 256),
+		transcriptQueue: make(chan transcriptItem, 512),
 	}
 
 	c.startStepWriter()
+	c.startTranscriptWriter()
 	runtime.SetFinalizer(c, func(conv *Conversation) {
 		_ = conv.Close()
 	})
@@ -221,6 +224,12 @@ type stepContentItem struct {
 	content   string
 	isFlush   bool
 	done      chan error
+}
+
+type transcriptItem struct {
+	data    []byte
+	isFlush bool
+	done    chan error
 }
 
 // Conversation represents a single conversation session with persistent state.
@@ -244,11 +253,13 @@ type Conversation struct {
 	// In-memory state
 	State *pb.ConversationState
 
-	mu        sync.Mutex
-	queueMu   sync.RWMutex
-	stepQueue chan stepContentItem
-	stepWg    sync.WaitGroup
-	closed    bool
+	mu              sync.Mutex
+	queueMu         sync.RWMutex
+	stepQueue       chan stepContentItem
+	stepWg          sync.WaitGroup
+	transcriptQueue chan transcriptItem
+	transcriptWg    sync.WaitGroup
+	closed          bool
 }
 
 // ─── Step & Trajectory Management ───────────────────────────────────────
@@ -312,11 +323,14 @@ func (c *Conversation) AddUsage(usage *pb.UsageMetadata) {
 // ─── Transcript Logging (JSONL to logs/transcript.jsonl) ────────────────
 
 // LogStep appends a step entry to the transcript.jsonl (human-readable log).
+// Offloads serialization and file appending off the caller path to eliminate lock contention.
 func (c *Conversation) LogStep(entry *TranscriptJSONEntry) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	entry.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	if entry == nil {
+		return nil
+	}
+	if entry.CreatedAt == "" {
+		entry.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -325,7 +339,33 @@ func (c *Conversation) LogStep(entry *TranscriptJSONEntry) error {
 			WithContext("conversation_id", c.ID).
 			WithComponent("conversation")
 	}
+	data = append(data, '\n')
 
+	c.queueMu.RLock()
+	if c.closed || c.transcriptQueue == nil {
+		c.queueMu.RUnlock()
+		return c.writeTranscriptSync(data)
+	}
+
+	select {
+	case c.transcriptQueue <- transcriptItem{data: data}:
+		c.queueMu.RUnlock()
+		return nil
+	default:
+		c.queueMu.RUnlock()
+		return c.writeTranscriptSync(data)
+	}
+}
+
+func (c *Conversation) writeTranscriptSync(data []byte) error {
+	dir := filepath.Dir(c.TranscriptPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return errors.Wrap(err, errors.ErrCodePersistenceError,
+			"transcript mkdir error").
+			WithContext("conversation_id", c.ID).
+			WithContext("path", dir).
+			WithComponent("conversation")
+	}
 	f, err := os.OpenFile(c.TranscriptPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return errors.Wrap(err, errors.ErrCodeFileNotFound,
@@ -336,7 +376,7 @@ func (c *Conversation) LogStep(entry *TranscriptJSONEntry) error {
 	}
 	defer f.Close()
 
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	if _, err := f.Write(data); err != nil {
 		return errors.Wrap(err, errors.ErrCodeConfiguration,
 			"transcript write error").
 			WithContext("conversation_id", c.ID).
@@ -345,6 +385,84 @@ func (c *Conversation) LogStep(entry *TranscriptJSONEntry) error {
 	}
 
 	return nil
+}
+
+func (c *Conversation) startTranscriptWriter() {
+	c.transcriptWg.Add(1)
+	go func() {
+		defer c.transcriptWg.Done()
+
+		var file *os.File
+		var bufWriter *bufio.Writer
+		var lastErr error
+
+		closeFile := func() {
+			if bufWriter != nil {
+				_ = bufWriter.Flush()
+				bufWriter = nil
+			}
+			if file != nil {
+				_ = file.Sync()
+				_ = file.Close()
+				file = nil
+			}
+		}
+		defer closeFile()
+
+		ensureWriter := func() (*bufio.Writer, error) {
+			if bufWriter != nil {
+				return bufWriter, nil
+			}
+			dir := filepath.Dir(c.TranscriptPath)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, err
+			}
+			f, err := os.OpenFile(c.TranscriptPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				return nil, err
+			}
+			file = f
+			bufWriter = bufio.NewWriterSize(f, 32*1024)
+			return bufWriter, nil
+		}
+
+		for item := range c.transcriptQueue {
+			if item.isFlush {
+				if bufWriter != nil {
+					if err := bufWriter.Flush(); err != nil {
+						lastErr = err
+					}
+				}
+				if file != nil {
+					if err := file.Sync(); err != nil {
+						lastErr = err
+					}
+				}
+				err := lastErr
+				lastErr = nil
+				if item.done != nil {
+					item.done <- err
+				}
+				continue
+			}
+
+			w, err := ensureWriter()
+			if err != nil {
+				lastErr = err
+				continue
+			}
+
+			if _, err := w.Write(item.data); err != nil {
+				lastErr = err
+			}
+
+			if len(c.transcriptQueue) == 0 && bufWriter != nil {
+				if err := bufWriter.Flush(); err != nil {
+					lastErr = err
+				}
+			}
+		}
+	}()
 }
 
 func (c *Conversation) startStepWriter() {
@@ -407,10 +525,10 @@ func (c *Conversation) SaveStepContentSync(stepIndex int32, content string) erro
 	return c.writeStepContent(stepIndex, content, true)
 }
 
-// Flush waits for all pending background step content writes to finish.
-func (c *Conversation) Flush() error {
+// FlushStepContent waits for all pending background step content writes to finish.
+func (c *Conversation) FlushStepContent() error {
 	c.queueMu.RLock()
-	if c.closed {
+	if c.closed || c.stepQueue == nil {
 		c.queueMu.RUnlock()
 		return nil
 	}
@@ -422,7 +540,34 @@ func (c *Conversation) Flush() error {
 	return <-done
 }
 
-// Close stops the background step writer and flushes any pending writes.
+// FlushTranscript waits for all queued transcript entries to be written and synced to disk.
+func (c *Conversation) FlushTranscript() error {
+	c.queueMu.RLock()
+	if c.closed || c.transcriptQueue == nil {
+		c.queueMu.RUnlock()
+		return nil
+	}
+
+	done := make(chan error, 1)
+	c.transcriptQueue <- transcriptItem{isFlush: true, done: done}
+	c.queueMu.RUnlock()
+
+	return <-done
+}
+
+// Flush waits for all pending background step content and transcript writes to finish.
+func (c *Conversation) Flush() error {
+	var firstErr error
+	if err := c.FlushStepContent(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := c.FlushTranscript(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+// Close stops background writers and flushes any pending writes.
 func (c *Conversation) Close() error {
 	c.queueMu.Lock()
 	if c.closed {
@@ -430,10 +575,16 @@ func (c *Conversation) Close() error {
 		return nil
 	}
 	c.closed = true
-	close(c.stepQueue)
+	if c.stepQueue != nil {
+		close(c.stepQueue)
+	}
+	if c.transcriptQueue != nil {
+		close(c.transcriptQueue)
+	}
 	c.queueMu.Unlock()
 
 	c.stepWg.Wait()
+	c.transcriptWg.Wait()
 	return nil
 }
 

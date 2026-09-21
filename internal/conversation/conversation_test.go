@@ -296,6 +296,10 @@ func TestLogStep(t *testing.T) {
 		t.Fatalf("LogStep failed: %v", err)
 	}
 
+	if err := conv.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
 	// Verify transcript file was created and contains valid JSONL
 	data, err := os.ReadFile(conv.TranscriptPath)
 	if err != nil {
@@ -323,6 +327,7 @@ func TestLogStepMultiple(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr, _ := NewManager(tmpDir)
 	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
 
 	for i := 0; i < 5; i++ {
 		err := conv.LogStep(&TranscriptJSONEntry{
@@ -333,6 +338,10 @@ func TestLogStepMultiple(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LogStep %d failed: %v", i, err)
 		}
+	}
+
+	if err := conv.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
 	}
 
 	data, _ := os.ReadFile(conv.TranscriptPath)
@@ -718,5 +727,121 @@ func TestConversation_Flush_ConcurrentWithClose(t *testing.T) {
 		}()
 
 		wg.Wait()
+	}
+}
+
+func TestLogStep_NonBlockingQueue(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
+
+	const count = 50
+	start := time.Now()
+	for i := 0; i < count; i++ {
+		err := conv.LogStep(&TranscriptJSONEntry{
+			StepIndex: int32(i),
+			Source:    "MODEL",
+			Type:      "MODEL_RESPONSE",
+			Content:   "streaming token or tool execution",
+		})
+		if err != nil {
+			t.Fatalf("LogStep(%d) failed: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+	t.Logf("%d transcript logs enqueued in %v", count, elapsed)
+
+	// Enqueuing into memory channel should finish in under 10ms
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("enqueuing %d transcript logs took too long: %v", count, elapsed)
+	}
+
+	if err := conv.FlushTranscript(); err != nil {
+		t.Fatalf("FlushTranscript failed: %v", err)
+	}
+
+	data, err := os.ReadFile(conv.TranscriptPath)
+	if err != nil {
+		t.Fatalf("cannot read transcript: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != count {
+		t.Fatalf("expected %d lines in transcript, got %d", count, len(lines))
+	}
+}
+
+func TestLogStep_ConcurrentWritesAndFlush(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+	defer conv.Close()
+
+	const goroutines = 10
+	const entriesPerGoroutine = 20
+	var wg sync.WaitGroup
+
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(gID int) {
+			defer wg.Done()
+			for i := 0; i < entriesPerGoroutine; i++ {
+				err := conv.LogStep(&TranscriptJSONEntry{
+					StepIndex: int32(gID*entriesPerGoroutine + i),
+					Source:    "MODEL",
+					Type:      "MODEL_RESPONSE",
+					Content:   "concurrent transcript item",
+				})
+				if err != nil {
+					t.Errorf("LogStep failed: %v", err)
+				}
+			}
+		}(g)
+	}
+
+	wg.Wait()
+
+	if err := conv.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+
+	data, err := os.ReadFile(conv.TranscriptPath)
+	if err != nil {
+		t.Fatalf("cannot read transcript: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	expected := goroutines * entriesPerGoroutine
+	if len(lines) != expected {
+		t.Fatalf("expected %d lines in transcript, got %d", expected, len(lines))
+	}
+}
+
+func TestLogStep_CloseDrainsPending(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, _ := mgr.Create(&pb.HarnessConfig{})
+
+	const count = 15
+	for i := 0; i < count; i++ {
+		_ = conv.LogStep(&TranscriptJSONEntry{
+			StepIndex: int32(i),
+			Source:    "USER_EXPLICIT",
+			Type:      "USER_INPUT",
+			Content:   "drain test",
+		})
+	}
+
+	// Close directly without prior explicit Flush
+	if err := conv.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	data, err := os.ReadFile(conv.TranscriptPath)
+	if err != nil {
+		t.Fatalf("cannot read transcript: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != count {
+		t.Fatalf("expected %d lines in transcript after Close, got %d", count, len(lines))
 	}
 }
