@@ -36,6 +36,8 @@ type runFlags struct {
 	isolated           bool
 	maxAutoWake        int
 	voice              bool
+	accessMode         string
+	allowHost          bool
 }
 
 // formatResumeCommand builds the CLI command to resume the given conversation session.
@@ -74,6 +76,12 @@ func formatResumeCommand(sessionID string, flags runFlags) string {
 	if flags.voice {
 		parts = append(parts, "--voice")
 	}
+	if flags.accessMode != "" {
+		parts = append(parts, fmt.Sprintf("--access-mode=%s", flags.accessMode))
+	}
+	if flags.allowHost {
+		parts = append(parts, "--allow-host")
+	}
 	return strings.Join(parts, " ")
 }
 
@@ -84,6 +92,13 @@ func parseRunFlags(args []string) runFlags {
 		switch {
 		case a == "--yolo" || a == "--dangerously-skip-permissions":
 			f.yolo = true
+		case a == "--allow-host":
+			f.allowHost = true
+		case strings.HasPrefix(a, "--access-mode="):
+			f.accessMode = strings.TrimPrefix(a, "--access-mode=")
+		case a == "--access-mode" && i+1 < len(args):
+			i++
+			f.accessMode = args[i]
 		case a == "--detach":
 			f.detach = true
 		case a == "--ephemeral":
@@ -320,11 +335,19 @@ func runInteractiveWithOptions(flags runFlags) error {
 		})
 	}
 
+	resolvedAccessMode := pb.AccessMode_ACCESS_MODE_WORKSPACE
+	if flags.allowHost {
+		resolvedAccessMode = pb.AccessMode_ACCESS_MODE_UNRESTRICTED
+	} else if flags.accessMode != "" {
+		resolvedAccessMode = config.ParseAccessMode(flags.accessMode)
+	}
+
 	harnessCfg := &pb.HarnessConfig{
 		ConversationId:    flags.sessionID,
 		LitellmModel:      flags.model,
 		Workspaces:        pbWorkspaces,
 		YoloMode:          flags.yolo,
+		AccessMode:        resolvedAccessMode,
 		MaxAutoWakeTurns:  int32(maxAutoWake),
 		McpServers:        mcpServers,
 		BrowserProfileDir: flags.browserProfile,

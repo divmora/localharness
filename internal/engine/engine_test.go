@@ -3208,3 +3208,70 @@ func TestTokenUsageDeduplication_MultiToolTurn(t *testing.T) {
 		t.Errorf("expected second usage step to have 180 tokens, got %d", stepsWithUsage[1].Usage.TotalTokens)
 	}
 }
+
+func TestEngineAccessModes(t *testing.T) {
+	wsDir := t.TempDir()
+	eng := &Engine{
+		workspaces: []string{wsDir},
+		permissionHandler: func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+			return true, "", nil
+		},
+	}
+
+	// 1. Unrestricted Mode: everything should return false (no prompt)
+	eng.SetAccessMode(pb.AccessMode_ACCESS_MODE_UNRESTRICTED)
+	tcDestructive := llm.ToolCall{Name: "run_command", Args: map[string]interface{}{"CommandLine": "rm -rf /"}}
+	tcSensitive := llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"AbsolutePath": "/etc/passwd"}}
+	tcWriteOutside := llm.ToolCall{Name: "write_to_file", Args: map[string]interface{}{"TargetFile": "/tmp/test.txt"}}
+	if eng.toolRequiresPermission(tcDestructive) {
+		t.Error("unrestricted mode should not require permission for destructive command")
+	}
+	if eng.toolRequiresPermission(tcSensitive) {
+		t.Error("unrestricted mode should not require permission for sensitive file")
+	}
+	if eng.toolRequiresPermission(tcWriteOutside) {
+		t.Error("unrestricted mode should not require permission for outside write")
+	}
+
+	// 2. System Mode:
+	eng.SetAccessMode(pb.AccessMode_ACCESS_MODE_SYSTEM)
+	// Destructive command should require permission
+	if !eng.toolRequiresPermission(tcDestructive) {
+		t.Error("system mode should require permission for destructive command")
+	}
+	// Non-destructive command should NOT require permission
+	tcNormalCmd := llm.ToolCall{Name: "run_command", Args: map[string]interface{}{"CommandLine": "ls -la"}}
+	if eng.toolRequiresPermission(tcNormalCmd) {
+		t.Error("system mode should not require permission for non-destructive command")
+	}
+	// Sensitive file should require permission even for read-only tool
+	if !eng.toolRequiresPermission(tcSensitive) {
+		t.Error("system mode should require permission for sensitive file")
+	}
+	// Non-sensitive host file read-only should NOT require permission
+	tcReadHost := llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"AbsolutePath": filepath.Join(os.TempDir(), "safe.txt")}}
+	if eng.toolRequiresPermission(tcReadHost) {
+		t.Error("system mode should not require permission for reading non-sensitive host file")
+	}
+	// Write to host file outside workspace should require permission
+	if !eng.toolRequiresPermission(tcWriteOutside) {
+		t.Error("system mode should require permission for writing outside workspace")
+	}
+	// Write to file INSIDE workspace should NOT require permission
+	tcWriteInside := llm.ToolCall{Name: "write_to_file", Args: map[string]interface{}{"TargetFile": filepath.Join(wsDir, "file.txt")}}
+	if eng.toolRequiresPermission(tcWriteInside) {
+		t.Error("system mode should not require permission for writing inside workspace")
+	}
+
+	// 3. Workspace Mode:
+	eng.SetAccessMode(pb.AccessMode_ACCESS_MODE_WORKSPACE)
+	// Reading outside workspace requires permission in workspace mode
+	if !eng.toolRequiresPermission(tcReadHost) {
+		t.Error("workspace mode should require permission for reading outside workspace")
+	}
+	// Reading inside workspace does NOT require permission
+	tcReadInside := llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"AbsolutePath": filepath.Join(wsDir, "file.txt")}}
+	if eng.toolRequiresPermission(tcReadInside) {
+		t.Error("workspace mode should not require permission for reading inside workspace")
+	}
+}

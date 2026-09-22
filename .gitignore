@@ -31,4 +31,7 @@ Thumbs.db
 # Logs
 *.log
 
+# Generated TypeScript
+gen/ts/
+
 .local/

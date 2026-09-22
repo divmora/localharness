@@ -21,6 +21,7 @@ message InputConfig {
   string workspace = 1;        // Default workspace path (empty = cwd)
   bool debug = 2;              // Enable debug logging
   string session_id = 3;       // Optional: Provide to resume an existing session
+  AccessMode access_mode = 4;  // Optional: Access mode override for session
 }
 
 // OutputConfig is written by the binary to stdout during handshake.
@@ -684,6 +685,24 @@ message PermissionResponse {
 // CONFIGURATION MESSAGES
 // ═══════════════════════════════════════════════════════════════════════
 
+// AccessMode defines host filesystem and execution boundaries for an agent session.
+enum AccessMode {
+  // Default unconfigured value (treated as ACCESS_MODE_WORKSPACE).
+  ACCESS_MODE_UNSPECIFIED = 0;
+
+  // Scoped strictly to configured workspaces.
+  // File operations outside workspace directories are rejected.
+  ACCESS_MODE_WORKSPACE = 1;
+
+  // Supervised host-wide access.
+  // The agent can read and write files across the host, but interactive permission
+  // is required for sensitive paths (~/.ssh, ~/.aws, /etc) or destructive commands.
+  ACCESS_MODE_SYSTEM = 2;
+
+  // Full autonomous host access without workspace boundaries or interactive prompts.
+  ACCESS_MODE_UNRESTRICTED = 3;
+}
+
 // HarnessConfig is the complete configuration sent in InitRequest.
 message HarnessConfig {
   // Name of the LiteLLM endpoint to load from ~/.divmora/config/litellm.json.
@@ -766,6 +785,10 @@ message HarnessConfig {
 
   // Force ephemeral in-memory browser profile (disable persistent profile)
   bool isolated_browser = 31;
+
+  // Access mode controls the agent's host-wide filesystem and execution scope.
+  // Defaults to ACCESS_MODE_WORKSPACE (strict workspace isolation).
+  AccessMode access_mode = 32;
 }
 
 // UserRuleConfig is an SDK-injected user rule with inline content.

@@ -195,3 +195,44 @@ func TestIsCommandAllowedAgainstRules(t *testing.T) {
 		})
 	}
 }
+
+func TestIsDestructiveCommand(t *testing.T) {
+	tests := []struct {
+		cmd         string
+		destructive bool
+	}{
+		{"", false},
+		{"ls -la", false},
+		{"cat file.txt", false},
+		{"git status", false},
+		{"go test ./...", false},
+		{"npm run build", false},
+		{"rm -rf /tmp/scratch", true},
+		{"rm -r ./dist", true},
+		{"rm file.txt", true},
+		{"rmdir old_dir", true},
+		{"sudo apt install pkg", true},
+		{"dd if=/dev/zero of=/dev/sda", true},
+		{"mkfs.ext4 /dev/sdb1", true},
+		{"fdisk /dev/sda", true},
+		{"shutdown -h now", true},
+		{"reboot", true},
+		{"kill -9 1234", true},
+		{"pkill node", true},
+		{"chmod -R 777 /var/www", true},
+		{"git reset --hard HEAD~1", true},
+		{"git clean -fd", true},
+		{"git push --force origin main", true},
+		{"echo hello && rm -rf /", true},
+		{"VAR=1 sudo cat /etc/shadow", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			got := IsDestructiveCommand(tt.cmd)
+			if got != tt.destructive {
+				t.Errorf("IsDestructiveCommand(%q) = %v, want %v", tt.cmd, got, tt.destructive)
+			}
+		})
+	}
+}

@@ -5,30 +5,68 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
+	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/errors"
 )
 
-// Manager validates file paths against configured workspace directories.
+// AccessMode aliases the proto AccessMode enum for internal workspace usage.
+type AccessMode = pb.AccessMode
+
+const (
+	AccessModeWorkspace    = pb.AccessMode_ACCESS_MODE_WORKSPACE
+	AccessModeSystem       = pb.AccessMode_ACCESS_MODE_SYSTEM
+	AccessModeUnrestricted = pb.AccessMode_ACCESS_MODE_UNRESTRICTED
+)
+
+// PathPolicy contains metadata about a validated path.
+type PathPolicy struct {
+	CleanPath   string
+	IsSensitive bool
+	InWorkspace bool
+}
+
+// Manager validates file paths against configured workspace directories and access modes.
 type Manager struct {
 	mu                   sync.RWMutex
+	accessMode           pb.AccessMode
 	workspaces           []string // Absolute paths of allowed workspace directories
 	resolvedWorkspaces   []string // Pre-resolved canonical symlink targets of workspaces
 	allowedPaths         []string // Additional absolute paths allowed beyond workspaces (e.g., brain dir)
 	resolvedAllowedPaths []string // Pre-resolved canonical symlink targets of allowed paths
 }
 
-// NewManager creates a workspace manager from a list of directories.
+// NewManager creates a workspace manager from a list of directories with default AccessModeWorkspace.
 func NewManager(dirs []string) (*Manager, error) {
-	m := &Manager{}
+	return NewManagerWithAccessMode(dirs, pb.AccessMode_ACCESS_MODE_WORKSPACE)
+}
+
+// NewManagerWithAccessMode creates a workspace manager with an explicit access mode.
+func NewManagerWithAccessMode(dirs []string, mode pb.AccessMode) (*Manager, error) {
+	m := &Manager{accessMode: mode}
 	for _, d := range dirs {
 		if err := m.AddWorkspace(d); err != nil {
 			return nil, err
 		}
 	}
 	return m, nil
+}
+
+// AccessMode returns the current access mode.
+func (m *Manager) AccessMode() pb.AccessMode {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.accessMode
+}
+
+// SetAccessMode updates the access mode for this workspace manager.
+func (m *Manager) SetAccessMode(mode pb.AccessMode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.accessMode = mode
 }
 
 // AddWorkspace dynamically adds a workspace directory to the manager.
@@ -103,10 +141,105 @@ func (m *Manager) AddAllowedPath(path string) error {
 	return nil
 }
 
-// ValidatePath checks if a path is within any configured workspace or allowed path.
-// Relative paths are resolved against the first configured workspace.
-// Returns the cleaned absolute path if valid, or an error if not.
-func (m *Manager) ValidatePath(path string) (string, error) {
+// IsSensitivePath checks if a path targets sensitive host files, credentials,
+// authentication keys, or system directories that warrant supervision.
+func IsSensitivePath(path string) bool {
+	if path == "" {
+		return false
+	}
+	clean := filepath.Clean(path)
+	realPath, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		realPath = clean
+	}
+
+	// 1. Home-relative sensitive directories and files
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		homeClean := filepath.Clean(home)
+		realHome, _ := filepath.EvalSymlinks(homeClean)
+
+		sensitiveHomeItems := []string{
+			filepath.Join(homeClean, ".ssh"),
+			filepath.Join(homeClean, ".aws"),
+			filepath.Join(homeClean, ".gnupg"),
+			filepath.Join(homeClean, ".gpg"),
+			filepath.Join(homeClean, ".kube"),
+			filepath.Join(homeClean, ".azure"),
+			filepath.Join(homeClean, ".config", "gcloud"),
+			filepath.Join(homeClean, ".docker"),
+			filepath.Join(homeClean, ".netrc"),
+			filepath.Join(homeClean, ".git-credentials"),
+			filepath.Join(homeClean, ".bash_history"),
+			filepath.Join(homeClean, ".zsh_history"),
+			filepath.Join(homeClean, ".sh_history"),
+			filepath.Join(homeClean, ".bashrc"),
+			filepath.Join(homeClean, ".zshrc"),
+			filepath.Join(homeClean, ".bash_profile"),
+			filepath.Join(homeClean, ".profile"),
+			filepath.Join(homeClean, ".zprofile"),
+		}
+
+		for _, item := range sensitiveHomeItems {
+			if isSubPath(item, clean) || isSubPath(item, realPath) {
+				return true
+			}
+			if realHome != "" {
+				realItem, _ := filepath.EvalSymlinks(item)
+				if realItem != "" && (isSubPath(realItem, clean) || isSubPath(realItem, realPath)) {
+					return true
+				}
+			}
+		}
+	}
+
+	// 2. System directories
+	systemPrefixes := []string{
+		"/etc",
+		"/private/etc",
+		"/boot",
+		"/sys",
+		"/proc",
+		"/dev",
+		"/var/root",
+	}
+	if runtime.GOOS == "windows" {
+		systemPrefixes = []string{
+			`C:\Windows`,
+			`C:\ProgramData`,
+		}
+	}
+	for _, sp := range systemPrefixes {
+		if isSubPath(sp, clean) || isSubPath(sp, realPath) {
+			return true
+		}
+	}
+
+	// 3. Sensitive file names and extensions
+	base := strings.ToLower(filepath.Base(clean))
+	if strings.HasPrefix(base, "id_rsa") || strings.HasPrefix(base, "id_ed25519") ||
+		strings.HasPrefix(base, "id_ecdsa") || strings.HasPrefix(base, "id_dsa") {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(clean))
+	if ext == ".key" || ext == ".pem" || ext == ".pkcs12" || ext == ".pfx" {
+		return true
+	}
+	if base == ".env" || strings.HasPrefix(base, ".env.") || base == "credentials.json" || base == "service-account.json" {
+		return true
+	}
+
+	return false
+}
+
+// IsSensitivePath checks if a path targets sensitive host files or system directories.
+func (m *Manager) IsSensitivePath(path string) bool {
+	return IsSensitivePath(path)
+}
+
+// ValidatePathWithPolicy evaluates a path against the current access mode, returning
+// detailed policy metadata including cleanliness, sensitivity, and workspace membership.
+func (m *Manager) ValidatePathWithPolicy(path string) (PathPolicy, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -121,7 +254,7 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 			var err error
 			abs, err = filepath.Abs(path)
 			if err != nil {
-				return "", errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
+				return PathPolicy{}, errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
 					"invalid path resolution").
 					WithContext("path", path).
 					WithContext("component", "workspace")
@@ -143,25 +276,70 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 		}
 	}
 
+	inWorkspace := false
 	for i, ws := range m.workspaces {
 		resolvedWS := m.resolvedWorkspaces[i]
 		if isSubPath(ws, abs) || isSubPath(ws, resolved) || isSubPath(resolvedWS, resolved) || isSubPath(resolvedWS, abs) {
-			return abs, nil
+			inWorkspace = true
+			break
 		}
 	}
 
-	for i, ap := range m.allowedPaths {
-		resolvedAP := m.resolvedAllowedPaths[i]
-		if isSubPath(ap, abs) || isSubPath(ap, resolved) || isSubPath(resolvedAP, resolved) || isSubPath(resolvedAP, abs) {
-			return abs, nil
+	if !inWorkspace {
+		for i, ap := range m.allowedPaths {
+			resolvedAP := m.resolvedAllowedPaths[i]
+			if isSubPath(ap, abs) || isSubPath(ap, resolved) || isSubPath(resolvedAP, resolved) || isSubPath(resolvedAP, abs) {
+				inWorkspace = true
+				break
+			}
 		}
 	}
 
-	return "", errors.New(errors.ErrCodePathTraversal,
-		"path is outside all configured workspaces").
-		WithContext("path", path).
-		WithContext("resolved_path", resolved).
-		WithContext("component", "workspace")
+	isSensitive := IsSensitivePath(abs) || IsSensitivePath(resolved)
+
+	switch m.accessMode {
+	case pb.AccessMode_ACCESS_MODE_UNRESTRICTED:
+		// Full autonomous host access
+		return PathPolicy{
+			CleanPath:   abs,
+			IsSensitive: false,
+			InWorkspace: inWorkspace,
+		}, nil
+
+	case pb.AccessMode_ACCESS_MODE_SYSTEM:
+		// Supervised host-wide access
+		return PathPolicy{
+			CleanPath:   abs,
+			IsSensitive: isSensitive,
+			InWorkspace: inWorkspace,
+		}, nil
+
+	default: // ACCESS_MODE_WORKSPACE
+		if !inWorkspace {
+			return PathPolicy{}, errors.New(errors.ErrCodePathTraversal,
+				"path is outside all configured workspaces").
+				WithContext("path", path).
+				WithContext("resolved_path", resolved).
+				WithContext("component", "workspace")
+		}
+		return PathPolicy{
+			CleanPath:   abs,
+			IsSensitive: isSensitive,
+			InWorkspace: true,
+		}, nil
+	}
+}
+
+// ValidatePath checks if a path is within any configured workspace or allowed path.
+// Under ACCESS_MODE_WORKSPACE, paths outside workspaces are rejected.
+// Under ACCESS_MODE_SYSTEM and ACCESS_MODE_UNRESTRICTED, valid host paths are permitted.
+// Returns the cleaned absolute path if valid, or an error if not.
+func (m *Manager) ValidatePath(path string) (string, error) {
+	policy, err := m.ValidatePathWithPolicy(path)
+	if err != nil {
+		return "", err
+	}
+	return policy.CleanPath, nil
 }
 
 // isSubPath checks if child is within (or equal to) parent directory without string allocations.

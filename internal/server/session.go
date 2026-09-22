@@ -440,7 +440,13 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		workspaceInfos = []engine.WorkspaceInfo{{Directory: s.serverCfg.Workspace}}
 	}
 
-	wsMgr, err := workspace.NewManager(workspaceDirs)
+	// Access mode resolution (InitRequest > serverCfg)
+	accessMode := cfg.AccessMode
+	if accessMode == pb.AccessMode_ACCESS_MODE_WORKSPACE && s.serverCfg != nil && s.serverCfg.AccessMode != "" {
+		accessMode = config.ParseAccessMode(s.serverCfg.AccessMode)
+	}
+
+	wsMgr, err := workspace.NewManagerWithAccessMode(workspaceDirs, accessMode)
 	if err != nil {
 		s.sendError("INIT_ERROR", fmt.Sprintf("workspace error: %v", err), true)
 		return
@@ -495,7 +501,7 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 					CorpusName: ws.CorpusName,
 				})
 			}
-			if newWsMgr, wsErr := workspace.NewManager(workspaceDirs); wsErr == nil {
+			if newWsMgr, wsErr := workspace.NewManagerWithAccessMode(workspaceDirs, accessMode); wsErr == nil {
 				wsMgr = newWsMgr
 				s.wsMgr = wsMgr
 				s.logger.Info("restored persisted workspaces for resumed conversation", "count", len(workspaceDirs))
@@ -742,6 +748,7 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		ProjectRegistry:        projectRegistry,
 		ConversationManager:    convMgr,
 		YoloMode:               s.yoloMode,
+		AccessMode:             accessMode,
 	})
 
 	// Store notification channel on session for auto-wake in Run() select loop

@@ -450,3 +450,122 @@ func BenchmarkValidatePath(b *testing.B) {
 		}
 	}
 }
+
+func TestAccessModes(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "host_file.txt")
+	_ = os.WriteFile(outsideFile, []byte("content"), 0644)
+
+	wsFile := filepath.Join(wsDir, "ws_file.txt")
+	_ = os.WriteFile(wsFile, []byte("content"), 0644)
+
+	// 1. Default Workspace Mode
+	mgr, err := NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	if mgr.AccessMode() != AccessModeWorkspace {
+		t.Errorf("expected AccessModeWorkspace, got %v", mgr.AccessMode())
+	}
+
+	// In-workspace path must succeed
+	if _, err := mgr.ValidatePath(wsFile); err != nil {
+		t.Errorf("ValidatePath for wsFile failed in workspace mode: %v", err)
+	}
+	// Outside path must fail
+	if _, err := mgr.ValidatePath(outsideFile); err == nil {
+		t.Error("ValidatePath for outsideFile should fail in workspace mode")
+	}
+
+	// 2. System Mode
+	mgr.SetAccessMode(AccessModeSystem)
+	if mgr.AccessMode() != AccessModeSystem {
+		t.Errorf("expected AccessModeSystem, got %v", mgr.AccessMode())
+	}
+	// Outside path must succeed in system mode
+	if res, err := mgr.ValidatePath(outsideFile); err != nil || res != outsideFile {
+		t.Errorf("ValidatePath for outsideFile failed in system mode: res=%q, err=%v", res, err)
+	}
+
+	// 3. Unrestricted Mode
+	mgrUnrestricted, err := NewManagerWithAccessMode([]string{wsDir}, AccessModeUnrestricted)
+	if err != nil {
+		t.Fatalf("NewManagerWithAccessMode failed: %v", err)
+	}
+	if mgrUnrestricted.AccessMode() != AccessModeUnrestricted {
+		t.Errorf("expected AccessModeUnrestricted, got %v", mgrUnrestricted.AccessMode())
+	}
+	if res, err := mgrUnrestricted.ValidatePath(outsideFile); err != nil || res != outsideFile {
+		t.Errorf("ValidatePath for outsideFile failed in unrestricted mode: res=%q, err=%v", res, err)
+	}
+}
+
+func TestIsSensitivePath(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	tests := []struct {
+		name      string
+		path      string
+		sensitive bool
+	}{
+		{"empty path", "", false},
+		{"normal temp file", filepath.Join(os.TempDir(), "project", "main.go"), false},
+		{"normal home project file", filepath.Join(home, "projects", "app", "index.ts"), false},
+		{"ssh private key", filepath.Join(home, ".ssh", "id_rsa"), true},
+		{"ssh config", filepath.Join(home, ".ssh", "config"), true},
+		{"aws credentials", filepath.Join(home, ".aws", "credentials"), true},
+		{"gnupg ring", filepath.Join(home, ".gnupg", "secring.gpg"), true},
+		{"kube config", filepath.Join(home, ".kube", "config"), true},
+		{"bashrc", filepath.Join(home, ".bashrc"), true},
+		{"zsh_history", filepath.Join(home, ".zsh_history"), true},
+		{"etc passwd", "/etc/passwd", true},
+		{"etc shadow", "/etc/shadow", true},
+		{"private etc", "/private/etc/hosts", true},
+		{"random id_rsa key file", filepath.Join(os.TempDir(), "keys", "id_rsa"), true},
+		{"random pem cert file", filepath.Join(os.TempDir(), "keys", "server.pem"), true},
+		{"env file", filepath.Join(os.TempDir(), "repo", ".env"), true},
+		{"env local file", filepath.Join(os.TempDir(), "repo", ".env.local"), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsSensitivePath(tt.path)
+			if got != tt.sensitive {
+				t.Errorf("IsSensitivePath(%q) = %v, want %v", tt.path, got, tt.sensitive)
+			}
+		})
+	}
+}
+
+func TestValidatePathWithPolicy(t *testing.T) {
+	wsDir := t.TempDir()
+	mgr, err := NewManagerWithAccessMode([]string{wsDir}, AccessModeSystem)
+	if err != nil {
+		t.Fatalf("NewManagerWithAccessMode failed: %v", err)
+	}
+
+	// 1. Inside workspace, non-sensitive
+	policy, err := mgr.ValidatePathWithPolicy(filepath.Join(wsDir, "main.go"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !policy.InWorkspace {
+		t.Error("expected InWorkspace=true")
+	}
+	if policy.IsSensitive {
+		t.Error("expected IsSensitive=false")
+	}
+
+	// 2. Outside workspace, sensitive (/etc/passwd)
+	policy, err = mgr.ValidatePathWithPolicy("/etc/passwd")
+	if err != nil {
+		t.Fatalf("unexpected error in system mode: %v", err)
+	}
+	if policy.InWorkspace {
+		t.Error("expected InWorkspace=false")
+	}
+	if !policy.IsSensitive {
+		t.Error("expected IsSensitive=true for /etc/passwd")
+	}
+}

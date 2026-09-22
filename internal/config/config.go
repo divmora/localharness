@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ type ServerConfig struct {
 	AppDataDir   string // ~/.divmora/localharness/ by default
 	Debug        bool
 	Version      bool
+	AccessMode   string // "workspace", "system", "unrestricted"
+	AllowHost    bool   // Alias/flag for unrestricted host access
 	APIKey       string // Set during pipe handshake (crypto-random)
 	SessionID    string // Set during pipe handshake (UUID)
 	IsNewSession bool   // Indicates if the SessionID is newly generated
@@ -41,6 +44,18 @@ const DefaultCompactionThreshold = 400000
 // DefaultKeepRecentMessages is the number of recent messages preserved during compaction.
 const DefaultKeepRecentMessages = 10
 
+// ParseAccessMode parses an access mode string into a protobuf AccessMode enum.
+func ParseAccessMode(s string) pb.AccessMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "system":
+		return pb.AccessMode_ACCESS_MODE_SYSTEM
+	case "unrestricted", "autonomous", "host":
+		return pb.AccessMode_ACCESS_MODE_UNRESTRICTED
+	default:
+		return pb.AccessMode_ACCESS_MODE_WORKSPACE
+	}
+}
+
 // ParseFlags parses CLI flags and returns a ServerConfig.
 // Note: --port and --host are no longer supported. The binary exclusively
 // uses pipe-based handshake (stdin/stdout) for port assignment and auth.
@@ -51,8 +66,14 @@ func ParseFlags() *ServerConfig {
 	flag.StringVar(&cfg.AppDataDir, "data-dir", "", "Data directory for conversations and brain (defaults to ~/.divmora/localharness/)")
 	flag.BoolVar(&cfg.Debug, "debug", false, "Enable debug logging")
 	flag.BoolVar(&cfg.Version, "version", false, "Print version and exit")
+	flag.StringVar(&cfg.AccessMode, "access-mode", "workspace", "Agent access mode: workspace (default), system, unrestricted")
+	flag.BoolVar(&cfg.AllowHost, "allow-host", false, "Permit full host-wide access (equivalent to --access-mode=unrestricted)")
 
 	flag.Parse()
+
+	if cfg.AllowHost {
+		cfg.AccessMode = "unrestricted"
+	}
 
 	// Resolve workspace
 	if cfg.Workspace == "" {

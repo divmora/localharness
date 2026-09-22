@@ -52,6 +52,8 @@ lhctl attach <session-id>
 | `--model` | `-m` | Target LLM model (e.g. `gpt-4o`, `claude-3-5-sonnet`) | Harness default |
 | `--workspace` | `-w` | Attach workspace directory (repeatable) | Current working directory |
 | `--add-dir` | | Attach workspace directory (repeatable, alias for `--workspace`) | Current working directory |
+| `--access-mode` | | Agent access mode: `workspace` (default), `system` (supervised host-wide), `unrestricted` | `workspace` |
+| `--allow-host` | | Permit full host-wide access (equivalent to `--access-mode=unrestricted`) | `false` |
 | `--voice` | | Enable automatic text-to-speech spoken responses (`autoSpeak: true`) | `false` |
 | `--yolo` | `-y` | Enable YOLO Mode (skip all permission prompts) | `false` |
 | `--browser` | | Explicitly enable browser automation tools (auto-enabled if `npx` installed) | `auto (true if npx found)` |

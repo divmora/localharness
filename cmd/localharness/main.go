@@ -100,10 +100,20 @@ func main() {
 		cfg.IsNewSession = true
 	}
 
+	if inputCfg.AccessMode != pb.AccessMode_ACCESS_MODE_WORKSPACE {
+		switch inputCfg.AccessMode {
+		case pb.AccessMode_ACCESS_MODE_SYSTEM:
+			cfg.AccessMode = "system"
+		case pb.AccessMode_ACCESS_MODE_UNRESTRICTED:
+			cfg.AccessMode = "unrestricted"
+		}
+	}
+
 	logger.Debug("received InputConfig",
 		"workspace", inputCfg.Workspace,
 		"debug", inputCfg.Debug,
 		"session_id", cfg.SessionID,
+		"access_mode", cfg.AccessMode,
 	)
 
 	// Bind to 127.0.0.1:0 atomically to explicitly use IPv4 loopback

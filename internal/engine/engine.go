@@ -24,6 +24,7 @@ import (
 	mcpbridge "github.com/divmora/localharness/internal/mcp"
 	"github.com/divmora/localharness/internal/tools"
 	"github.com/divmora/localharness/internal/util"
+	"github.com/divmora/localharness/internal/workspace"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -146,6 +147,7 @@ type Engine struct {
 	conv     *conversation.Conversation // Subagent's own conversation (nil for root — Session manages it)
 
 	mu             sync.RWMutex
+	accessMode     pb.AccessMode     // Access mode (workspace, system, unrestricted)
 	env            map[string]string // Isolated environment variables for child processes/tools
 	workspaces     []string
 	workspaceInfos []WorkspaceInfo
@@ -156,6 +158,7 @@ type Engine struct {
 
 // Config holds engine configuration.
 type Config struct {
+	AccessMode          pb.AccessMode // Access mode (workspace, system, unrestricted)
 	Provider            llm.Provider
 	SummarizerProvider  llm.Provider      // Optional: dedicated fast provider for context compaction (defaults to flash tier)
 	ModelTierResolver   ModelTierResolver // Optional: custom resolver for model tiers (defaults to DefaultModelTierResolver)
@@ -451,6 +454,7 @@ func NewEngine(cfg Config) *Engine {
 		workspaceInfos:           cfg.WorkspaceInfos,
 		userRules:                cfg.UserRules,
 		yoloMode:                 cfg.YoloMode,
+		accessMode:               cfg.AccessMode,
 		globalSettings:           config.LoadGlobalSettings(cfg.Logger),
 	}
 
@@ -489,6 +493,20 @@ func (e *Engine) SetYoloMode(enabled bool) {
 	e.mu.Unlock()
 }
 
+// AccessMode returns the current access mode for the engine.
+func (e *Engine) AccessMode() pb.AccessMode {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.accessMode
+}
+
+// SetAccessMode updates the access mode for the engine.
+func (e *Engine) SetAccessMode(mode pb.AccessMode) {
+	e.mu.Lock()
+	e.accessMode = mode
+	e.mu.Unlock()
+}
+
 // getSummarizerProvider returns the provider to use for context compaction.
 func (e *Engine) getSummarizerProvider() llm.Provider {
 	if e.summarizerProvider != nil {
@@ -518,12 +536,7 @@ func (e *Engine) isPermissionGranted(tc llm.ToolCall) bool {
 
 	// Check Global Settings (~/.divmora/config/settings.json) & Conversation Grants
 	if tc.Name == "run_command" {
-		var cmd string
-		if c, ok := tc.Args["command"].(string); ok {
-			cmd = c
-		} else if c, ok := tc.Args["CommandLine"].(string); ok {
-			cmd = c
-		}
+		cmd := extractToolCommand(tc)
 		if cmd != "" {
 			var allowedCmds []string
 			if e.globalSettings != nil {
@@ -1164,20 +1177,66 @@ func (e *Engine) toolRequiresPermission(tc llm.ToolCall) bool {
 	if e.yoloMode {
 		return false
 	}
+	if e.AccessMode() == pb.AccessMode_ACCESS_MODE_UNRESTRICTED {
+		return false
+	}
 	if isAlwaysAllowedTool(tc.Name) {
 		return false
 	}
 	if e.isAppDataDirPath(tc) {
 		return false
 	}
+
+	targetPath := extractToolPath(tc)
+
+	if e.AccessMode() == pb.AccessMode_ACCESS_MODE_SYSTEM {
+		// In system mode, supervised host-wide access:
+		// 1. Destructive commands or dangerous shell calls require permission
+		if tc.Name == "run_command" {
+			cmd := extractToolCommand(tc)
+			if util.IsDestructiveCommand(cmd) {
+				return !e.isPermissionGranted(tc)
+			}
+			// Non-destructive commands in system mode do not prompt unless blocked by policy
+			return false
+		}
+		// 2. Sensitive host paths require permission (even for read-only tools)
+		if targetPath != "" && workspace.IsSensitivePath(targetPath) {
+			return !e.isPermissionGranted(tc)
+		}
+		// 3. Modifying files outside the workspace in system mode requires permission
+		if !isReadOnlyFileTool(tc.Name) && targetPath != "" {
+			if !e.isPathInsideWorkspaceOrAppData(targetPath) {
+				return !e.isPermissionGranted(tc)
+			}
+			return false
+		}
+		// Read-only access to non-sensitive host paths is permitted without prompt
+		if isReadOnlyFileTool(tc.Name) {
+			return false
+		}
+		return !e.isPermissionGranted(tc)
+	}
+
+	// ACCESS_MODE_WORKSPACE (default)
 	if isReadOnlyFileTool(tc.Name) {
-		targetPath := extractToolPath(tc)
 		if e.isPathInsideWorkspaceOrAppData(targetPath) {
 			return false
 		}
 		return !e.isPermissionGranted(tc)
 	}
 	return !e.isPermissionGranted(tc)
+}
+
+// extractToolCommand extracts the command string from tool call arguments.
+func extractToolCommand(tc llm.ToolCall) string {
+	if c, ok := tc.Args["command"].(string); ok && c != "" {
+		return c
+	}
+	if c, ok := tc.Args["CommandLine"].(string); ok && c != "" {
+		return c
+	}
+	return ""
 }
 
 // isConcurrentReadOnlyTool returns true if tc is a read-only tool that can safely

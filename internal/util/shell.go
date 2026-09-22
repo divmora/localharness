@@ -1,6 +1,7 @@
 package util
 
 import (
+	"path/filepath"
 	"strings"
 )
 
@@ -235,4 +236,67 @@ func IsCommandAllowedAgainstRules(cmd string, allowedPatterns []string) bool {
 	}
 
 	return true
+}
+
+// IsDestructiveCommand analyzes a shell command (including compound commands)
+// and returns true if it performs destructive actions such as recursive deletion,
+// disk formatting, privilege escalation, force-pushing, or system shutdown.
+func IsDestructiveCommand(cmd string) bool {
+	trimmed := strings.TrimSpace(cmd)
+	if trimmed == "" {
+		return false
+	}
+
+	subCommands, _ := SplitShellCommands(trimmed)
+	if len(subCommands) == 0 {
+		subCommands = []string{trimmed}
+	}
+
+	for _, sub := range subCommands {
+		clean := StripLeadingEnvVars(strings.TrimSpace(sub))
+		parts := strings.Fields(clean)
+		if len(parts) == 0 {
+			continue
+		}
+		bin := filepath.Base(parts[0])
+
+		switch bin {
+		case "sudo", "doas", "su":
+			return true
+		case "rm", "rmdir":
+			return true
+		case "dd", "fdisk", "gdisk", "parted", "wipefs":
+			return true
+		default:
+			if strings.HasPrefix(bin, "mkfs") {
+				return true
+			}
+		case "shutdown", "reboot", "poweroff", "halt":
+			return true
+		case "init":
+			if len(parts) > 1 && (parts[1] == "0" || parts[1] == "6") {
+				return true
+			}
+		case "kill", "killall", "pkill":
+			return true
+		case "chmod", "chown":
+			for _, p := range parts[1:] {
+				if strings.Contains(p, "-R") || strings.Contains(p, "-r") || p == "777" {
+					return true
+				}
+			}
+		case "git":
+			if len(parts) > 1 {
+				args := strings.Join(parts[1:], " ")
+				if strings.Contains(args, "reset --hard") ||
+					strings.Contains(args, "clean -f") ||
+					strings.Contains(args, "push --force") ||
+					strings.Contains(args, "push -f") {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
