@@ -13,9 +13,11 @@ import (
 
 // Manager validates file paths against configured workspace directories.
 type Manager struct {
-	mu           sync.RWMutex
-	workspaces   []string // Absolute paths of allowed workspace directories
-	allowedPaths []string // Additional absolute paths allowed beyond workspaces (e.g., brain dir)
+	mu                   sync.RWMutex
+	workspaces           []string // Absolute paths of allowed workspace directories
+	resolvedWorkspaces   []string // Pre-resolved canonical symlink targets of workspaces
+	allowedPaths         []string // Additional absolute paths allowed beyond workspaces (e.g., brain dir)
+	resolvedAllowedPaths []string // Pre-resolved canonical symlink targets of allowed paths
 }
 
 // NewManager creates a workspace manager from a list of directories.
@@ -53,6 +55,11 @@ func (m *Manager) AddWorkspace(d string) error {
 			WithContext("component", "workspace")
 	}
 
+	resolvedWS, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		resolvedWS = abs
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -62,6 +69,7 @@ func (m *Manager) AddWorkspace(d string) error {
 		}
 	}
 	m.workspaces = append(m.workspaces, abs)
+	m.resolvedWorkspaces = append(m.resolvedWorkspaces, resolvedWS)
 	return nil
 }
 
@@ -78,13 +86,16 @@ func (m *Manager) RemoveWorkspace(d string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var updated []string
-	for _, ws := range m.workspaces {
+	var updatedWS []string
+	var updatedResolved []string
+	for i, ws := range m.workspaces {
 		if ws != abs {
-			updated = append(updated, ws)
+			updatedWS = append(updatedWS, ws)
+			updatedResolved = append(updatedResolved, m.resolvedWorkspaces[i])
 		}
 	}
-	m.workspaces = updated
+	m.workspaces = updatedWS
+	m.resolvedWorkspaces = updatedResolved
 	return nil
 }
 
@@ -100,9 +111,21 @@ func (m *Manager) AddAllowedPath(path string) error {
 			WithContext("path", path).
 			WithContext("component", "workspace")
 	}
+
+	resolvedAP, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		resolvedAP = abs
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, ap := range m.allowedPaths {
+		if ap == abs {
+			return nil
+		}
+	}
 	m.allowedPaths = append(m.allowedPaths, abs)
+	m.resolvedAllowedPaths = append(m.resolvedAllowedPaths, resolvedAP)
 	return nil
 }
 
@@ -146,21 +169,15 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 		}
 	}
 
-	for _, ws := range m.workspaces {
-		resolvedWS, err := filepath.EvalSymlinks(ws)
-		if err != nil {
-			resolvedWS = ws
-		}
+	for i, ws := range m.workspaces {
+		resolvedWS := m.resolvedWorkspaces[i]
 		if isSubPath(ws, abs) || isSubPath(ws, resolved) || isSubPath(resolvedWS, resolved) || isSubPath(resolvedWS, abs) {
 			return abs, nil
 		}
 	}
 
-	for _, ap := range m.allowedPaths {
-		resolvedAP, err := filepath.EvalSymlinks(ap)
-		if err != nil {
-			resolvedAP = ap
-		}
+	for i, ap := range m.allowedPaths {
+		resolvedAP := m.resolvedAllowedPaths[i]
 		if isSubPath(ap, abs) || isSubPath(ap, resolved) || isSubPath(resolvedAP, resolved) || isSubPath(resolvedAP, abs) {
 			return abs, nil
 		}
@@ -173,14 +190,24 @@ func (m *Manager) ValidatePath(path string) (string, error) {
 		WithContext("component", "workspace")
 }
 
-// isSubPath checks if child is within (or equal to) parent directory.
+// isSubPath checks if child is within (or equal to) parent directory without string allocations.
 func isSubPath(parent, child string) bool {
-	// Ensure parent ends with separator for prefix check
-	parentWithSep := parent
-	if !strings.HasSuffix(parentWithSep, string(filepath.Separator)) {
-		parentWithSep += string(filepath.Separator)
+	if len(parent) == 0 || len(child) == 0 {
+		return false
 	}
-	return child == parent || strings.HasPrefix(child, parentWithSep)
+	if child == parent {
+		return true
+	}
+	if strings.HasPrefix(child, parent) {
+		sep := byte(filepath.Separator)
+		if parent[len(parent)-1] == sep || parent[len(parent)-1] == '/' {
+			return true
+		}
+		if len(child) > len(parent) && (child[len(parent)] == sep || child[len(parent)] == '/') {
+			return true
+		}
+	}
+	return false
 }
 
 // Workspaces returns the list of configured workspace directories.

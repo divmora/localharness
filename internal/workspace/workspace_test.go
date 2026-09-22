@@ -434,3 +434,27 @@ func TestAddAndRemoveWorkspace(t *testing.T) {
 		t.Error("expected ws1 to be rejected after removal, got nil error")
 	}
 }
+
+func BenchmarkValidatePath(b *testing.B) {
+	wsDir := b.TempDir()
+	brainDir := b.TempDir()
+	knowledgeDir := b.TempDir()
+	mgr, err := NewManager([]string{wsDir})
+	if err != nil {
+		b.Fatal(err)
+	}
+	_ = mgr.AddAllowedPath(brainDir)
+	_ = mgr.AddAllowedPath(knowledgeDir)
+
+	testFile := filepath.Join(wsDir, "src", "pkg", "main.go")
+	_ = os.MkdirAll(filepath.Dir(testFile), 0755)
+	_ = os.WriteFile(testFile, []byte("package main"), 0644)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := mgr.ValidatePath(testFile)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

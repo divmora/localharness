@@ -77,7 +77,14 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-(Active optimizations implemented across codegraph, diffing, transcript logging, websocket write pump, and tools)
+- [ ] **Early-Exit Streaming and `fd` Integration in `find_file`** (#65)
+  - Add `fd` binary detection with native gitignore support, stream stdout line-by-line via `bufio.Scanner`, and kill child process upon reaching `maxResults` to prevent runaway disk walks and unbounded memory allocation.
+- [ ] **Zero-Allocation Case-Insensitive Scanning and Reflection-Free Line Parsing in `grep_search`** (#66)
+  - Replace `bytes.ToLower` line allocation in `nativeSearch` with zero-allocation ASCII fold scanning, replace `fmt.Sscanf` with `strconv.Atoi`, and parse ripgrep output lines without intermediate slice allocations.
+- [ ] **Zero-Allocation Line Counting and Slicing in Context Reduction** (#67)
+  - Use `strings.Count(content, "\n")` and index-based slicing in `trimLargeResults` within `internal/engine/reduction.go` to eliminate heap slice allocations for stale file results.
+- [ ] **Zero-Allocation Tool Call Argument Token Estimation in `EstimateTokens`** (#68)
+  - Introduce type-switch fast paths for strings and primitives in `EstimateTokens` to eliminate duplicate heap allocations and string formatting during context budgeting.
 
 ---
 
