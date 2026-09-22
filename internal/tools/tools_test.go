@@ -1202,6 +1202,39 @@ func TestFindFileMissingPath(t *testing.T) {
 	}
 }
 
+func BenchmarkFindFile(b *testing.B) {
+	wsDir := b.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := NewRegistry(wsMgr, logger)
+	RegisterBuiltinTools(reg, nil)
+
+	// Create 20 dirs with 20 files each
+	for i := 0; i < 20; i++ {
+		sub := filepath.Join(wsDir, fmt.Sprintf("dir_%d", i))
+		_ = os.MkdirAll(sub, 0755)
+		for j := 0; j < 20; j++ {
+			_ = os.WriteFile(filepath.Join(sub, fmt.Sprintf("file_%d.go", j)), []byte("package main"), 0644)
+		}
+	}
+
+	ctx := context.Background()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		step := &pb.StepUpdate{
+			Action: &pb.StepUpdate_FindFile{
+				FindFile: &pb.ActionFindFile{
+					Pattern: "*.go",
+					Path:    wsDir,
+				},
+			},
+		}
+		if err := reg.Execute(ctx, "find_file", step); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // ─── Search Dir Tests ────────────────────────────────────────────────────
 
 func TestSearchDir(t *testing.T) {
