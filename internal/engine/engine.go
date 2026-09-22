@@ -630,37 +630,6 @@ func (e *Engine) AddWorkspace(ws string, info WorkspaceInfo) {
 	e.msgCtx.UserRules = e.userRules
 }
 
-// RemoveWorkspace dynamically removes a workspace directory from the engine.
-func (e *Engine) RemoveWorkspace(ws string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	var updatedWS []string
-	var updatedInfos []WorkspaceInfo
-	for i, existing := range e.workspaces {
-		if existing != ws {
-			updatedWS = append(updatedWS, existing)
-			if i < len(e.workspaceInfos) {
-				updatedInfos = append(updatedInfos, e.workspaceInfos[i])
-			}
-		}
-	}
-	e.workspaces = updatedWS
-	e.workspaceInfos = updatedInfos
-
-	// Reload rules
-	discoveredRules := config.LoadAgentsRules(e.workspaces, e.logger)
-	var sdkRules []config.UserRule
-	for _, r := range e.userRules {
-		if !strings.HasSuffix(r.Filename, "AGENTS.md") {
-			sdkRules = append(sdkRules, r)
-		}
-	}
-	e.userRules = append(sdkRules, discoveredRules...)
-	e.msgCtx.Workspaces = e.workspaceInfos
-	e.msgCtx.UserRules = e.userRules
-}
-
 // Workspaces returns the list of current workspace directories.
 func (e *Engine) Workspaces() []string {
 	e.mu.RLock()

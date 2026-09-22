@@ -73,32 +73,6 @@ func (m *Manager) AddWorkspace(d string) error {
 	return nil
 }
 
-// RemoveWorkspace removes a workspace directory from the manager.
-func (m *Manager) RemoveWorkspace(d string) error {
-	abs, err := filepath.Abs(d)
-	if err != nil {
-		return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
-			"invalid workspace path").
-			WithContext("path", d).
-			WithContext("component", "workspace")
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var updatedWS []string
-	var updatedResolved []string
-	for i, ws := range m.workspaces {
-		if ws != abs {
-			updatedWS = append(updatedWS, ws)
-			updatedResolved = append(updatedResolved, m.resolvedWorkspaces[i])
-		}
-	}
-	m.workspaces = updatedWS
-	m.resolvedWorkspaces = updatedResolved
-	return nil
-}
-
 // AddAllowedPath registers an additional directory that ValidatePath will accept.
 // This does not appear in Workspaces() — it is for internal paths like the
 // brain/artifacts directory that need write access but are not user workspaces.

@@ -776,14 +776,14 @@ func TestModel_VoiceAndDirectoryCommands(t *testing.T) {
 		t.Errorf("expected usage message, got: %s", lastItem.Content)
 	}
 
-	// 4. /remove-dir without args
+	// 4. /remove-dir reports not supported
 	cmdRmEmpty, _ := ParseCommand("/remove-dir")
 	teaCmd4 := m.handleSlashCommand(cmdRmEmpty)
 	if teaCmd4 == nil {
-		t.Errorf("expected tea.Cmd for empty /remove-dir")
+		t.Errorf("expected tea.Cmd for /remove-dir")
 	}
 	lastItem2 := m.history.items[len(m.history.items)-1]
-	if !strings.Contains(lastItem2.Content, "Usage: /remove-dir") {
-		t.Errorf("expected usage message, got: %s", lastItem2.Content)
+	if !strings.Contains(lastItem2.Content, "Workspace removal is not supported") {
+		t.Errorf("expected not supported message, got: %s", lastItem2.Content)
 	}
 }

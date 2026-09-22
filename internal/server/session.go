@@ -1769,68 +1769,25 @@ func (s *Session) handleWorkspaceRequest(ctx context.Context, req *pb.WorkspaceR
 		})
 
 	case "remove":
-		if req.Path == "" {
-			s.sendServerMessage(&pb.ServerMessage{
-				Payload: &pb.ServerMessage_WorkspaceResponse{
-					WorkspaceResponse: &pb.WorkspaceResponse{
-						Success: false,
-						Message: "workspace path is required",
-					},
-				},
-			})
-			return
-		}
-		absPath, err := filepath.Abs(req.Path)
-		if err != nil {
-			absPath = req.Path
-		}
-
-		if err := s.wsMgr.RemoveWorkspace(absPath); err != nil {
-			s.sendServerMessage(&pb.ServerMessage{
-				Payload: &pb.ServerMessage_WorkspaceResponse{
-					WorkspaceResponse: &pb.WorkspaceResponse{
-						Success: false,
-						Message: fmt.Sprintf("failed to remove workspace: %v", err),
-					},
-				},
-			})
-			return
-		}
-
-		if s.engine != nil {
-			s.engine.RemoveWorkspace(absPath)
-		}
-
-		if s.conv != nil && s.conv.State != nil && s.conv.State.Config != nil {
-			var updated []*pb.Workspace
-			for _, ws := range s.conv.State.Config.Workspaces {
-				if ws.Directory != absPath {
-					updated = append(updated, ws)
-				}
-			}
-			s.conv.State.Config.Workspaces = updated
-			_ = s.conv.SaveAll()
-		}
-
-		var currentWorkspaces []*pb.Workspace
-		if s.engine != nil {
-			for _, dir := range s.engine.Workspaces() {
-				currentWorkspaces = append(currentWorkspaces, &pb.Workspace{
-					Directory: dir,
-					Name:      filepath.Base(dir),
-				})
-			}
-		}
-
 		s.sendServerMessage(&pb.ServerMessage{
 			Payload: &pb.ServerMessage_WorkspaceResponse{
 				WorkspaceResponse: &pb.WorkspaceResponse{
-					Success:    true,
-					Message:    fmt.Sprintf("Removed workspace %s", absPath),
-					Workspaces: currentWorkspaces,
+					Success: false,
+					Message: "workspace removal is not supported; start a new conversation to isolate workspace contexts",
 				},
 			},
 		})
+		return
+	default:
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_WorkspaceResponse{
+				WorkspaceResponse: &pb.WorkspaceResponse{
+					Success: false,
+					Message: fmt.Sprintf("unknown workspace action %q (supported: 'add', 'list')", req.Action),
+				},
+			},
+		})
+		return
 	}
 }
 

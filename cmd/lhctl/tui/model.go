@@ -947,13 +947,8 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			if m.client != nil {
 				_ = m.client.SendWorkspaceRequest("add", target, "", "")
 			}
-		} else if len(cmd.Args) >= 2 && (cmd.Args[0] == "remove" || cmd.Args[0] == "rm") {
-			target := expandPath(cmd.Args[1])
-			if m.client != nil {
-				_ = m.client.SendWorkspaceRequest("remove", target, "", "")
-			}
 		} else {
-			item := m.history.AddSystemMessage("Usage: /workspace [list | add <path> | remove <path>]")
+			item := m.history.AddSystemMessage("Usage: /workspace [list | add <path>]")
 			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
 		return nil
@@ -977,15 +972,8 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		return nil
 
 	case "remove-dir", "remove_dir", "rm-dir":
-		if len(cmd.Args) == 0 {
-			item := m.history.AddSystemMessage("Usage: /remove-dir <path>")
-			return tea.Println(m.history.RenderItem(item, m.getWidth()))
-		}
-		target := expandPath(cmd.Args[0])
-		if m.client != nil {
-			_ = m.client.SendWorkspaceRequest("remove", target, "", "")
-		}
-		return nil
+		item := m.history.AddSystemMessage("Workspace removal is not supported; use '/new' to start a new conversation with isolated workspace contexts.")
+		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "dirs", "workspaces":
 		if m.client != nil {
@@ -1011,13 +999,6 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			}
 			return nil
 		}
-		if (cmd.Args[0] == "remove" || cmd.Args[0] == "rm") && len(cmd.Args) >= 2 {
-			target := expandPath(cmd.Args[1])
-			if m.client != nil {
-				_ = m.client.SendWorkspaceRequest("remove", target, "", "")
-			}
-			return nil
-		}
 		target := expandPath(cmd.Args[0])
 		if fi, err := os.Stat(target); err == nil && fi.IsDir() {
 			if m.client != nil {
@@ -1025,7 +1006,7 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			}
 			return nil
 		}
-		item := m.history.AddSystemMessage("Usage: /dir [list | add <path> | remove <path>]")
+		item := m.history.AddSystemMessage("Usage: /dir [list | add <path>]")
 		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "voice":

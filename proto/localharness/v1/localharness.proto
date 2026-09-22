@@ -1243,10 +1243,10 @@ message CodeGraphEdge {
 // WORKSPACE & RUNTIME CONTROL
 // ═══════════════════════════════════════════════════════════════════════
 
-// WorkspaceRequest requests dynamic modification or listing of workspaces.
+// WorkspaceRequest requests dynamic addition or listing of workspaces.
 message WorkspaceRequest {
-  string action = 1;      // "add", "remove", "list"
-  string path = 2;        // Directory path for add/remove
+  string action = 1;      // "add", "list" ("remove" is deprecated/unsupported)
+  string path = 2;        // Directory path for add
   string name = 3;        // Optional human-readable name
   string corpus_name = 4; // Optional semantic search corpus identifier
 }

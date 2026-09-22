@@ -329,7 +329,7 @@ func (c *Client) SendQuestionResponse(requestID string, answers []*pb.QuestionAn
 	})
 }
 
-// SendWorkspaceRequest adds, removes, or lists workspaces dynamically.
+// SendWorkspaceRequest adds or lists workspaces dynamically.
 func (c *Client) SendWorkspaceRequest(action, path, name, corpus string) error {
 	return c.send(&pb.ClientMessage{
 		Payload: &pb.ClientMessage_WorkspaceRequest{

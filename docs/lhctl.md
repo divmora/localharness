@@ -175,12 +175,10 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/subagents` | View subagent hierarchy & drill down into subagent transcripts |
 | `/tasks`, `/ps` | View running background tasks, shell commands, timers, and live output |
 | `/add-dir <path>` | Add directory to workspace with path expansion (`~`) and validation (aliases: `/dir add`, `/add_dir`) |
-| `/remove-dir <path>` | Remove directory from workspace (aliases: `/dir remove`, `/remove_dir`, `/rm-dir`) |
 | `/dirs` | List all attached workspaces (alias: `/workspaces`) |
-| `/dir` | Manage workspace directories (`list`, `add <path>`, `remove <path>`) |
+| `/dir` | Manage workspace directories (`list`, `add <path>`) |
 | `/workspace list` | List all attached workspace roots |
 | `/workspace add <dir>` | Dynamically attach a workspace directory with trust check |
-| `/workspace remove <dir>` | Detach a workspace directory |
 | `/voice [start|stop|auto]` | Toggle voice dictation recording or toggle auto-spoken response playback |
 | `/speak [auto|stop|<text>]` | Speak assistant response aloud with native TTS (or toggle auto-speech) |
 | `/yolo` | Toggle YOLO Mode on/off (bypass all approval queues) |

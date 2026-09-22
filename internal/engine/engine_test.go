@@ -2473,7 +2473,7 @@ func TestIsAppDataDirPath_PrefixTrick(t *testing.T) {
 	}
 }
 
-func TestEngine_AddAndRemoveWorkspace(t *testing.T) {
+func TestEngine_DynamicAddWorkspace(t *testing.T) {
 	ws1 := t.TempDir()
 	ws2 := t.TempDir()
 
@@ -2515,19 +2515,6 @@ func TestEngine_AddAndRemoveWorkspace(t *testing.T) {
 	}
 	if len(eng.msgCtx.UserRules) == 0 {
 		t.Fatal("expected user rules to be loaded and synced to msgCtx.UserRules after adding ws2 with AGENTS.md")
-	}
-
-	// Dynamically remove ws2
-	eng.RemoveWorkspace(ws2)
-
-	if len(eng.Workspaces()) != 1 || eng.Workspaces()[0] != ws1 {
-		t.Fatalf("expected 1 workspace %s after remove, got %v", ws1, eng.Workspaces())
-	}
-	if len(eng.msgCtx.Workspaces) != 1 {
-		t.Fatalf("expected 1 msgCtx workspace after remove, got %d", len(eng.msgCtx.Workspaces))
-	}
-	if len(eng.msgCtx.UserRules) != 0 {
-		t.Fatalf("expected 0 user rules after removing ws2, got %d", len(eng.msgCtx.UserRules))
 	}
 }
 

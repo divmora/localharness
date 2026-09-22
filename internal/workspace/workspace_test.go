@@ -390,7 +390,7 @@ func TestScopedAllowedPaths_OnlyBrainAndKnowledge(t *testing.T) {
 	}
 }
 
-func TestAddAndRemoveWorkspace(t *testing.T) {
+func TestDynamicAddWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
 	ws1 := filepath.Join(tmpDir, "ws1")
 	ws2 := filepath.Join(tmpDir, "ws2")
@@ -420,18 +420,10 @@ func TestAddAndRemoveWorkspace(t *testing.T) {
 		t.Errorf("ValidatePath for ws2 failed: %v", err)
 	}
 
-	// Remove ws1
-	if err := mgr.RemoveWorkspace(ws1); err != nil {
-		t.Fatalf("RemoveWorkspace failed: %v", err)
-	}
-	if len(mgr.Workspaces()) != 1 {
-		t.Fatalf("expected 1 workspace after remove, got %d", len(mgr.Workspaces()))
-	}
-
-	// ws1 should now be rejected
+	// ws1 should still be valid
 	f1 := filepath.Join(ws1, "file.txt")
-	if _, err := mgr.ValidatePath(f1); err == nil {
-		t.Error("expected ws1 to be rejected after removal, got nil error")
+	if _, err := mgr.ValidatePath(f1); err != nil {
+		t.Errorf("ValidatePath for ws1 failed: %v", err)
 	}
 }
 
