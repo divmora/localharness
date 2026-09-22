@@ -532,6 +532,47 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+func BenchmarkEstimateTokens(b *testing.B) {
+	messages := []llm.Message{
+		{Role: "user", Content: "Please review and edit the file"},
+		{
+			Role: "model",
+			ToolCalls: []llm.ToolCall{
+				{
+					Name: "view_file",
+					Args: map[string]interface{}{
+						"AbsolutePath": "/Users/user/project/pkg/service/handler.go",
+						"StartLine":    1,
+						"EndLine":      250,
+					},
+				},
+				{
+					Name: "write_to_file",
+					Args: map[string]interface{}{
+						"TargetFile":  "/Users/user/project/pkg/service/handler.go",
+						"Overwrite":   true,
+						"CodeContent": strings.Repeat("func HandleRequest() error { return nil }\n", 100),
+						"Description": "Add HandleRequest definition with boilerplate",
+					},
+				},
+			},
+		},
+		{
+			Role: "tool",
+			ToolResult: &llm.ToolCallResult{
+				Name:    "write_to_file",
+				Content: "Successfully wrote 100 lines to /Users/user/project/pkg/service/handler.go",
+			},
+		},
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = EstimateTokens(messages)
+	}
+}
+
 func TestCompactIfNeededBelowThreshold(t *testing.T) {
 	logger := slog.Default()
 	messages := []llm.Message{

@@ -304,7 +304,13 @@ func summarizeArgs(args map[string]interface{}) string {
 
 	var parts []string
 	for k, v := range args {
-		s := fmt.Sprintf("%v", v)
+		var s string
+		switch val := v.(type) {
+		case string:
+			s = val
+		default:
+			s = fmt.Sprintf("%v", v)
+		}
 		if len(s) > 100 {
 			s = s[:100] + "..."
 		}
@@ -337,11 +343,48 @@ func EstimateTokens(messages []llm.Message) int {
 			total += 4 // function call overhead
 			total += estimateStringTokens(tc.Name)
 			for _, v := range tc.Args {
-				total += estimateStringTokens(fmt.Sprintf("%v", v))
+				total += estimateValueTokens(v)
 			}
 		}
 	}
 	return total
+}
+
+// estimateValueTokens estimates token count for an arbitrary tool call argument value
+// without allocations for common primitive types.
+func estimateValueTokens(v any) int {
+	switch val := v.(type) {
+	case string:
+		return estimateStringTokens(val)
+	case bool:
+		return 1
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return 2
+	case []any:
+		t := 2
+		for _, item := range val {
+			t += estimateValueTokens(item)
+		}
+		return t
+	case []string:
+		t := 2
+		for _, item := range val {
+			t += estimateStringTokens(item)
+		}
+		return t
+	case map[string]any:
+		t := 2
+		for k, item := range val {
+			t += estimateStringTokens(k) + estimateValueTokens(item)
+		}
+		return t
+	case fmt.Stringer:
+		return estimateStringTokens(val.String())
+	case nil:
+		return 0
+	default:
+		return estimateStringTokens(fmt.Sprintf("%v", v))
+	}
 }
 
 // EstimateStringTokens estimates token count for a single string.

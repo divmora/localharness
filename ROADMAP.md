@@ -77,8 +77,8 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-- [ ] **Zero-Allocation Tool Call Argument Token Estimation in `EstimateTokens`** (#68)
-  - Introduce type-switch fast paths for strings and primitives in `EstimateTokens` to eliminate duplicate heap allocations and string formatting during context budgeting.
+- [ ] **Adaptive AST & Knowledge Cache Eviction**
+  - Implement LRU-based memory capping and eviction for in-memory AST codegraph nodes and persistent knowledge items in massive multi-workspace repositories.
 
 ---
 
