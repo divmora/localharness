@@ -41,8 +41,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Support `optional: true` configurations and per-server connection timeouts in the MCP manager, ensuring a single slow or unreachable external MCP server does not abort session initialization.
 - [ ] **Jupyter Notebook Editing Tool (`notebook_edit`)**
   - Add cell-level read, write, and execute capabilities for `.ipynb` notebook files.
-- [ ] **Programmatic Workspace Management Tool**
-  - Add tool for dynamically creating, switching, and pruning workspace contexts within long-running sessions.
 - [ ] **Visual Grounding & Accessibility Tree Targeting for Desktop**
   - Expose native accessibility APIs (macOS Accessibility, Windows UI Automation, Linux AT-SPI) to enable coordinate-free semantic desktop targeting by label, icon description, or role.
 - [ ] **HiDPI / Retina Coordinate Normalization**
@@ -64,8 +62,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - **Tiered Local Scoping**: Support global (`~/.divmora/config/settings.json`), project-committed (`<workspace>/.agents/settings.json`), and gitignored local approvals (`<workspace>/.agents/settings.local.json`) to prevent Git merge conflicts.
   - **Playwright Origin Enforcement**: Pass allowed domains directly to `@playwright/mcp` via `--allowed-origins` flag.
   - **Configuration & CLI**: Interactive prompts ("Always allow", "Allow once") automatically save to `settings.local.json`, with CLI flag `--allow-domain` and management command `lhctl config allow-domain`. Pre-initialized with `localhost` and `127.0.0.1`.
-- [ ] **Shell Injection & Dangerous Command Detection**
-  - Static pattern analysis (`isDangerousBinary()`, `isDangerousSubcommand()`) before executing shell commands via `run_command`.
 - [ ] **Auto-Run Trust Policy Engine**
   - Implement configurable auto-run policies based on workspace trust state in `~/.divmora/config/settings.json`.
 - [ ] **Interactive REPL Auto-Upgrade Policies**
