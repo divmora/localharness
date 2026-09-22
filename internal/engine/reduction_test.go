@@ -555,3 +555,27 @@ func TestTrimLargeResults_DiffBlock(t *testing.T) {
 		t.Fatal("bottom lines should be preserved")
 	}
 }
+
+func BenchmarkTrimLargeResults(b *testing.B) {
+	var lines []string
+	for i := 1; i <= 500; i++ {
+		lines = append(lines, fmt.Sprintf("%d: some line content here in the file", i))
+	}
+	largeContent := strings.Join(lines, "\n")
+
+	messages := []llm.Message{
+		{Role: "user", Content: "check"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "view_file", Args: map[string]interface{}{"path": "/path/big.go"}}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "view_file", Content: largeContent}},
+	}
+	for i := 0; i < 8; i++ {
+		messages = append(messages, llm.Message{Role: "user", Content: "msg"})
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		msgs := make([]llm.Message, len(messages))
+		copy(msgs, messages)
+		_, _ = trimLargeResults(msgs, 8)
+	}
+}

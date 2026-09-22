@@ -270,19 +270,18 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			if strings.HasPrefix(content, "[... diff lines trimmed") {
 				continue
 			}
-			lines := strings.Split(content, "\n")
-			if len(lines) <= 40 {
+			numLines := lineCount(content)
+			if numLines <= 40 {
 				continue
 			}
 			oldTokens := estimateStringTokens(content)
-			topLines := lines[:15]
-			bottomLines := lines[len(lines)-15:]
-			trimmedCount := len(lines) - 30
+			topLines, bottomLines := splitTopBottomLines(content, 15, 15)
+			trimmedCount := numLines - 30
 
 			var sb strings.Builder
-			sb.WriteString(strings.Join(topLines, "\n"))
+			sb.WriteString(topLines)
 			sb.WriteString(fmt.Sprintf("\n\n[... %d diff lines trimmed — edit already applied in earlier turn ...]\n\n", trimmedCount))
-			sb.WriteString(strings.Join(bottomLines, "\n"))
+			sb.WriteString(bottomLines)
 
 			newContent := sb.String()
 			messages[i].ToolResult = &llm.ToolCallResult{
@@ -308,21 +307,20 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			continue
 		}
 
-		lines := strings.Split(content, "\n")
-		if len(lines) <= minLinesToTrim {
+		numLines := lineCount(content)
+		if numLines <= minLinesToTrim {
 			continue
 		}
 
 		// Keep first N + last N lines
 		oldTokens := estimateStringTokens(content)
-		topLines := lines[:keepTopLines]
-		bottomLines := lines[len(lines)-keepBottomLines:]
-		trimmedCount := len(lines) - keepTopLines - keepBottomLines
+		topLines, bottomLines := splitTopBottomLines(content, keepTopLines, keepBottomLines)
+		trimmedCount := numLines - keepTopLines - keepBottomLines
 
 		var sb strings.Builder
-		sb.WriteString(strings.Join(topLines, "\n"))
+		sb.WriteString(topLines)
 		sb.WriteString(fmt.Sprintf("\n\n[... %d lines trimmed — re-read file if needed ...]\n\n", trimmedCount))
-		sb.WriteString(strings.Join(bottomLines, "\n"))
+		sb.WriteString(bottomLines)
 
 		newContent := sb.String()
 		messages[i].ToolResult = &llm.ToolCallResult{
@@ -338,6 +336,55 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 	}
 
 	return trimmed, tokensSaved
+}
+
+// lineCount returns the number of lines in s without allocating a string slice.
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
+// splitTopBottomLines extracts the first topN lines and last bottomN lines from s
+// without allocating a slice of all intermediate lines.
+func splitTopBottomLines(s string, topN, bottomN int) (string, string) {
+	// Find topN-th newline
+	topEnd := 0
+	for i := 0; i < topN && topEnd < len(s); i++ {
+		next := strings.IndexByte(s[topEnd:], '\n')
+		if next == -1 {
+			topEnd = len(s)
+			break
+		}
+		topEnd += next + 1
+	}
+	topPart := strings.TrimSuffix(s[:topEnd], "\n")
+
+	// Find bottomN-th newline from end
+	searchEnd := len(s)
+	if searchEnd > 0 && s[searchEnd-1] == '\n' {
+		searchEnd--
+	}
+	bottomStart := 0
+	count := 0
+	for count < bottomN && searchEnd > 0 {
+		prev := strings.LastIndexByte(s[:searchEnd], '\n')
+		count++
+		if prev == -1 {
+			bottomStart = 0
+			break
+		}
+		bottomStart = prev + 1
+		searchEnd = prev
+	}
+	bottomPart := strings.TrimSuffix(s[bottomStart:], "\n")
+
+	return topPart, bottomPart
 }
 
 // pruneHistoricalUserContext removes redundant system XML boilerplate

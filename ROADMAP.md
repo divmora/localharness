@@ -77,8 +77,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-- [ ] **Zero-Allocation Line Counting and Slicing in Context Reduction** (#67)
-  - Use `strings.Count(content, "\n")` and index-based slicing in `trimLargeResults` within `internal/engine/reduction.go` to eliminate heap slice allocations for stale file results.
 - [ ] **Zero-Allocation Tool Call Argument Token Estimation in `EstimateTokens`** (#68)
   - Introduce type-switch fast paths for strings and primitives in `EstimateTokens` to eliminate duplicate heap allocations and string formatting during context budgeting.
 
