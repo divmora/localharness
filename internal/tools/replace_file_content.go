@@ -264,12 +264,14 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	ef.Success = true
 
 	// Save artifact metadata sidecar if provided
-	if ef.ArtifactMetadata != nil && r.conversation != nil {
-		filename := filepath.Base(path)
-		meta := r.conversationMeta(ef.ArtifactMetadata)
-		if err := r.conversation.SaveArtifactMetadata(filename, meta); err != nil {
-			// Non-fatal: edit succeeded, metadata save failed
-			return fmt.Errorf("replace_file_content: edit succeeded but metadata save failed: %w", err)
+	if ef.ArtifactMetadata != nil {
+		if conv := r.Conversation(); conv != nil {
+			filename := filepath.Base(path)
+			meta := r.conversationMeta(ef.ArtifactMetadata)
+			if err := conv.SaveArtifactMetadata(filename, meta); err != nil {
+				// Non-fatal: edit succeeded, metadata save failed
+				return fmt.Errorf("replace_file_content: edit succeeded but metadata save failed: %w", err)
+			}
 		}
 
 		// Dispatch artifact feedback if requested

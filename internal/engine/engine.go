@@ -466,7 +466,11 @@ func NewEngine(cfg Config) *Engine {
 	}
 
 	if eng.toolRegistry != nil {
+		eng.toolRegistry = eng.toolRegistry.Clone()
 		eng.toolRegistry.SetStepEmitter(eng.emitStep)
+		if eng.conv != nil {
+			eng.toolRegistry.SetConversation(eng.conv)
+		}
 	}
 
 	return eng

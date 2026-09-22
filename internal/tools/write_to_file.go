@@ -119,17 +119,19 @@ func executeCreateFile(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	cf.DiffBlock = diff
 
 	// Save artifact metadata sidecar if this is an artifact
-	if cf.IsArtifact && cf.ArtifactMetadata != nil && r.conversation != nil {
-		filename := filepath.Base(path)
-		meta := r.conversationMeta(cf.ArtifactMetadata)
-		if err := r.conversation.SaveArtifactMetadata(filename, meta); err != nil {
-			// Non-fatal: artifact was created, metadata save failed
-			return errors.Wrap(err, errors.ErrCodeToolExecution,
-				"artifact created but metadata save failed").
-				WithContext("path", path).
-				WithContext("filename", filename).
-				WithContext("operation", "write_to_file").
-				WithComponent("write_to_file")
+	if cf.IsArtifact && cf.ArtifactMetadata != nil {
+		if conv := r.Conversation(); conv != nil {
+			filename := filepath.Base(path)
+			meta := r.conversationMeta(cf.ArtifactMetadata)
+			if err := conv.SaveArtifactMetadata(filename, meta); err != nil {
+				// Non-fatal: artifact was created, metadata save failed
+				return errors.Wrap(err, errors.ErrCodeToolExecution,
+					"artifact created but metadata save failed").
+					WithContext("path", path).
+					WithContext("filename", filename).
+					WithContext("operation", "write_to_file").
+					WithComponent("write_to_file")
+			}
 		}
 
 		// Dispatch artifact feedback if requested
