@@ -14,6 +14,7 @@ type AutocompleteType int
 const (
 	AutocompleteFile AutocompleteType = iota
 	AutocompleteSlashCommand
+	AutocompleteModel
 )
 
 // SlashCommandDef holds command metadata.
@@ -264,4 +265,73 @@ func MatchAllSlashCommands(query string, customMgr *CustomCommandManager) []Auto
 	}
 
 	return matches
+}
+
+// DetectModelArgumentQuery checks if input text starts with `/model ` and returns the query after the space.
+func DetectModelArgumentQuery(text string, pos int) (query string, found bool) {
+	if pos < 0 || pos > len(text) {
+		pos = len(text)
+	}
+
+	sub := text[:pos]
+	if strings.HasPrefix(sub, "/model ") {
+		return strings.TrimPrefix(sub, "/model "), true
+	}
+	return "", false
+}
+
+// DefaultWellKnownModels provides fallback standard models when no catalog is available.
+var DefaultWellKnownModels = []string{
+	"gpt-4o",
+	"gpt-4o-mini",
+	"claude-3-7-sonnet",
+	"claude-3-5-sonnet",
+	"claude-3-5-haiku",
+	"gemini-2.5-pro",
+	"gemini-2.5-flash",
+	"gemini-2.0-flash",
+	"deepseek-chat",
+	"deepseek-reasoner",
+	"o1",
+	"o3-mini",
+	"llama-3.3-70b",
+}
+
+// MatchModelCandidates returns matching model suggestions for a query from discovered models and standard models.
+func MatchModelCandidates(query string, catalog []string, endpoints []string) []AutocompleteCandidate {
+	q := strings.ToLower(query)
+	var candidates []AutocompleteCandidate
+	seen := make(map[string]bool)
+
+	// Combine catalog and well-known models
+	allModels := make([]string, 0, len(catalog)+len(DefaultWellKnownModels)+len(endpoints))
+	allModels = append(allModels, catalog...)
+	allModels = append(allModels, DefaultWellKnownModels...)
+
+	for _, m := range allModels {
+		if seen[m] {
+			continue
+		}
+		seen[m] = true
+		if q == "" || strings.HasPrefix(strings.ToLower(m), q) || strings.Contains(strings.ToLower(m), q) {
+			candidates = append(candidates, AutocompleteCandidate{
+				Value:       m,
+				DisplayText: fmt.Sprintf("%-28s %s", m, "[model]"),
+			})
+		}
+	}
+
+	// Also suggest endpoint prefixes: <endpoint>/
+	for _, ep := range endpoints {
+		epPrefix := ep + "/"
+		if !seen[epPrefix] && (q == "" || strings.HasPrefix(strings.ToLower(epPrefix), q) || strings.Contains(strings.ToLower(epPrefix), q)) {
+			seen[epPrefix] = true
+			candidates = append(candidates, AutocompleteCandidate{
+				Value:       epPrefix,
+				DisplayText: fmt.Sprintf("%-28s %s", epPrefix, "[endpoint]"),
+			})
+		}
+	}
+
+	return candidates
 }

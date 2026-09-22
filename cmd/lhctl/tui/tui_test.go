@@ -106,6 +106,55 @@ func TestSlashCommandCompleter(t *testing.T) {
 	}
 }
 
+func TestModelArgumentCompleter(t *testing.T) {
+	// 1. Detection
+	q, found := DetectModelArgumentQuery("/model ", 7)
+	if !found || q != "" {
+		t.Errorf("expected found=true, q='' for '/model ', got found=%v, q=%q", found, q)
+	}
+
+	qClaude, foundClaude := DetectModelArgumentQuery("/model claud", 12)
+	if !foundClaude || qClaude != "claud" {
+		t.Errorf("expected found=true, q='claud', got found=%v, q=%q", foundClaude, qClaude)
+	}
+
+	_, foundNotModel := DetectModelArgumentQuery("/mode ", 6)
+	if foundNotModel {
+		t.Errorf("expected found=false for '/mode '")
+	}
+
+	// 2. Candidate matching
+	catalog := []string{"custom-finetune-v1", "mistral-large"}
+	endpoints := []string{"ollama", "cloud-proxy"}
+
+	matches := MatchModelCandidates("claud", catalog, endpoints)
+	if len(matches) == 0 {
+		t.Fatalf("expected matches for 'claud', got 0")
+	}
+	hasClaude37 := false
+	for _, m := range matches {
+		if m.Value == "claude-3-7-sonnet" {
+			hasClaude37 = true
+			break
+		}
+	}
+	if !hasClaude37 {
+		t.Errorf("expected claude-3-7-sonnet in matches, got: %v", matches)
+	}
+
+	// Match discovered catalog model
+	matchesCatalog := MatchModelCandidates("custom", catalog, endpoints)
+	if len(matchesCatalog) == 0 || matchesCatalog[0].Value != "custom-finetune-v1" {
+		t.Errorf("expected custom-finetune-v1 in matches, got: %v", matchesCatalog)
+	}
+
+	// Match endpoint prefix
+	matchesEndpoint := MatchModelCandidates("olla", catalog, endpoints)
+	if len(matchesEndpoint) == 0 || matchesEndpoint[0].Value != "ollama/" {
+		t.Errorf("expected ollama/ in matches, got: %v", matchesEndpoint)
+	}
+}
+
 func TestApprovalModalRender(t *testing.T) {
 	app := &ActiveApproval{
 		RequestID:   "req-1",

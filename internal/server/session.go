@@ -1194,18 +1194,32 @@ func (s *Session) createProvider(cfg *pb.HarnessConfig) (llm.Provider, error) {
 	var endpointName string
 	if cfg.LitellmEndpoint != "" {
 		endpointName = cfg.LitellmEndpoint
-	} else if liteLLMCfg.DefaultEndpoint != "" {
+	}
+
+	model := cfg.LitellmModel
+	if ep, mod := llm.ParseModelAndEndpoint(model, liteLLMCfg); ep != "" {
+		endpointName = ep
+		model = mod
+	}
+
+	if endpointName == "" && liteLLMCfg.DefaultEndpoint != "" {
 		endpointName = liteLLMCfg.DefaultEndpoint
 	}
 
-	var baseURL, apiKey, model string
+	var baseURL, apiKey string
+	var headers map[string]string
+	var timeoutSec int
 
 	// Load from global config if an endpoint is resolved
 	if endpointName != "" {
 		if endpoint, ok := liteLLMCfg.Endpoints[endpointName]; ok {
 			baseURL = endpoint.BaseURL
 			apiKey = endpoint.APIKey
-			model = endpoint.DefaultModel
+			if model == "" {
+				model = endpoint.DefaultModel
+			}
+			headers = endpoint.Headers
+			timeoutSec = endpoint.TimeoutSeconds
 			s.logger.Info("using LiteLLM endpoint from global config", "endpoint", endpointName)
 		} else if cfg.LitellmEndpoint != "" {
 			return nil, errors.New(errors.ErrCodeConfiguration,
@@ -1224,7 +1238,11 @@ func (s *Session) createProvider(cfg *pb.HarnessConfig) (llm.Provider, error) {
 		apiKey = cfg.LitellmApiKey
 	}
 	if cfg.LitellmModel != "" {
-		model = cfg.LitellmModel
+		if ep, mod := llm.ParseModelAndEndpoint(cfg.LitellmModel, liteLLMCfg); ep != "" {
+			model = mod
+		} else {
+			model = cfg.LitellmModel
+		}
 	}
 
 	if baseURL == "" {
@@ -1234,10 +1252,17 @@ func (s *Session) createProvider(cfg *pb.HarnessConfig) (llm.Provider, error) {
 			WithComponent("session")
 	}
 
+	var timeout time.Duration
+	if timeoutSec > 0 {
+		timeout = time.Duration(timeoutSec) * time.Second
+	}
+
 	primary, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
 		BaseURL:   baseURL,
 		APIKey:    apiKey,
 		ModelName: model,
+		Headers:   headers,
+		Timeout:   timeout,
 	}, s.logger)
 
 	if err != nil {
@@ -1771,16 +1796,24 @@ func (s *Session) resolveProviderForSwitch(req *pb.SwitchModelRequest) (llm.Prov
 	}
 
 	targetModel := engine.DefaultModelTierResolver(currentModel, req.Model)
+	endpointName := req.LitellmEndpoint
+
+	liteLLMCfg := config.LoadGlobalLiteLLMConfig(s.logger)
+	if ep, mod := llm.ParseModelAndEndpoint(targetModel, liteLLMCfg); ep != "" {
+		endpointName = ep
+		targetModel = mod
+	}
 
 	// If a custom base URL or API key is specified, or a specific LiteLLM endpoint is requested:
-	if req.BaseUrl != "" || req.ApiKey != "" || req.LitellmEndpoint != "" {
+	if req.BaseUrl != "" || req.ApiKey != "" || endpointName != "" {
 		baseURL := req.BaseUrl
 		apiKey := req.ApiKey
 		model := targetModel
+		var headers map[string]string
+		var timeoutSec int
 
-		if req.LitellmEndpoint != "" {
-			liteLLMCfg := config.LoadGlobalLiteLLMConfig(s.logger)
-			if endpoint, ok := liteLLMCfg.Endpoints[req.LitellmEndpoint]; ok {
+		if endpointName != "" {
+			if endpoint, ok := liteLLMCfg.Endpoints[endpointName]; ok {
 				if baseURL == "" {
 					baseURL = endpoint.BaseURL
 				}
@@ -1790,8 +1823,10 @@ func (s *Session) resolveProviderForSwitch(req *pb.SwitchModelRequest) (llm.Prov
 				if model == "" {
 					model = endpoint.DefaultModel
 				}
+				headers = endpoint.Headers
+				timeoutSec = endpoint.TimeoutSeconds
 			} else {
-				return nil, fmt.Errorf("LiteLLM endpoint %q not found in configuration", req.LitellmEndpoint)
+				return nil, fmt.Errorf("LiteLLM endpoint %q not found in configuration", endpointName)
 			}
 		}
 
@@ -1801,13 +1836,23 @@ func (s *Session) resolveProviderForSwitch(req *pb.SwitchModelRequest) (llm.Prov
 				if apiKey == "" {
 					apiKey = op.APIKey()
 				}
+				if len(headers) == 0 {
+					headers = op.Headers()
+				}
 			}
+		}
+
+		var timeout time.Duration
+		if timeoutSec > 0 {
+			timeout = time.Duration(timeoutSec) * time.Second
 		}
 
 		return llm.NewOpenAIProvider(llm.OpenAIConfig{
 			BaseURL:   baseURL,
 			APIKey:    apiKey,
 			ModelName: model,
+			Headers:   headers,
+			Timeout:   timeout,
 		}, s.logger)
 	}
 

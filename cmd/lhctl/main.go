@@ -27,21 +27,24 @@ var (
 
 func newRootCommand() *cobra.Command {
 	var (
-		modelFlag          string
-		workspacesFlag     []string
-		yoloFlag           bool
-		detachFlag         bool
-		promptFlag         string
-		convFlag           string
-		browserFlag        bool
-		noBrowserFlag      bool
-		desktopFlag        bool
-		headedFlag         bool
-		headlessFlag       bool
-		connectBrowserFlag string
-		browserProfileFlag string
-		isolatedFlag       bool
-		maxAutoWakeFlag    int
+		modelFlag           string
+		endpointFlag        string
+		skipHealthCheckFlag bool
+		offlineFlag         bool
+		workspacesFlag      []string
+		yoloFlag            bool
+		detachFlag          bool
+		promptFlag          string
+		convFlag            string
+		browserFlag         bool
+		noBrowserFlag       bool
+		desktopFlag         bool
+		headedFlag          bool
+		headlessFlag        bool
+		connectBrowserFlag  string
+		browserProfileFlag  string
+		isolatedFlag        bool
+		maxAutoWakeFlag     int
 	)
 
 	rootCmd := &cobra.Command{
@@ -62,6 +65,9 @@ detach and attach to headless sessions, and inspect conversation state and trace
 			}
 			flags := runFlags{
 				model:              modelFlag,
+				endpoint:           endpointFlag,
+				skipHealthCheck:    skipHealthCheckFlag,
+				offline:            offlineFlag,
 				workspaces:         workspacesFlag,
 				explicitWorkspaces: workspacesFlag,
 				yolo:               yoloFlag,
@@ -90,25 +96,28 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	rootCmd.PersistentFlags().StringVar(&globalDataDir, "data-dir", getDefaultDataDir(), "Override data directory")
 
 	// Run / Interactive flags on root
-	addRunFlags(rootCmd, &modelFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag, &browserFlag, &noBrowserFlag, &desktopFlag, &headedFlag, &headlessFlag, &connectBrowserFlag, &browserProfileFlag, &isolatedFlag, &maxAutoWakeFlag)
+	addRunFlags(rootCmd, &modelFlag, &endpointFlag, &skipHealthCheckFlag, &offlineFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag, &browserFlag, &noBrowserFlag, &desktopFlag, &headedFlag, &headlessFlag, &connectBrowserFlag, &browserProfileFlag, &isolatedFlag, &maxAutoWakeFlag)
 
 	// Subcommand: run
 	var (
-		runModelFlag          string
-		runWorkspacesFlag     []string
-		runYoloFlag           bool
-		runDetachFlag         bool
-		runPromptFlag         string
-		runConvFlag           string
-		runBrowserFlag        bool
-		runNoBrowserFlag      bool
-		runDesktopFlag        bool
-		runHeadedFlag         bool
-		runHeadlessFlag       bool
-		runConnectBrowserFlag string
-		runBrowserProfileFlag string
-		runIsolatedFlag       bool
-		runMaxAutoWakeFlag    int
+		runModelFlag           string
+		runEndpointFlag        string
+		runSkipHealthCheckFlag bool
+		runOfflineFlag         bool
+		runWorkspacesFlag      []string
+		runYoloFlag            bool
+		runDetachFlag          bool
+		runPromptFlag          string
+		runConvFlag            string
+		runBrowserFlag         bool
+		runNoBrowserFlag       bool
+		runDesktopFlag         bool
+		runHeadedFlag          bool
+		runHeadlessFlag        bool
+		runConnectBrowserFlag  string
+		runBrowserProfileFlag  string
+		runIsolatedFlag        bool
+		runMaxAutoWakeFlag     int
 	)
 	runCmd := &cobra.Command{
 		Use:   "run",
@@ -122,6 +131,9 @@ detach and attach to headless sessions, and inspect conversation state and trace
 			}
 			flags := runFlags{
 				model:              runModelFlag,
+				endpoint:           runEndpointFlag,
+				skipHealthCheck:    runSkipHealthCheckFlag,
+				offline:            runOfflineFlag,
 				workspaces:         runWorkspacesFlag,
 				explicitWorkspaces: runWorkspacesFlag,
 				yolo:               runYoloFlag,
@@ -141,7 +153,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 			return runInteractiveWithOptions(flags)
 		},
 	}
-	addRunFlags(runCmd, &runModelFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag, &runBrowserFlag, &runNoBrowserFlag, &runDesktopFlag, &runHeadedFlag, &runHeadlessFlag, &runConnectBrowserFlag, &runBrowserProfileFlag, &runIsolatedFlag, &runMaxAutoWakeFlag)
+	addRunFlags(runCmd, &runModelFlag, &runEndpointFlag, &runSkipHealthCheckFlag, &runOfflineFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag, &runBrowserFlag, &runNoBrowserFlag, &runDesktopFlag, &runHeadedFlag, &runHeadlessFlag, &runConnectBrowserFlag, &runBrowserProfileFlag, &runIsolatedFlag, &runMaxAutoWakeFlag)
 	rootCmd.AddCommand(runCmd)
 
 	// Subcommand: attach
@@ -298,12 +310,16 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	rootCmd.AddCommand(convCmd)
 	rootCmd.AddCommand(newCodeGraphCommand())
 	rootCmd.AddCommand(newVersionCommand())
+	rootCmd.AddCommand(newLiteLLMCommand())
 
 	return rootCmd
 }
 
-func addRunFlags(cmd *cobra.Command, model *string, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string, browser *bool, noBrowser *bool, desktop *bool, headed *bool, headless *bool, connectBrowser *string, browserProfile *string, isolated *bool, maxAutoWake *int) {
+func addRunFlags(cmd *cobra.Command, model *string, endpoint *string, skipHealthCheck *bool, offline *bool, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string, browser *bool, noBrowser *bool, desktop *bool, headed *bool, headless *bool, connectBrowser *string, browserProfile *string, isolated *bool, maxAutoWake *int) {
 	cmd.Flags().StringVarP(model, "model", "m", "", "Target LLM model (e.g. gpt-4o, claude-3-5-sonnet)")
+	cmd.Flags().StringVarP(endpoint, "endpoint", "e", "", "Target LiteLLM endpoint name (from ~/.divmora/config/litellm.json)")
+	cmd.Flags().BoolVar(skipHealthCheck, "skip-health-check", false, "Skip pre-flight LiteLLM connection and health verification")
+	cmd.Flags().BoolVar(offline, "offline", false, "Bypass network health checks and run in offline mode")
 	cmd.Flags().StringArrayVarP(workspaces, "workspace", "w", nil, "Attach workspace directory (repeatable)")
 	cmd.Flags().BoolVarP(yolo, "yolo", "y", false, "Enable YOLO Mode (dangerously skip permission checks)")
 	cmd.Flags().BoolVarP(detach, "detach", "d", false, "Launch prompt in background daemon without blocking")

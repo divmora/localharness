@@ -33,6 +33,7 @@ type OpenAIProvider struct {
 	model       string
 	temperature *float64
 	maxTokens   int
+	headers     map[string]string
 	client      *http.Client
 	logger      *slog.Logger
 }
@@ -40,10 +41,12 @@ type OpenAIProvider struct {
 // OpenAIConfig holds configuration for the OpenAI-compatible provider.
 type OpenAIConfig struct {
 	APIKey      string
-	BaseURL     string  // e.g., "http://localhost:11434/v1" for Ollama
-	ModelName   string  // e.g., "gpt-4o", "llama3", "deepseek-coder"
-	Temperature float64 // 0 = not set
-	MaxTokens   int     // 0 = model default
+	BaseURL     string            // e.g., "http://localhost:11434/v1" for Ollama
+	ModelName   string            // e.g., "gpt-4o", "llama3", "deepseek-coder"
+	Temperature float64           // 0 = not set
+	MaxTokens   int               // 0 = model default
+	Headers     map[string]string // Custom HTTP headers
+	Timeout     time.Duration     // Request timeout
 }
 
 // NewOpenAIProvider creates a new OpenAI-compatible provider.
@@ -70,11 +73,17 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 			WithComponent("llm_provider")
 	}
 
+	client := &http.Client{}
+	if cfg.Timeout > 0 {
+		client.Timeout = cfg.Timeout
+	}
+
 	p := &OpenAIProvider{
 		apiKey:  cfg.APIKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
-		client:  &http.Client{},
+		headers: cfg.Headers,
+		client:  client,
 		logger:  logger,
 	}
 
@@ -89,10 +98,11 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 	return p, nil
 }
 
-func (o *OpenAIProvider) ModelName() string { return o.model }
-func (o *OpenAIProvider) BaseURL() string   { return o.baseURL }
-func (o *OpenAIProvider) APIKey() string    { return o.apiKey }
-func (o *OpenAIProvider) Close() error      { return nil }
+func (o *OpenAIProvider) ModelName() string          { return o.model }
+func (o *OpenAIProvider) BaseURL() string            { return o.baseURL }
+func (o *OpenAIProvider) APIKey() string             { return o.apiKey }
+func (o *OpenAIProvider) Headers() map[string]string { return o.headers }
+func (o *OpenAIProvider) Close() error               { return nil }
 
 // WithModel returns a copy of OpenAIProvider configured with a different model name,
 // sharing the same base URL, API key, HTTP client, and logger.
@@ -103,6 +113,7 @@ func (o *OpenAIProvider) WithModel(modelName string) Provider {
 		model:       modelName,
 		temperature: o.temperature,
 		maxTokens:   o.maxTokens,
+		headers:     o.headers,
 		client:      o.client,
 		logger:      o.logger,
 	}
@@ -180,6 +191,9 @@ func (o *OpenAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 		httpReq.Header.Set("Content-Type", "application/json")
 		if o.apiKey != "" {
 			httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+		}
+		for k, v := range o.headers {
+			httpReq.Header.Set(k, v)
 		}
 
 		o.logger.Debug("calling OpenAI API", "model", o.model, "url", url, "messages", len(req.Messages), "attempt", attempt)
@@ -478,6 +492,9 @@ func (o *OpenAIProvider) GenerateStream(ctx context.Context, req *GenerateReques
 			httpReq.Header.Set("Accept", "text/event-stream")
 			if o.apiKey != "" {
 				httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+			}
+			for k, v := range o.headers {
+				httpReq.Header.Set(k, v)
 			}
 
 			o.logger.Debug("calling OpenAI streaming API", "model", o.model, "url", url, "messages", len(req.Messages), "attempt", attempt)

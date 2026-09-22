@@ -203,3 +203,41 @@ data: [DONE]
 		}
 	}
 }
+
+func TestOpenAICustomHeadersAndTimeout(t *testing.T) {
+	var receivedCustomHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedCustomHeader = r.Header.Get("X-Proxy-Header")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id": "chatcmpl-test",
+			"object": "chat.completion",
+			"choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]
+		}`)
+	}))
+	defer server.Close()
+
+	p, err := NewOpenAIProvider(OpenAIConfig{
+		BaseURL:   server.URL,
+		ModelName: "test-model",
+		Headers:   map[string]string{"X-Proxy-Header": "litellm-val"},
+		Timeout:   10 * time.Second,
+	}, slog.Default())
+	if err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	if p.Headers()["X-Proxy-Header"] != "litellm-val" {
+		t.Errorf("expected header stored, got %v", p.Headers())
+	}
+
+	_, err = p.Generate(context.Background(), &GenerateRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	if receivedCustomHeader != "litellm-val" {
+		t.Errorf("server received header %q, want %q", receivedCustomHeader, "litellm-val")
+	}
+}

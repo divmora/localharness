@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/daemon"
+	"github.com/divmora/localharness/internal/llm"
 )
 
 // Model is the main Bubbletea TUI application model.
@@ -50,6 +53,8 @@ type Model struct {
 	lastInterrupt     time.Time
 	voice             *VoiceManager
 	isTranscribing    bool
+	modelCatalog      []string
+	endpointNames     []string
 }
 
 // SetAutoSpeak sets the voice auto-speak preference.
@@ -114,6 +119,13 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 
 	vm := NewVoiceManager()
 
+	liteCfg := config.LoadGlobalLiteLLMConfig(nil)
+	var endpointNames []string
+	for name := range liteCfg.Endpoints {
+		endpointNames = append(endpointNames, name)
+	}
+	sort.Strings(endpointNames)
+
 	return Model{
 		client:         c,
 		textarea:       ta,
@@ -130,6 +142,43 @@ func InitialModelWithHistory(c *client.Client, workspaces []string, yolo bool, i
 		showThinking:   false,
 		ready:          true,
 		voice:          vm,
+		endpointNames:  endpointNames,
+	}
+}
+
+// DiscoveredModelsMsg carries model IDs discovered asynchronously from LiteLLM proxy.
+type DiscoveredModelsMsg struct {
+	Models []string
+}
+
+func discoverLiteLLMModelsCmd() tea.Cmd {
+	return func() tea.Msg {
+		liteCfg := config.LoadGlobalLiteLLMConfig(nil)
+		if len(liteCfg.Endpoints) == 0 {
+			return DiscoveredModelsMsg{Models: nil}
+		}
+
+		targetName := liteCfg.DefaultEndpoint
+		if targetName == "" {
+			for k := range liteCfg.Endpoints {
+				targetName = k
+				break
+			}
+		}
+
+		ep, ok := liteCfg.Endpoints[targetName]
+		if !ok {
+			return DiscoveredModelsMsg{Models: nil}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		models, err := llm.FetchAvailableModels(ctx, ep)
+		if err != nil {
+			return DiscoveredModelsMsg{Models: nil}
+		}
+		return DiscoveredModelsMsg{Models: models}
 	}
 }
 
@@ -140,6 +189,7 @@ func (m Model) Init() tea.Cmd {
 		m.spinner.Tick,
 		listenForEvents(m.client),
 		listenForErrors(m.client),
+		discoverLiteLLMModelsCmd(),
 	}
 	if len(m.history.items) > 0 {
 		initial := m.history.FormatInitialHistory(m.getWidth())
@@ -195,6 +245,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, spCmd = m.spinner.Update(msg)
 		cmds = append(cmds, spCmd)
 		return m, tea.Batch(cmds...)
+
+	case DiscoveredModelsMsg:
+		if len(msg.Models) > 0 {
+			m.modelCatalog = append(m.modelCatalog, msg.Models...)
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		// Active audio recording handling: Enter/F5/Ctrl+R transcribes, Esc/Ctrl+C cancels
@@ -534,6 +590,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.autocompleteState.Type == AutocompleteSlashCommand {
 						m.textarea.SetValue(selected.Value + " ")
 						m.textarea.CursorEnd()
+					} else if m.autocompleteState.Type == AutocompleteModel {
+						m.textarea.SetValue("/model " + selected.Value)
+						m.textarea.CursorEnd()
 					} else {
 						prefix := val[:m.autocompleteState.CursorPos]
 						m.textarea.SetValue(prefix + "@" + selected.Value + " ")
@@ -732,6 +791,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Candidates:    matches,
 				SelectedIndex: selIndex,
 				CursorPos:     0,
+			}
+		} else {
+			m.autocompleteState.Active = false
+		}
+	} else if modelQ, isModel := DetectModelArgumentQuery(m.textarea.Value(), pos); isModel {
+		matches := MatchModelCandidates(modelQ, m.modelCatalog, m.endpointNames)
+		if len(matches) > 0 {
+			selIndex := 0
+			if m.autocompleteState.Active && m.autocompleteState.Type == AutocompleteModel && m.autocompleteState.Query == modelQ {
+				selIndex = m.autocompleteState.SelectedIndex
+				if selIndex >= len(matches) {
+					selIndex = len(matches) - 1
+				}
+			}
+			m.autocompleteState = AutocompleteState{
+				Active:        true,
+				Type:          AutocompleteModel,
+				Query:         modelQ,
+				Candidates:    matches,
+				SelectedIndex: selIndex,
+				CursorPos:     len("/model "),
 			}
 		} else {
 			m.autocompleteState.Active = false
@@ -1129,9 +1209,19 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 	case "model":
 		if len(cmd.Args) > 0 {
 			targetModel := cmd.Args[0]
+			endpoint := ""
+			liteCfg := config.LoadGlobalLiteLLMConfig(nil)
+			if ep, mod := llm.ParseModelAndEndpoint(targetModel, liteCfg); ep != "" {
+				endpoint = ep
+				targetModel = mod
+			}
 			if m.client != nil {
-				_ = m.client.SendSwitchModel(targetModel, "")
-				item := m.history.AddSystemMessage(fmt.Sprintf("Switching active model to %s...", targetModel))
+				_ = m.client.SendSwitchModel(targetModel, endpoint)
+				displayName := targetModel
+				if endpoint != "" {
+					displayName = fmt.Sprintf("%s/%s", endpoint, targetModel)
+				}
+				item := m.history.AddSystemMessage(fmt.Sprintf("Switching active model to %s...", displayName))
 				return tea.Println(m.history.RenderItem(item, m.getWidth()))
 			}
 			m.modelName = targetModel

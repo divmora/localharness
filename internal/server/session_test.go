@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/engine"
 	"github.com/divmora/localharness/internal/llm"
 )
@@ -342,5 +345,81 @@ func TestHandleSwitchModel(t *testing.T) {
 
 	if s.engine.Provider().ModelName() != "claude-3-5-haiku" {
 		t.Errorf("expected engine model to be claude-3-5-haiku, got %s", s.engine.Provider().ModelName())
+	}
+}
+
+func TestCreateProvider_LiteLLM_EndpointRouting(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	configDir := filepath.Join(homeDir, ".divmora", "config")
+	_ = os.MkdirAll(configDir, 0755)
+
+	liteCfg := &config.GlobalLiteLLMConfig{
+		DefaultEndpoint: "default",
+		Endpoints: map[string]config.LiteLLMEndpoint{
+			"default": {
+				BaseURL:      "http://127.0.0.1:4000/v1",
+				APIKey:       "key-default",
+				DefaultModel: "gpt-4o",
+			},
+			"local-ollama": {
+				BaseURL:        "http://127.0.0.1:11434/v1",
+				DefaultModel:   "llama3.2",
+				Headers:        map[string]string{"X-Local": "true"},
+				TimeoutSeconds: 60,
+			},
+		},
+	}
+	_ = config.SaveGlobalLiteLLMConfigTo(filepath.Join(configDir, "litellm.json"), liteCfg, nil)
+
+	s := &Session{
+		logger: slog.Default(),
+	}
+
+	// 1. Create provider with endpoint/model routing
+	p1, err := s.createProvider(&pb.HarnessConfig{
+		LitellmModel: "local-ollama/qwen2.5-coder",
+	})
+	if err != nil {
+		t.Fatalf("createProvider failed: %v", err)
+	}
+	op1, ok := p1.(*llm.OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected OpenAIProvider, got %T", p1)
+	}
+	if op1.BaseURL() != "http://127.0.0.1:11434/v1" {
+		t.Errorf("expected local-ollama baseUrl, got %s", op1.BaseURL())
+	}
+	if op1.ModelName() != "qwen2.5-coder" {
+		t.Errorf("expected model qwen2.5-coder, got %s", op1.ModelName())
+	}
+	if op1.Headers()["X-Local"] != "true" {
+		t.Errorf("expected custom header preserved, got %v", op1.Headers())
+	}
+
+	// 2. Switch provider using endpoint/model syntax
+	eng := engine.NewEngine(engine.Config{Provider: p1})
+	s.engine = eng
+	s.initCfg = &pb.HarnessConfig{LitellmModel: "local-ollama/qwen2.5-coder"}
+
+	p2, err := s.resolveProviderForSwitch(&pb.SwitchModelRequest{
+		Model: "default/gemini-2.0-flash",
+	})
+	if err != nil {
+		t.Fatalf("resolveProviderForSwitch failed: %v", err)
+	}
+	op2, ok := p2.(*llm.OpenAIProvider)
+	if !ok {
+		t.Fatalf("expected OpenAIProvider, got %T", p2)
+	}
+	if op2.BaseURL() != "http://127.0.0.1:4000/v1" {
+		t.Errorf("expected default baseUrl, got %s", op2.BaseURL())
+	}
+	if op2.ModelName() != "gemini-2.0-flash" {
+		t.Errorf("expected model gemini-2.0-flash, got %s", op2.ModelName())
+	}
+	if op2.APIKey() != "key-default" {
+		t.Errorf("expected key-default, got %s", op2.APIKey())
 	}
 }

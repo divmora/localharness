@@ -9,16 +9,21 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/term"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/divmora/localharness/cmd/lhctl/client"
 	"github.com/divmora/localharness/cmd/lhctl/tui"
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/llm"
 )
 
 type runFlags struct {
 	model              string
+	endpoint           string
+	skipHealthCheck    bool
+	offline            bool
 	workspaces         []string
 	explicitWorkspaces []string
 	yolo               bool
@@ -48,6 +53,15 @@ func formatResumeCommand(sessionID string, flags runFlags) string {
 	parts = append(parts, "lhctl", "-c", sessionID)
 	if flags.model != "" {
 		parts = append(parts, fmt.Sprintf("--model=%s", flags.model))
+	}
+	if flags.endpoint != "" {
+		parts = append(parts, fmt.Sprintf("--endpoint=%s", flags.endpoint))
+	}
+	if flags.skipHealthCheck {
+		parts = append(parts, "--skip-health-check")
+	}
+	if flags.offline {
+		parts = append(parts, "--offline")
 	}
 	if flags.yolo {
 		parts = append(parts, "--yolo")
@@ -134,6 +148,15 @@ func parseRunFlags(args []string) runFlags {
 			var n int
 			_, _ = fmt.Sscanf(args[i], "%d", &n)
 			f.maxAutoWake = n
+		case strings.HasPrefix(a, "--endpoint="):
+			f.endpoint = strings.TrimPrefix(a, "--endpoint=")
+		case a == "-e" && i+1 < len(args):
+			i++
+			f.endpoint = args[i]
+		case a == "--skip-health-check":
+			f.skipHealthCheck = true
+		case a == "--offline":
+			f.offline = true
 		case strings.HasPrefix(a, "--model="):
 			f.model = strings.TrimPrefix(a, "--model=")
 		case a == "-m" && i+1 < len(args):
@@ -258,6 +281,22 @@ func runInteractiveWithOptions(flags runFlags) error {
 		}
 	}
 
+	// First-time LiteLLM setup wizard if no credentials configured
+	if shouldRunFirstTimeWizard(flags) {
+		if term.IsTerminal(os.Stdin.Fd()) {
+			if _, err := runFirstTimeSetupWizard(os.Stdin, os.Stdout); err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("no LiteLLM endpoints configured.\nRun 'lhctl litellm add <name> --url <url>' or configure LITELLM_API_KEY / ~/.divmora/config/litellm.json")
+		}
+	}
+
+	// Pre-flight LiteLLM reachability and health verification
+	if err := runPreflightCheck(flags); err != nil {
+		return err
+	}
+
 	cl, err := client.ConnectOrStartDaemonWithSession(logger, flags.sessionID)
 	if err != nil {
 		return fmt.Errorf("connecting to daemon: %w", err)
@@ -342,9 +381,19 @@ func runInteractiveWithOptions(flags runFlags) error {
 		resolvedAccessMode = config.ParseAccessMode(flags.accessMode)
 	}
 
+	// Support endpoint_name/model_name routing syntax
+	liteCfg := config.LoadGlobalLiteLLMConfig(nil)
+	targetEndpoint := flags.endpoint
+	targetModel := flags.model
+	if ep, mod := llm.ParseModelAndEndpoint(targetModel, liteCfg); ep != "" {
+		targetEndpoint = ep
+		targetModel = mod
+	}
+
 	harnessCfg := &pb.HarnessConfig{
 		ConversationId:    flags.sessionID,
-		LitellmModel:      flags.model,
+		LitellmEndpoint:   targetEndpoint,
+		LitellmModel:      targetModel,
 		Workspaces:        pbWorkspaces,
 		YoloMode:          flags.yolo,
 		AccessMode:        resolvedAccessMode,

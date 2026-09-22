@@ -49,7 +49,10 @@ lhctl attach <session-id>
 | `--conversation` | `-c` | Resume an existing conversation by ID (or most recent if omitted) | Start fresh conversation |
 | `--continue` | | Alias for `--conversation` | |
 | `--resume` | | Alias for `--conversation` | |
-| `--model` | `-m` | Target LLM model (e.g. `gpt-4o`, `claude-3-5-sonnet`) | Harness default |
+| `--model` | `-m` | Target LLM model (e.g. `gpt-4o`, `claude-3-5-sonnet`, `endpoint/model`) | Harness default |
+| `--endpoint` | `-e` | Target LiteLLM endpoint name (from `~/.divmora/config/litellm.json`) | Default configured endpoint |
+| `--skip-health-check` | | Skip pre-flight LiteLLM connection and health verification on startup | `false` |
+| `--offline` | | Bypass network health checks and run in offline mode | `false` |
 | `--workspace` | `-w` | Attach workspace directory (repeatable) | Current working directory |
 | `--add-dir` | | Attach workspace directory (repeatable, alias for `--workspace`) | Current working directory |
 | `--access-mode` | | Agent access mode: `workspace` (default), `system` (supervised host-wide), `unrestricted` | `workspace` |
@@ -380,6 +383,99 @@ lhctl conv trace <id>                    # Show tool call timeline
 lhctl conv trace <id> --watch            # Live tail (updates as agent runs)
 lhctl conv trace <id> --commands         # Show full command lines
 ```
+
+---
+
+## LiteLLM Endpoint Management (`lhctl litellm`)
+
+LocalHarness provides complete command-line management for LiteLLM proxies and OpenAI-compatible model endpoints (Ollama, vLLM, LM Studio, Azure, Cloud LiteLLM gateways) persisted in `~/.divmora/config/litellm.json`.
+
+### `litellm list`
+
+List all configured endpoints, active default marker (`*`), URLs, default models, and live reachability status:
+
+```bash
+lhctl litellm list
+# Output:
+# NAME        DEFAULT   BASE URL                   DEFAULT MODEL   STATUS
+# default     *         http://localhost:4000/v1   gpt-4o          online (24ms)
+# ollama                http://localhost:11434/v1  llama3.3        online (4ms)
+
+# Skip network checks or output as JSON:
+lhctl litellm list --no-check
+lhctl litellm list --json
+```
+
+### `litellm add`
+
+Add a new LiteLLM proxy or local model endpoint with pre-save reachability verification:
+
+```bash
+# Add with live connection test
+lhctl litellm add my-proxy --url http://localhost:4000/v1 --api-key sk-xxxx --model gpt-4o
+
+# Add a local Ollama endpoint without API key and mark as default
+lhctl litellm add ollama --url http://localhost:11434/v1 --model llama3.3 --default
+
+# Skip connection verification if server is temporarily offline
+lhctl litellm add backup --url http://10.0.0.5:4000/v1 --skip-verify
+```
+
+### `litellm show`
+
+Display detailed configuration with masked API keys:
+
+```bash
+lhctl litellm show default
+lhctl litellm show default --show-key    # Reveal full API key
+lhctl litellm show default --json        # JSON output
+```
+
+### `litellm update`
+
+Update individual endpoint parameters (URL, API key, model, timeout):
+
+```bash
+lhctl litellm update default --model claude-3-7-sonnet
+lhctl litellm update default --url http://new-proxy:4000/v1 --api-key sk-new
+```
+
+### `litellm set-default`
+
+Switch the default LiteLLM endpoint used across all LocalHarness sessions:
+
+```bash
+lhctl litellm set-default ollama
+```
+
+### `litellm delete` (alias: `remove`, `rm`)
+
+Delete a configured endpoint (prompts for confirmation, or pass `--force`):
+
+```bash
+lhctl litellm delete backup
+lhctl litellm delete backup --force
+```
+
+### `litellm test`
+
+Perform an on-demand latency test and query `/models` to list available model identifiers:
+
+```bash
+# Test specific endpoint
+lhctl litellm test default
+
+# Test all configured endpoints
+lhctl litellm test
+```
+
+### Pre-Flight Health Checks & Setup Wizard
+
+- **Pre-Flight Health Verification**: On `lhctl` startup, a lightweight 3-second probe runs against the active endpoint before launching the session. If the proxy is offline or credentials fail (HTTP 401/403/502), `lhctl` fails fast with troubleshooting diagnostics. Use `--skip-health-check` or `--offline` to bypass.
+- **First-Time Setup Wizard**: If `lhctl` starts without any configured endpoints or environment variables, an interactive terminal wizard guides you through configuring endpoint name, URL, API key, and default model with live validation.
+- **Model Routing & `/model` Autocompletion**:
+  - Models can be specified using `endpoint_name/model_name` syntax (e.g. `ollama/llama3.3` or `lhctl run -m ollama/llama3.3`).
+  - In the TUI, typing `/model ` queries available models dynamically from LiteLLM's `/models` endpoint and provides instant autocompletion.
 
 ---
 

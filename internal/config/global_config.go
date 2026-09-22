@@ -372,9 +372,12 @@ func SaveGlobalSettings(settings *GlobalSettings, logger *slog.Logger) error {
 
 // LiteLLMEndpoint represents a single LiteLLM server configuration.
 type LiteLLMEndpoint struct {
-	BaseURL      string `json:"baseUrl"`
-	APIKey       string `json:"apiKey"`
-	DefaultModel string `json:"defaultModel"`
+	BaseURL           string            `json:"baseUrl"`
+	APIKey            string            `json:"apiKey"`
+	DefaultModel      string            `json:"defaultModel,omitempty"`
+	Headers           map[string]string `json:"headers,omitempty"`
+	TimeoutSeconds    int               `json:"timeoutSeconds,omitempty"`
+	FallbackEndpoints []string          `json:"fallbackEndpoints,omitempty"`
 }
 
 // GlobalLiteLLMConfig represents the ~/.divmora/config/litellm.json file.
@@ -422,9 +425,12 @@ func LoadGlobalLiteLLMConfigFrom(path string, logger *slog.Logger) *GlobalLiteLL
 	cfg.DefaultEndpoint = expandEnvString(cfg.DefaultEndpoint)
 	for name, endpoint := range cfg.Endpoints {
 		cfg.Endpoints[name] = LiteLLMEndpoint{
-			BaseURL:      expandEnvString(endpoint.BaseURL),
-			APIKey:       expandEnvString(endpoint.APIKey),
-			DefaultModel: expandEnvString(endpoint.DefaultModel),
+			BaseURL:           expandEnvString(endpoint.BaseURL),
+			APIKey:            expandEnvString(endpoint.APIKey),
+			DefaultModel:      expandEnvString(endpoint.DefaultModel),
+			Headers:           expandEnvMap(endpoint.Headers),
+			TimeoutSeconds:    endpoint.TimeoutSeconds,
+			FallbackEndpoints: expandEnvSlice(endpoint.FallbackEndpoints),
 		}
 	}
 
@@ -434,4 +440,35 @@ func LoadGlobalLiteLLMConfigFrom(path string, logger *slog.Logger) *GlobalLiteLL
 		"default", cfg.DefaultEndpoint,
 	)
 	return &cfg
+}
+
+// SaveGlobalLiteLLMConfig writes LiteLLM configuration to ~/.divmora/config/litellm.json.
+func SaveGlobalLiteLLMConfig(cfg *GlobalLiteLLMConfig, logger *slog.Logger) error {
+	configDir, err := DivmoraConfigDir()
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot resolve config dir")
+	}
+	return SaveGlobalLiteLLMConfigTo(filepath.Join(configDir, "litellm.json"), cfg, logger)
+}
+
+// SaveGlobalLiteLLMConfigTo writes LiteLLM configuration to a specific path with 0600 permissions.
+func SaveGlobalLiteLLMConfigTo(path string, cfg *GlobalLiteLLMConfig, logger *slog.Logger) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot create config dir")
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot marshal litellm config")
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot write litellm config file")
+	}
+	if logger != nil {
+		logger.Info("saved global litellm config",
+			"path", path,
+			"endpoints", len(cfg.Endpoints),
+			"default", cfg.DefaultEndpoint,
+		)
+	}
+	return nil
 }

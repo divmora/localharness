@@ -332,3 +332,60 @@ func TestAddAllowedCommandAndTool_Persistence(t *testing.T) {
 		t.Error("expected 'edit_file' to be allowed")
 	}
 }
+
+func TestGlobalLiteLLMConfig_SaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "litellm.json")
+
+	cfg := &GlobalLiteLLMConfig{
+		DefaultEndpoint: "default",
+		Endpoints: map[string]LiteLLMEndpoint{
+			"default": {
+				BaseURL:           "http://localhost:4000/v1",
+				APIKey:            "sk-test-12345",
+				DefaultModel:      "gpt-4o",
+				Headers:           map[string]string{"X-Custom-Header": "foo"},
+				TimeoutSeconds:    45,
+				FallbackEndpoints: []string{"backup"},
+			},
+			"backup": {
+				BaseURL:      "http://localhost:11434/v1",
+				DefaultModel: "llama3",
+			},
+		},
+	}
+
+	if err := SaveGlobalLiteLLMConfigTo(path, cfg, slog.Default()); err != nil {
+		t.Fatalf("failed to save litellm config: %v", err)
+	}
+
+	// Verify file permissions (0600)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("failed to stat config file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("expected file mode 0600, got %o", perm)
+	}
+
+	loaded := LoadGlobalLiteLLMConfigFrom(path, slog.Default())
+	if loaded.DefaultEndpoint != "default" {
+		t.Errorf("expected defaultEndpoint 'default', got %q", loaded.DefaultEndpoint)
+	}
+	if len(loaded.Endpoints) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(loaded.Endpoints))
+	}
+	def := loaded.Endpoints["default"]
+	if def.BaseURL != "http://localhost:4000/v1" {
+		t.Errorf("unexpected baseUrl: %q", def.BaseURL)
+	}
+	if def.Headers["X-Custom-Header"] != "foo" {
+		t.Errorf("unexpected header value: %q", def.Headers["X-Custom-Header"])
+	}
+	if def.TimeoutSeconds != 45 {
+		t.Errorf("expected timeout 45, got %d", def.TimeoutSeconds)
+	}
+	if len(def.FallbackEndpoints) != 1 || def.FallbackEndpoints[0] != "backup" {
+		t.Errorf("unexpected fallback endpoints: %v", def.FallbackEndpoints)
+	}
+}
