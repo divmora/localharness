@@ -132,3 +132,50 @@ func ResolveSubagentProvider(parent llm.Provider, requestedTierOrModel string, r
 
 	return parent
 }
+
+// ModelContextWindow returns the known maximum context window (in tokens) for a given model.
+// Defaults to 128,000 for unknown models.
+func ModelContextWindow(modelName string) int {
+	lower := strings.ToLower(strings.TrimSpace(modelName))
+	switch {
+	case strings.Contains(lower, "gemini"):
+		// Gemini 1.5, 2.0, 2.5 support 1M to 2M tokens
+		return 1048576
+	case strings.Contains(lower, "claude"):
+		// Claude 3, 3.5, 3.7 support 200k tokens
+		return 200000
+	case strings.Contains(lower, "o1"), strings.Contains(lower, "o3"), strings.Contains(lower, "o4"):
+		// OpenAI reasoning models support 200k tokens
+		return 200000
+	case strings.Contains(lower, "gpt-4"), strings.Contains(lower, "chatgpt"):
+		// GPT-4o / GPT-4 Turbo support 128k tokens
+		return 128000
+	case strings.Contains(lower, "deepseek"):
+		// DeepSeek V3 / R1 support 128k context
+		return 128000
+	case strings.Contains(lower, "llama-3.1"), strings.Contains(lower, "llama-3.2"), strings.Contains(lower, "llama-3.3"):
+		// Llama 3.1+ supports 128k context
+		return 128000
+	case strings.Contains(lower, "qwen"):
+		return 128000
+	case strings.Contains(lower, "mistral"), strings.Contains(lower, "codestral"):
+		return 128000
+	default:
+		return 128000
+	}
+}
+
+// CalculateModelCompactionThreshold calculates context limits and a recommended
+// compaction threshold (typically ~75% of context window, capped at 400,000 tokens).
+func CalculateModelCompactionThreshold(modelName string) (contextWindow int, compactionThreshold int) {
+	window := ModelContextWindow(modelName)
+	if window >= 1000000 {
+		return window, 400000
+	}
+	// Target 75% of context window for safe compaction before overflow
+	threshold := int(float64(window) * 0.75)
+	if threshold < 2000 {
+		threshold = 2000
+	}
+	return window, threshold
+}

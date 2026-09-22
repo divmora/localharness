@@ -188,6 +188,14 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/clear` | Clear the chat history viewport |
 | `/exit`, `/quit` | Exit the TUI session |
 
+### Dynamic Runtime Model Switching (`/model [name]`)
+
+You can view or hot-swap the active LLM provider mid-session without restarting the conversation or losing session context:
+- **View active model**: Type `/model` to display the current active model, its maximum context window, and compaction threshold.
+- **Switch model**: Type `/model <name>` (e.g. `/model claude-3-7-sonnet`, `/model gpt-4o`, `/model gemini-2.5-pro`) to switch immediately.
+- **Tier aliases**: You can also switch using tier aliases (`/model pro`, `/model flash`, `/model flash_lite`), which automatically resolve to the flagship, fast, or lightweight models within the current provider family.
+- **Context auto-adaptation**: When switching models, context window limits and compaction thresholds automatically adjust to the target model's capacity, preventing context length exceeded errors.
+
 ---
 
 ## Voice Dictation & Spoken Responses (TTS)

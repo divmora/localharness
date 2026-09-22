@@ -51,6 +51,7 @@ message ClientMessage {
     ResumeRequest resume = 8;
     WorkspaceRequest workspace_request = 9;
     SetYoloModeRequest set_yolo_mode = 10;
+    SwitchModelRequest switch_model = 11;
   }
 }
 
@@ -125,6 +126,7 @@ message ServerMessage {
     TraceEvent trace_event = 5;
     WorkspaceResponse workspace_response = 6;
     ReplayComplete replay_complete = 7;
+    SwitchModelResponse switch_model_response = 8;
   }
 }
 
@@ -1289,5 +1291,23 @@ message SetYoloModeRequest {
 // ReplayComplete signals that all historical buffered events have been replayed.
 message ReplayComplete {
   int32 event_count = 1;
+}
+
+// SwitchModelRequest dynamically switches the active model/provider mid-session.
+message SwitchModelRequest {
+  string model = 1;              // Model identifier or tier alias (e.g. "claude-3-7-sonnet", "gpt-4o", "pro", "flash")
+  string litellm_endpoint = 2;    // Optional LiteLLM endpoint to route through
+  string base_url = 3;            // Optional custom base URL override
+  string api_key = 4;             // Optional API key override
+  int32 compaction_threshold = 5; // Optional custom compaction threshold (0 = auto-calculate for model)
+}
+
+// SwitchModelResponse returns the result of a model switch request.
+message SwitchModelResponse {
+  bool success = 1;
+  string model = 2;               // Active model name after switch
+  string error_message = 3;       // Populated if switch failed
+  int32 context_window = 4;       // Model's context window limit (tokens)
+  int32 compaction_threshold = 5; // Updated compaction threshold (tokens)
 }
 

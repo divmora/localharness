@@ -787,3 +787,43 @@ func TestModel_VoiceAndDirectoryCommands(t *testing.T) {
 		t.Errorf("expected not supported message, got: %s", lastItem2.Content)
 	}
 }
+
+func TestModel_SlashCommandModel(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// 1. Without args: prints current model
+	cmd, _ := ParseCommand("/model")
+	teaCmd := m.handleSlashCommand(cmd)
+	if teaCmd == nil {
+		t.Errorf("expected non-nil tea.Cmd for /model, got nil")
+	}
+
+	// 2. With target model (offline fallback when client is nil)
+	cmdSwitch, _ := ParseCommand("/model claude-3-7-sonnet")
+	teaCmd2 := m.handleSlashCommand(cmdSwitch)
+	if teaCmd2 == nil {
+		t.Errorf("expected non-nil tea.Cmd for /model switch, got nil")
+	}
+	if m.modelName != "claude-3-7-sonnet" {
+		t.Errorf("expected modelName to be claude-3-7-sonnet, got %s", m.modelName)
+	}
+
+	// 3. Process SwitchModelResponse event
+	srvMsg := &pb.ServerMessage{
+		Payload: &pb.ServerMessage_SwitchModelResponse{
+			SwitchModelResponse: &pb.SwitchModelResponse{
+				Success:             true,
+				Model:               "gpt-4o",
+				ContextWindow:       128000,
+				CompactionThreshold: 96000,
+			},
+		},
+	}
+	m.handleServerEvent(srvMsg)
+	if m.modelName != "gpt-4o" {
+		t.Errorf("expected modelName to update to gpt-4o from server message, got %s", m.modelName)
+	}
+}

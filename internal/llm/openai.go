@@ -90,6 +90,8 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 }
 
 func (o *OpenAIProvider) ModelName() string { return o.model }
+func (o *OpenAIProvider) BaseURL() string   { return o.baseURL }
+func (o *OpenAIProvider) APIKey() string    { return o.apiKey }
 func (o *OpenAIProvider) Close() error      { return nil }
 
 // WithModel returns a copy of OpenAIProvider configured with a different model name,

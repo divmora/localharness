@@ -1127,13 +1127,21 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 		return AskSideQuestionCmd(sideQ, m.history, m.modelName)
 
 	case "model":
-		var item ChatItem
 		if len(cmd.Args) > 0 {
-			m.modelName = cmd.Args[0]
-			item = m.history.AddSystemMessage(fmt.Sprintf("Switched model target to: %s", m.modelName))
-		} else {
-			item = m.history.AddSystemMessage(fmt.Sprintf("Current Model: %s", m.modelName))
+			targetModel := cmd.Args[0]
+			if m.client != nil {
+				_ = m.client.SendSwitchModel(targetModel, "")
+				item := m.history.AddSystemMessage(fmt.Sprintf("Switching active model to %s...", targetModel))
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+			m.modelName = targetModel
+			item := m.history.AddSystemMessage(fmt.Sprintf("Switched model target to: %s", m.modelName))
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
 		}
+		if m.client != nil {
+			_ = m.client.SendSwitchModel("", "")
+		}
+		item := m.history.AddSystemMessage(fmt.Sprintf("Current Model: %s", m.modelName))
 		return tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case "status":
@@ -1394,6 +1402,21 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) tea.Cmd {
 
 	if rc := srvMsg.GetReplayComplete(); rc != nil {
 		item := m.history.AddSystemMessage(fmt.Sprintf("🔄 Replayed %d historical events from buffer", rc.EventCount))
+		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
+	}
+
+	if modelResp := srvMsg.GetSwitchModelResponse(); modelResp != nil {
+		var msgText string
+		if modelResp.Success {
+			m.modelName = modelResp.Model
+			msgText = fmt.Sprintf("🤖 Switched model to %s (context: %s, compaction threshold: %s)",
+				modelResp.Model,
+				FormatTokenCount(int(modelResp.ContextWindow)),
+				FormatTokenCount(int(modelResp.CompactionThreshold)))
+		} else {
+			msgText = fmt.Sprintf("❌ Failed to switch model to %s: %s", modelResp.Model, modelResp.ErrorMessage)
+		}
+		item := m.history.AddSystemMessage(msgText)
 		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
 

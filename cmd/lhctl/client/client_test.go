@@ -96,6 +96,9 @@ func TestClientCommunication(t *testing.T) {
 	if err := c.SendCancel(); err != nil {
 		t.Errorf("SendCancel failed: %v", err)
 	}
+	if err := c.SendSwitchModel("claude-3-7-sonnet", ""); err != nil {
+		t.Errorf("SendSwitchModel failed: %v", err)
+	}
 
 	// Allow server to process messages
 	var count int
@@ -104,13 +107,13 @@ func TestClientCommunication(t *testing.T) {
 		mu.Lock()
 		count = len(receivedClientMsgs)
 		mu.Unlock()
-		if count >= 7 {
+		if count >= 8 {
 			break
 		}
 	}
 
-	if count < 7 {
-		t.Errorf("expected 7 client messages received, got %d", count)
+	if count < 8 {
+		t.Errorf("expected 8 client messages received, got %d", count)
 	}
 }
 

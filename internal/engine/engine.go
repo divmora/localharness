@@ -388,6 +388,11 @@ func NewEngine(cfg Config) *Engine {
 		summarizer = cfg.Provider
 	}
 
+	compactionThreshold := cfg.CompactionThreshold
+	if compactionThreshold == 0 && cfg.Provider != nil {
+		_, compactionThreshold = CalculateModelCompactionThreshold(cfg.Provider.ModelName())
+	}
+
 	eng := &Engine{
 		provider:                 cfg.Provider,
 		summarizerProvider:       summarizer,
@@ -402,7 +407,7 @@ func NewEngine(cfg Config) *Engine {
 		streamFlushInterval:      flushInterval,
 		maxConcurrentToolWorkers: maxWorkers,
 		maxTurns:                 cfg.MaxTurns,
-		compactionThreshold:      cfg.CompactionThreshold,
+		compactionThreshold:      compactionThreshold,
 		keepRecentMessages:       cfg.KeepRecentMessages,
 		tracer:                   NewTracer(cfg.BrainDir, cfg.Logger),
 		brainDir:                 cfg.BrainDir,
@@ -511,8 +516,70 @@ func (e *Engine) SetAccessMode(mode pb.AccessMode) {
 	e.mu.Unlock()
 }
 
+// Provider returns the active LLM provider.
+func (e *Engine) Provider() llm.Provider {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.provider
+}
+
+// CompactionThreshold returns the current token threshold for context compaction.
+func (e *Engine) CompactionThreshold() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.compactionThreshold
+}
+
+// SetProvider dynamically switches the active LLM provider mid-session.
+// It recalculates the summarizer provider and context window compaction threshold
+// to match the new model's capabilities unless customCompactionThreshold > 0.
+func (e *Engine) SetProvider(p llm.Provider, customCompactionThreshold int) (contextWindow int, compactionThreshold int) {
+	if p == nil {
+		return 0, 0
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.provider = p
+
+	// Re-derive summarizer provider (defaults to flash tier or same provider)
+	resolver := e.modelTierResolver
+	if resolver == nil {
+		resolver = DefaultModelTierResolver
+	}
+	tierModel := resolver(p.ModelName(), string(ModelTierFlash))
+	if tierModel != "" && tierModel != p.ModelName() {
+		if cloner, ok := p.(llm.ModelCloner); ok {
+			e.summarizerProvider = cloner.WithModel(tierModel)
+		} else {
+			e.summarizerProvider = p
+		}
+	} else {
+		e.summarizerProvider = p
+	}
+
+	win, compThresh := CalculateModelCompactionThreshold(p.ModelName())
+	if customCompactionThreshold > 0 {
+		e.compactionThreshold = customCompactionThreshold
+	} else {
+		e.compactionThreshold = compThresh
+	}
+
+	if e.logger != nil {
+		e.logger.Info("switched active LLM provider",
+			"model", p.ModelName(),
+			"context_window", win,
+			"compaction_threshold", e.compactionThreshold,
+		)
+	}
+
+	return win, e.compactionThreshold
+}
+
 // getSummarizerProvider returns the provider to use for context compaction.
 func (e *Engine) getSummarizerProvider() llm.Provider {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	if e.summarizerProvider != nil {
 		return e.summarizerProvider
 	}
@@ -841,10 +908,11 @@ drained:
 		}
 
 		// Context compaction — summarize old messages if over threshold
-		if e.compactionThreshold > 0 {
+		threshold := e.CompactionThreshold()
+		if threshold > 0 {
 			compacted, result, compErr := CompactIfNeeded(
 				ctx, e.getSummarizerProvider(), e.history, CompactionConfig{
-					Threshold:          e.compactionThreshold,
+					Threshold:          threshold,
 					KeepRecentMessages: e.keepRecentMessages,
 					LastRealTokenCount: e.lastRealTokenCount,
 					SystemPromptTokens: estimateStringTokens(e.sysPrompt),
@@ -889,9 +957,11 @@ drained:
 			SystemPrompt: e.sysPrompt,
 		}
 
+		activeProvider := e.Provider()
+
 		// Trace the request
 		stepForTrace := int(e.stepIndex.Load())
-		e.tracer.TraceRequest(stepForTrace, e.provider.ModelName(), req)
+		e.tracer.TraceRequest(stepForTrace, activeProvider.ModelName(), req)
 
 		var resp *llm.GenerateResponse
 		var err error
@@ -901,10 +971,10 @@ drained:
 		// (e.g., a proxy dies mid-stream without closing the connection).
 		callCtx, callCancel := context.WithTimeout(ctx, llmCallTimeout)
 
-		if sp, ok := e.provider.(llm.StreamingProvider); ok {
+		if sp, ok := activeProvider.(llm.StreamingProvider); ok {
 			resp, err = e.streamGenerate(callCtx, sp, req)
 		} else {
-			resp, err = e.provider.Generate(callCtx, req)
+			resp, err = activeProvider.Generate(callCtx, req)
 		}
 		callCancel()
 		latency := time.Since(start)
@@ -917,7 +987,7 @@ drained:
 			e.emitTrajectoryState(pb.TrajectoryState_TRAJ_ERROR)
 			return errors.Wrap(err, errors.ErrCodeLLMProvider,
 				"LLM call failed").
-				WithContext("model", e.provider.ModelName()).
+				WithContext("model", activeProvider.ModelName()).
 				WithContext("trajectory_id", e.trajectoryID).
 				WithContext("conversation_id", e.convID).
 				WithComponent("engine")
@@ -2668,6 +2738,11 @@ func (e *Engine) emitStructuredErrorStep(err error) {
 		// Fallback to legacy error format
 		e.emitErrorStep(err.Error())
 	}
+}
+
+// NextStepIndex returns the next sequential step index.
+func (e *Engine) NextStepIndex() int32 {
+	return e.nextStepIndex()
 }
 
 func (e *Engine) nextStepIndex() int32 {

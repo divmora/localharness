@@ -161,3 +161,81 @@ func TestExtractHandoffSummary(t *testing.T) {
 		}
 	})
 }
+
+func TestModelContextWindowAndCompaction(t *testing.T) {
+	tests := []struct {
+		model          string
+		expectedWindow int
+		expectedThresh int
+	}{
+		{"gemini-2.5-pro", 1048576, 400000},
+		{"gemini-2.5-flash", 1048576, 400000},
+		{"claude-3-7-sonnet", 200000, 150000},
+		{"claude-3-5-haiku", 200000, 150000},
+		{"o1", 200000, 150000},
+		{"o3-mini", 200000, 150000},
+		{"gpt-4o", 128000, 96000},
+		{"gpt-4o-mini", 128000, 96000},
+		{"deepseek-chat", 128000, 96000},
+		{"unknown-model", 128000, 96000},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.model, func(t *testing.T) {
+			win := ModelContextWindow(tc.model)
+			if win != tc.expectedWindow {
+				t.Errorf("ModelContextWindow(%q) = %d, expected %d", tc.model, win, tc.expectedWindow)
+			}
+			w, thresh := CalculateModelCompactionThreshold(tc.model)
+			if w != tc.expectedWindow {
+				t.Errorf("CalculateModelCompactionThreshold(%q) window = %d, expected %d", tc.model, w, tc.expectedWindow)
+			}
+			if thresh != tc.expectedThresh {
+				t.Errorf("CalculateModelCompactionThreshold(%q) thresh = %d, expected %d", tc.model, thresh, tc.expectedThresh)
+			}
+		})
+	}
+}
+
+func TestEngineSetProvider(t *testing.T) {
+	gemini := &mockProvider{modelName: "gemini-2.5-pro"}
+	eng := NewEngine(Config{
+		Provider: gemini,
+	})
+
+	if eng.Provider().ModelName() != "gemini-2.5-pro" {
+		t.Fatalf("expected initial model to be gemini-2.5-pro, got %s", eng.Provider().ModelName())
+	}
+	if eng.CompactionThreshold() != 400000 {
+		t.Fatalf("expected initial compaction threshold to be 400000, got %d", eng.CompactionThreshold())
+	}
+
+	// Switch to Claude 3.5 Sonnet
+	claude := &mockProvider{modelName: "claude-3-5-sonnet"}
+	win, thresh := eng.SetProvider(claude, 0)
+	if win != 200000 {
+		t.Errorf("expected win 200000, got %d", win)
+	}
+	if thresh != 150000 {
+		t.Errorf("expected thresh 150000, got %d", thresh)
+	}
+	if eng.Provider().ModelName() != "claude-3-5-sonnet" {
+		t.Errorf("expected active model to be claude-3-5-sonnet, got %s", eng.Provider().ModelName())
+	}
+	if eng.CompactionThreshold() != 150000 {
+		t.Errorf("expected engine compaction threshold to be 150000, got %d", eng.CompactionThreshold())
+	}
+
+	// Switch with custom threshold override
+	gpt4o := &mockProvider{modelName: "gpt-4o"}
+	win, thresh = eng.SetProvider(gpt4o, 80000)
+	if win != 128000 {
+		t.Errorf("expected win 128000, got %d", win)
+	}
+	if thresh != 80000 {
+		t.Errorf("expected custom thresh 80000, got %d", thresh)
+	}
+	if eng.CompactionThreshold() != 80000 {
+		t.Errorf("expected engine compaction threshold to be 80000, got %d", eng.CompactionThreshold())
+	}
+}

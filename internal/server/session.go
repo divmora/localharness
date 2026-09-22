@@ -63,6 +63,8 @@ type Session struct {
 	detached               bool
 	ringBuffer             *EventRingBuffer
 	approvalQueue          *ApprovalQueue
+	provider               llm.Provider
+	initCfg                *pb.HarnessConfig
 }
 
 // NewSession creates a new session for a WebSocket connection.
@@ -275,6 +277,8 @@ func (s *Session) dispatchClientMessage(ctx context.Context, msg *pb.ClientMessa
 		s.handleWorkspaceRequest(ctx, payload.WorkspaceRequest)
 	case *pb.ClientMessage_SetYoloMode:
 		s.handleSetYoloMode(payload.SetYoloMode)
+	case *pb.ClientMessage_SwitchModel:
+		s.handleSwitchModel(payload.SwitchModel)
 	default:
 		s.logger.Warn("unknown client message type")
 	}
@@ -536,6 +540,8 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		s.sendError("INIT_ERROR", fmt.Sprintf("LLM provider error: %v", err), true)
 		return
 	}
+	s.initCfg = cfg
+	s.provider = provider
 
 	// Set up tool registry
 	toolRegistry := tools.NewRegistry(wsMgr, s.logger)
@@ -1676,6 +1682,150 @@ func (s *Session) handleSetYoloMode(req *pb.SetYoloModeRequest) {
 			})
 		}
 	}
+}
+
+func (s *Session) handleSwitchModel(req *pb.SwitchModelRequest) {
+	if s.engine == nil {
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_SwitchModelResponse{
+				SwitchModelResponse: &pb.SwitchModelResponse{
+					Success:      false,
+					ErrorMessage: "session is not initialized yet",
+				},
+			},
+		})
+		return
+	}
+
+	requested := strings.TrimSpace(req.Model)
+	if requested == "" {
+		currentProvider := s.engine.Provider()
+		currentModel := ""
+		if currentProvider != nil {
+			currentModel = currentProvider.ModelName()
+		}
+		win, thresh := engine.CalculateModelCompactionThreshold(currentModel)
+		actualThresh := s.engine.CompactionThreshold()
+		if actualThresh > 0 {
+			thresh = actualThresh
+		}
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_SwitchModelResponse{
+				SwitchModelResponse: &pb.SwitchModelResponse{
+					Success:             true,
+					Model:               currentModel,
+					ContextWindow:       int32(win),
+					CompactionThreshold: int32(thresh),
+				},
+			},
+		})
+		return
+	}
+
+	// Resolve the new provider
+	newProvider, err := s.resolveProviderForSwitch(req)
+	if err != nil {
+		s.sendServerMessage(&pb.ServerMessage{
+			Payload: &pb.ServerMessage_SwitchModelResponse{
+				SwitchModelResponse: &pb.SwitchModelResponse{
+					Success:      false,
+					Model:        requested,
+					ErrorMessage: err.Error(),
+				},
+			},
+		})
+		return
+	}
+
+	win, thresh := s.engine.SetProvider(newProvider, int(req.CompactionThreshold))
+	s.provider = newProvider
+
+	// Log to transcript / conversation if available
+	if s.conv != nil {
+		_ = s.conv.LogStep(&conversation.TranscriptJSONEntry{
+			StepIndex: s.engine.NextStepIndex(),
+			Source:    "SYSTEM",
+			Type:      "MODEL_SWITCH",
+			Status:    "DONE",
+			Content:   fmt.Sprintf("Active model switched to %s (context window: %d, compaction threshold: %d)", newProvider.ModelName(), win, thresh),
+		})
+	}
+
+	s.sendServerMessage(&pb.ServerMessage{
+		Payload: &pb.ServerMessage_SwitchModelResponse{
+			SwitchModelResponse: &pb.SwitchModelResponse{
+				Success:             true,
+				Model:               newProvider.ModelName(),
+				ContextWindow:       int32(win),
+				CompactionThreshold: int32(thresh),
+			},
+		},
+	})
+}
+
+func (s *Session) resolveProviderForSwitch(req *pb.SwitchModelRequest) (llm.Provider, error) {
+	currentProvider := s.engine.Provider()
+	currentModel := ""
+	if currentProvider != nil {
+		currentModel = currentProvider.ModelName()
+	}
+
+	targetModel := engine.DefaultModelTierResolver(currentModel, req.Model)
+
+	// If a custom base URL or API key is specified, or a specific LiteLLM endpoint is requested:
+	if req.BaseUrl != "" || req.ApiKey != "" || req.LitellmEndpoint != "" {
+		baseURL := req.BaseUrl
+		apiKey := req.ApiKey
+		model := targetModel
+
+		if req.LitellmEndpoint != "" {
+			liteLLMCfg := config.LoadGlobalLiteLLMConfig(s.logger)
+			if endpoint, ok := liteLLMCfg.Endpoints[req.LitellmEndpoint]; ok {
+				if baseURL == "" {
+					baseURL = endpoint.BaseURL
+				}
+				if apiKey == "" {
+					apiKey = endpoint.APIKey
+				}
+				if model == "" {
+					model = endpoint.DefaultModel
+				}
+			} else {
+				return nil, fmt.Errorf("LiteLLM endpoint %q not found in configuration", req.LitellmEndpoint)
+			}
+		}
+
+		if baseURL == "" && currentProvider != nil {
+			if op, ok := currentProvider.(*llm.OpenAIProvider); ok {
+				baseURL = op.BaseURL()
+				if apiKey == "" {
+					apiKey = op.APIKey()
+				}
+			}
+		}
+
+		return llm.NewOpenAIProvider(llm.OpenAIConfig{
+			BaseURL:   baseURL,
+			APIKey:    apiKey,
+			ModelName: model,
+		}, s.logger)
+	}
+
+	// If current provider implements ModelCloner, clone with the new model name
+	if currentProvider != nil {
+		if cloner, ok := currentProvider.(llm.ModelCloner); ok {
+			return cloner.WithModel(targetModel), nil
+		}
+	}
+
+	// Fallback to creating a new provider using session configuration
+	if s.initCfg != nil {
+		cfgCopy := proto.Clone(s.initCfg).(*pb.HarnessConfig)
+		cfgCopy.LitellmModel = targetModel
+		return s.createProvider(cfgCopy)
+	}
+
+	return nil, fmt.Errorf("unable to clone or resolve provider for model %q", targetModel)
 }
 
 func (s *Session) handleWorkspaceRequest(ctx context.Context, req *pb.WorkspaceRequest) {

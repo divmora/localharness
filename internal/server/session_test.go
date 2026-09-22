@@ -8,6 +8,7 @@ import (
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/engine"
 	"github.com/divmora/localharness/internal/llm"
 )
 
@@ -287,4 +288,59 @@ func TestCleanup_UnblocksPendingToolResults(t *testing.T) {
 	}
 
 	<-doneCh
+}
+
+func TestHandleSwitchModel(t *testing.T) {
+	// 1. Session not initialized
+	sUninit := &Session{
+		logger: slog.Default(),
+	}
+	// Use a mock/channel to capture sent message
+	// Since sUninit.conn is nil, sendServerMessage doesn't panic
+	sUninit.handleSwitchModel(&pb.SwitchModelRequest{Model: "gpt-4o"})
+
+	// 2. Initialized session with OpenAI provider
+	p, err := llm.NewOpenAIProvider(llm.OpenAIConfig{
+		BaseURL:   "http://127.0.0.1:4000/v1",
+		APIKey:    "test-key",
+		ModelName: "gpt-4o",
+	}, nil)
+	if err != nil {
+		t.Fatalf("failed to create provider: %v", err)
+	}
+
+	eng := engine.NewEngine(engine.Config{
+		Provider: p,
+	})
+
+	s := &Session{
+		logger: slog.Default(),
+		engine: eng,
+		initCfg: &pb.HarnessConfig{
+			LitellmBaseUrl: "http://127.0.0.1:4000/v1",
+			LitellmApiKey:  "test-key",
+			LitellmModel:   "gpt-4o",
+		},
+	}
+
+	// Switch to claude-3-7-sonnet
+	s.handleSwitchModel(&pb.SwitchModelRequest{
+		Model: "claude-3-7-sonnet",
+	})
+
+	if s.engine.Provider().ModelName() != "claude-3-7-sonnet" {
+		t.Errorf("expected engine model to be claude-3-7-sonnet, got %s", s.engine.Provider().ModelName())
+	}
+	if s.engine.CompactionThreshold() != 150000 {
+		t.Errorf("expected compaction threshold 150000, got %d", s.engine.CompactionThreshold())
+	}
+
+	// Switch using tier alias "flash" (resolves to claude-3-5-haiku since parent is claude)
+	s.handleSwitchModel(&pb.SwitchModelRequest{
+		Model: "flash",
+	})
+
+	if s.engine.Provider().ModelName() != "claude-3-5-haiku" {
+		t.Errorf("expected engine model to be claude-3-5-haiku, got %s", s.engine.Provider().ModelName())
+	}
 }

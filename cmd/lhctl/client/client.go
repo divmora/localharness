@@ -354,6 +354,18 @@ func (c *Client) SendSetYoloMode(enabled bool) error {
 	})
 }
 
+// SendSwitchModel dynamically switches the active model on the server.
+func (c *Client) SendSwitchModel(model, endpoint string) error {
+	return c.send(&pb.ClientMessage{
+		Payload: &pb.ClientMessage_SwitchModel{
+			SwitchModel: &pb.SwitchModelRequest{
+				Model:           model,
+				LitellmEndpoint: endpoint,
+			},
+		},
+	})
+}
+
 // SendInterrupt requests graceful pause of the running turn.
 func (c *Client) SendInterrupt() error {
 	return c.send(&pb.ClientMessage{
