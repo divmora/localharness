@@ -77,8 +77,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 5. Performance & Scalability
 
-- [ ] **Zero-Allocation Case-Insensitive Scanning and Reflection-Free Line Parsing in `grep_search`** (#66)
-  - Replace `bytes.ToLower` line allocation in `nativeSearch` with zero-allocation ASCII fold scanning, replace `fmt.Sscanf` with `strconv.Atoi`, and parse ripgrep output lines without intermediate slice allocations.
 - [ ] **Zero-Allocation Line Counting and Slicing in Context Reduction** (#67)
   - Use `strings.Count(content, "\n")` and index-based slicing in `trimLargeResults` within `internal/engine/reduction.go` to eliminate heap slice allocations for stale file results.
 - [ ] **Zero-Allocation Tool Call Argument Token Estimation in `EstimateTokens`** (#68)

@@ -1285,6 +1285,94 @@ func TestSearchDirMissingQuery(t *testing.T) {
 	}
 }
 
+func TestGrepSearch_NativeCaseInsensitiveAndLineParsing(t *testing.T) {
+	// Test parseRipgrepLine Unix
+	match := parseRipgrepLine("/dir/file.go:42:const Hello = 123", true)
+	if match == nil {
+		t.Fatal("expected match, got nil")
+	}
+	if match.Filename != "/dir/file.go" || match.LineNumber != 42 || match.LineContent != "const Hello = 123" {
+		t.Errorf("unexpected match fields: %+v", match)
+	}
+
+	// Test parseRipgrepLine Windows drive letter
+	winMatch := parseRipgrepLine("C:\\repo\\file.go:99:func Win()", true)
+	if winMatch == nil {
+		t.Fatal("expected winMatch, got nil")
+	}
+	if winMatch.Filename != "C:\\repo\\file.go" || winMatch.LineNumber != 99 || winMatch.LineContent != "func Win()" {
+		t.Errorf("unexpected winMatch fields: %+v", winMatch)
+	}
+
+	// Test parseRipgrepLine matchPerLine=false
+	fileOnly := parseRipgrepLine("/dir/file.go", false)
+	if fileOnly == nil || fileOnly.Filename != "/dir/file.go" {
+		t.Errorf("unexpected fileOnly match: %+v", fileOnly)
+	}
+
+	// Test containsFoldASCII
+	tests := []struct {
+		haystack string
+		needle   string
+		want     bool
+	}{
+		{"hello WORLD", "world", true},
+		{"HeLLo World", "hello", true},
+		{"FooBarBaz", "bar", true},
+		{"FooBarBaz", "qux", false},
+		{"abc", "abcd", false},
+		{"", "a", false},
+		{"anything", "", true},
+	}
+	for _, tt := range tests {
+		got := containsFoldASCII([]byte(tt.haystack), []byte(tt.needle))
+		if got != tt.want {
+			t.Errorf("containsFoldASCII(%q, %q) = %v, want %v", tt.haystack, tt.needle, got, tt.want)
+		}
+	}
+}
+
+func BenchmarkNativeSearchCaseInsensitive(b *testing.B) {
+	wsDir := b.TempDir()
+	// Create 10 files with 100 lines each
+	for i := 0; i < 10; i++ {
+		var sb strings.Builder
+		for j := 0; j < 100; j++ {
+			if j == 50 {
+				sb.WriteString("some random line with TARGET_STRING in the middle\n")
+			} else {
+				sb.WriteString("lorem ipsum dolor sit amet consectetur adipiscing elit\n")
+			}
+		}
+		_ = os.WriteFile(filepath.Join(wsDir, fmt.Sprintf("file_%d.txt", i)), []byte(sb.String()), 0644)
+	}
+
+	sd := &pb.ActionGrepSearch{
+		Query:           "target_string",
+		Path:            wsDir,
+		CaseInsensitive: true,
+		MatchPerLine:    true,
+		MaxResults:      50,
+	}
+
+	ctx := context.Background()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, err := nativeSearch(ctx, sd, wsDir, 50)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkParseRipgrepLine(b *testing.B) {
+	line := "/path/to/repo/internal/tools/grep_search.go:123:func parseRipgrepLine(line string, matchPerLine bool) *pb.SearchMatch {"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = parseRipgrepLine(line, true)
+	}
+}
+
 // ─── Run Command Tests ──────────────────────────────────────────────────
 
 func TestRunCommand(t *testing.T) {

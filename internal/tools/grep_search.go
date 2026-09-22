@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -200,18 +201,25 @@ func parseRipgrepLine(line string, matchPerLine bool) *pb.SearchMatch {
 		rest = line
 	}
 
-	parts := strings.SplitN(rest, ":", 3)
-	if len(parts) < 3 {
+	c1 := strings.IndexByte(rest, ':')
+	if c1 == -1 {
+		return nil
+	}
+	c2 := strings.IndexByte(rest[c1+1:], ':')
+	if c2 == -1 {
+		return nil
+	}
+	c2 = c1 + 1 + c2
+
+	lineNum, err := strconv.Atoi(rest[c1+1 : c2])
+	if err != nil {
 		return nil
 	}
 
-	lineNum := 0
-	_, _ = fmt.Sscanf(parts[1], "%d", &lineNum)
-
 	return &pb.SearchMatch{
-		Filename:    prefix + parts[0],
+		Filename:    prefix + rest[:c1],
 		LineNumber:  int32(lineNum),
-		LineContent: truncateLineContent(parts[2]),
+		LineContent: truncateLineContent(rest[c2+1:]),
 	}
 }
 
@@ -221,6 +229,58 @@ func isWindowsDriveLetter(s string) bool {
 	}
 	c := s[0]
 	return (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')) && s[1] == ':'
+}
+
+// isASCIIBytes reports whether b contains only ASCII characters.
+func isASCIIBytes(b []byte) bool {
+	for _, c := range b {
+		if c >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// containsFoldASCII checks if haystack contains needleLower (where needleLower is lowercase ASCII)
+// case-insensitively without heap allocations.
+func containsFoldASCII(haystack, needleLower []byte) bool {
+	n := len(needleLower)
+	if n == 0 {
+		return true
+	}
+	h := len(haystack)
+	if h < n {
+		return false
+	}
+
+	firstLower := needleLower[0]
+	var firstUpper byte
+	if firstLower >= 'a' && firstLower <= 'z' {
+		firstUpper = firstLower - 32
+	} else {
+		firstUpper = firstLower
+	}
+
+	for i := 0; i <= h-n; i++ {
+		b := haystack[i]
+		if b == firstLower || b == firstUpper {
+			match := true
+			for j := 1; j < n; j++ {
+				hb := haystack[i+j]
+				if hb >= 'A' && hb <= 'Z' {
+					hb += 32
+				}
+				if hb != needleLower[j] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // nativeSearch is a pure Go fallback when ripgrep is unavailable.
@@ -243,8 +303,10 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 
 	queryBytes := []byte(sd.Query)
 	var queryBytesLower []byte
+	queryIsASCII := false
 	if sd.CaseInsensitive && !sd.IsRegex {
 		queryBytesLower = bytes.ToLower(queryBytes)
+		queryIsASCII = isASCIIBytes(queryBytes)
 	}
 
 	baseDir := searchPath
@@ -271,9 +333,11 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 			if path == searchPath {
 				return nil
 			}
-			// Skip hidden dirs and common large dirs
+			// Skip hidden dirs and common large build/dependency/cache dirs
 			name := d.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "__pycache__" {
+			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "__pycache__" ||
+				name == "dist" || name == "build" || name == "target" || name == "bin" || name == ".venv" ||
+				name == ".gemini" || name == ".divmora" || name == ".cache" || name == ".turbo" {
 				return filepath.SkipDir
 			}
 			if gitignore.Matches(relPath, true) {
@@ -330,7 +394,11 @@ func nativeSearch(ctx context.Context, sd *pb.ActionGrepSearch, searchPath strin
 			if re != nil {
 				isMatch = re.Match(lineBytes)
 			} else if sd.CaseInsensitive {
-				isMatch = bytes.Contains(bytes.ToLower(lineBytes), queryBytesLower)
+				if queryIsASCII {
+					isMatch = containsFoldASCII(lineBytes, queryBytesLower)
+				} else {
+					isMatch = bytes.Contains(bytes.ToLower(lineBytes), queryBytesLower)
+				}
 			} else {
 				isMatch = bytes.Contains(lineBytes, queryBytes)
 			}
