@@ -109,6 +109,7 @@ type Engine struct {
 	hasBrowserConfig         bool                       // Explicit browser configuration flag
 	hasDesktopConfig         bool                       // Explicit desktop configuration flag
 	pendingSyntheticMsgs     []string                   // Buffered synthetic notifications to include on next turn
+	rulesFingerprint         string                     // Fingerprint of user rules & workspaces to detect updates
 	running                  atomic.Int32               // 1 = engine is running a turn, 0 = idle
 	preCompletionHook        func()                     // Called before TRAJ_IDLE so session can save state
 
@@ -472,10 +473,16 @@ func NewEngine(cfg Config) *Engine {
 
 	if eng.toolRegistry != nil {
 		eng.toolRegistry = eng.toolRegistry.Clone()
-		eng.toolRegistry.SetStepEmitter(eng.emitStep)
-		if eng.conv != nil {
-			eng.toolRegistry.SetConversation(eng.conv)
-		}
+	} else {
+		eng.toolRegistry = tools.NewRegistry(nil, eng.logger)
+	}
+	eng.toolRegistry.SetStepEmitter(eng.emitStep)
+	if eng.conv != nil {
+		eng.toolRegistry.SetConversation(eng.conv)
+	}
+
+	if len(eng.history) > 0 {
+		eng.rulesFingerprint = eng.computeRulesFingerprint()
 	}
 
 	return eng
@@ -819,7 +826,15 @@ drained:
 		})
 		msgCtx.KnowledgeItems = kiList
 	}
-	enrichedParts := EnrichUserMessage(userMessage, msgCtx)
+	var enrichedParts []string
+	if e.shouldEnrichFull() {
+		enrichedParts = EnrichUserMessage(userMessage, msgCtx)
+		e.mu.Lock()
+		e.rulesFingerprint = e.computeRulesFingerprintLocked()
+		e.mu.Unlock()
+	} else {
+		enrichedParts = EnrichFollowUpUserMessage(userMessage, msgCtx)
+	}
 
 	// Clear ephemeral messages and settings changes after consumption — they are single-use per turn.
 	e.msgCtx.EphemeralMessages = nil
@@ -1198,8 +1213,64 @@ func (e *Engine) reinjectMetadataAfterCompaction() {
 			"metadata_parts", len(metaParts),
 			"target_message_index", i,
 		)
+		e.mu.Lock()
+		e.rulesFingerprint = e.computeRulesFingerprintLocked()
+		e.mu.Unlock()
 		return
 	}
+}
+
+// computeRulesFingerprintLocked generates a stable fingerprint of current workspaces and user rules.
+// Must be called with e.mu held (or during initialization before concurrent access).
+func (e *Engine) computeRulesFingerprintLocked() string {
+	var b strings.Builder
+	for _, ws := range e.workspaces {
+		b.WriteString(ws)
+		b.WriteString(";")
+	}
+	for _, r := range e.userRules {
+		b.WriteString(r.Filename)
+		b.WriteString(":")
+		b.WriteString(r.Content)
+		b.WriteString(";")
+	}
+	return b.String()
+}
+
+// computeRulesFingerprint generates a stable fingerprint of current workspaces and user rules.
+func (e *Engine) computeRulesFingerprint() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.computeRulesFingerprintLocked()
+}
+
+// shouldEnrichFull determines whether the next user message needs full context enrichment
+// (<user_rules>, <user_information>, <skills>, etc.) or whether follow-up enrichment is sufficient.
+func (e *Engine) shouldEnrichFull() bool {
+	if len(e.history) == 0 {
+		return true
+	}
+	currentFP := e.computeRulesFingerprint()
+	e.mu.RLock()
+	lastFP := e.rulesFingerprint
+	e.mu.RUnlock()
+	if lastFP == "" || lastFP != currentFP {
+		return true
+	}
+	// Check if any existing user message in history already has the rules or user information.
+	for _, msg := range e.history {
+		if msg.Role == "user" {
+			for _, p := range msg.Parts {
+				if strings.Contains(p, "<user_rules>") || strings.Contains(p, "<user_information>") {
+					return false
+				}
+			}
+			if strings.Contains(msg.Content, "<user_rules>") || strings.Contains(msg.Content, "<user_information>") {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // handleFinalResponse processes the LLM's final text response.

@@ -3275,3 +3275,174 @@ func TestEngineAccessModes(t *testing.T) {
 		t.Error("workspace mode should not require permission for reading inside workspace")
 	}
 }
+
+func TestEngine_MultiTurnContextOptimization(t *testing.T) {
+	wsDir := t.TempDir()
+	rulesContent := "# Project Rules\nStrict compliance required."
+	if err := os.WriteFile(filepath.Join(wsDir, "AGENTS.md"), []byte(rulesContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := NewEngine(Config{
+		Provider: &mockProvider{
+			responses: []*llm.GenerateResponse{
+				{Content: "reply 1", FinishReason: "stop"},
+				{Content: "reply 2", FinishReason: "stop"},
+			},
+		},
+		Workspaces:     []string{wsDir},
+		UserRules:      []config.UserRule{{Filename: "AGENTS.md", Content: rulesContent}},
+		ConversationID: "conv-multiturn-test",
+		TrajectoryID:   "traj-multiturn-test",
+	})
+
+	ctx := context.Background()
+
+	// Turn 0: Initial message should be fully enriched
+	if err := eng.Run(ctx, "first prompt"); err != nil {
+		t.Fatalf("turn 0 failed: %v", err)
+	}
+
+	if len(eng.history) < 2 {
+		t.Fatalf("expected at least 2 history messages after turn 0, got %d", len(eng.history))
+	}
+
+	turn0Msg := eng.history[0]
+	if turn0Msg.Role != "user" {
+		t.Fatalf("expected history[0] to be user, got %s", turn0Msg.Role)
+	}
+	turn0Text := turn0Msg.TextContent()
+	if !strings.Contains(turn0Text, "<user_rules>") || !strings.Contains(turn0Text, rulesContent) {
+		t.Error("turn 0 user message must contain full <user_rules>")
+	}
+	if !strings.Contains(turn0Text, "<user_information>") {
+		t.Error("turn 0 user message must contain <user_information>")
+	}
+	if !strings.Contains(turn0Text, "<USER_REQUEST>\nfirst prompt\n</USER_REQUEST>") {
+		t.Error("turn 0 user message must contain USER_REQUEST")
+	}
+
+	// Turn 1: Follow-up message should omit static rules and info
+	if err := eng.Run(ctx, "second prompt"); err != nil {
+		t.Fatalf("turn 1 failed: %v", err)
+	}
+
+	if len(eng.history) < 4 {
+		t.Fatalf("expected at least 4 history messages after turn 1, got %d", len(eng.history))
+	}
+
+	turn1Msg := eng.history[2]
+	if turn1Msg.Role != "user" {
+		t.Fatalf("expected history[2] to be user, got %s", turn1Msg.Role)
+	}
+	turn1Text := turn1Msg.TextContent()
+	if strings.Contains(turn1Text, "<user_rules>") || strings.Contains(turn1Text, rulesContent) {
+		t.Error("turn 1 user message should NOT duplicate <user_rules>")
+	}
+	if strings.Contains(turn1Text, "<user_information>") {
+		t.Error("turn 1 user message should NOT duplicate <user_information>")
+	}
+	if !strings.Contains(turn1Text, "<USER_REQUEST>\nsecond prompt\n</USER_REQUEST>") {
+		t.Error("turn 1 user message must contain USER_REQUEST")
+	}
+}
+
+func TestEngine_ResumedSession_FollowUpEnrichment(t *testing.T) {
+	wsDir := t.TempDir()
+	rulesContent := "# Rules\nFollow them."
+
+	initialUserParts := EnrichUserMessage("hello", MessageContextConfig{
+		ConversationID: "conv-resumed",
+		UserRules:      []config.UserRule{{Filename: "AGENTS.md", Content: rulesContent}},
+	})
+
+	initialHistory := []llm.Message{
+		{Role: "user", Parts: initialUserParts},
+		{Role: "assistant", Content: "Hello! How can I help?"},
+	}
+
+	eng := NewEngine(Config{
+		Provider: &mockProvider{
+			responses: []*llm.GenerateResponse{
+				{Content: "Resumed reply", FinishReason: "stop"},
+			},
+		},
+		Workspaces:     []string{wsDir},
+		UserRules:      []config.UserRule{{Filename: "AGENTS.md", Content: rulesContent}},
+		InitialHistory: initialHistory,
+		ConversationID: "conv-resumed",
+		TrajectoryID:   "traj-resumed",
+	})
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "next prompt after resume"); err != nil {
+		t.Fatalf("execution on resumed session failed: %v", err)
+	}
+
+	if len(eng.history) != 4 {
+		t.Fatalf("expected 4 history messages, got %d", len(eng.history))
+	}
+
+	newMsg := eng.history[2]
+	newText := newMsg.TextContent()
+	if strings.Contains(newText, "<user_rules>") || strings.Contains(newText, rulesContent) {
+		t.Error("resumed session follow-up message should NOT duplicate <user_rules>")
+	}
+	if strings.Contains(newText, "<user_information>") {
+		t.Error("resumed session follow-up message should NOT duplicate <user_information>")
+	}
+	if !strings.Contains(newText, "<USER_REQUEST>\nnext prompt after resume\n</USER_REQUEST>") {
+		t.Error("resumed session follow-up message must contain USER_REQUEST")
+	}
+}
+
+func TestEngine_DynamicAddWorkspace_TriggersFullEnrichment(t *testing.T) {
+	wsDir1 := t.TempDir()
+	wsDir2 := t.TempDir()
+
+	rule1 := "# Rule 1"
+	rule2 := "# Rule 2"
+	if err := os.WriteFile(filepath.Join(wsDir1, "AGENTS.md"), []byte(rule1), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir2, "AGENTS.md"), []byte(rule2), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := NewEngine(Config{
+		Provider: &mockProvider{
+			responses: []*llm.GenerateResponse{
+				{Content: "reply 1", FinishReason: "stop"},
+				{Content: "reply 2", FinishReason: "stop"},
+			},
+		},
+		Workspaces:     []string{wsDir1},
+		UserRules:      []config.UserRule{{Filename: "AGENTS.md", Content: rule1, WorkspaceDir: wsDir1}},
+		ConversationID: "conv-dyn-ws",
+		TrajectoryID:   "traj-dyn-ws",
+	})
+
+	ctx := context.Background()
+
+	// Turn 0
+	if err := eng.Run(ctx, "prompt 1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add second workspace
+	eng.AddWorkspace(wsDir2, WorkspaceInfo{Directory: wsDir2})
+
+	// Turn 1 should now detect rule/workspace change and trigger full enrichment
+	if err := eng.Run(ctx, "prompt 2 after new workspace"); err != nil {
+		t.Fatal(err)
+	}
+
+	turn1Msg := eng.history[2]
+	turn1Text := turn1Msg.TextContent()
+	if !strings.Contains(turn1Text, "<user_rules>") {
+		t.Error("turn after AddWorkspace must re-inject <user_rules> with updated workspace context")
+	}
+	if !strings.Contains(turn1Text, rule2) {
+		t.Error("turn after AddWorkspace must contain newly loaded rule from ws2")
+	}
+}

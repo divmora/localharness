@@ -289,6 +289,32 @@ func EnrichUserMessage(prompt string, cfg MessageContextConfig) []string {
 		parts = append(parts, b.String())
 	}
 
+	// Append dynamic per-turn context sections (parts 9-13)
+	return appendDynamicParts(parts, prompt, cfg)
+}
+
+// EnrichFollowUpUserMessage enriches subsequent user turns in an active session.
+// It omits the static system & workspace context (<user_rules>, <skills>, <plugins>,
+// <slash_commands>, <subagents>, <knowledge_items>, <artifacts>, <user_information>)
+// that was already injected on Turn 0 (and re-injected after compaction), appending
+// only the dynamic per-turn sections:
+//  1. <ADDITIONAL_METADATA> — if host context provided
+//  2. <USER_SETTINGS_CHANGE> — per settings change
+//  3. <EPHEMERAL_MESSAGE> — per ephemeral message
+//  4. <SYSTEM_MESSAGE> — per pending notification
+//  5. <USER_REQUEST> — always last
+func EnrichFollowUpUserMessage(prompt string, cfg MessageContextConfig) []string {
+	return appendDynamicParts(nil, prompt, cfg)
+}
+
+// appendDynamicParts appends dynamic per-turn context sections:
+//  9. <ADDITIONAL_METADATA> — if host context provided
+//
+// 10. <USER_SETTINGS_CHANGE> — per settings change
+// 11. <EPHEMERAL_MESSAGE> — per ephemeral message
+// 12. <SYSTEM_MESSAGE> — per pending notification
+// 13. <USER_REQUEST> — always last
+func appendDynamicParts(parts []string, prompt string, cfg MessageContextConfig) []string {
 	// Part 9: <ADDITIONAL_METADATA> — only if host context is provided
 	if cfg.HostContext != nil {
 		var b strings.Builder

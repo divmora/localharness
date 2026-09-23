@@ -728,3 +728,71 @@ func TestEnrichUserMessage_SettingsChanges_Ordering(t *testing.T) {
 		t.Error("USER_SETTINGS_CHANGE should come before EPHEMERAL_MESSAGE")
 	}
 }
+
+func TestEnrichFollowUpUserMessage_Minimal(t *testing.T) {
+	cfg := MessageContextConfig{
+		ConversationID: "conv-123",
+		AppDataDir:     "/tmp/app",
+		UserRules: []config.UserRule{
+			{Filename: "AGENTS.md", Content: "Do not delete files"},
+		},
+		Skills: []SkillDef{
+			{Name: "my-skill", Description: "a skill"},
+		},
+		Plugins: []PluginDef{
+			{Name: "my-plugin"},
+		},
+	}
+
+	parts := EnrichFollowUpUserMessage("next prompt", cfg)
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part for minimal follow-up message, got %d", len(parts))
+	}
+
+	expected := "<USER_REQUEST>\nnext prompt\n</USER_REQUEST>"
+	if parts[0] != expected {
+		t.Errorf("expected %q, got %q", expected, parts[0])
+	}
+
+	// Verify static context blocks are omitted
+	result := parts[0]
+	for _, forbidden := range []string{"<user_information>", "<user_rules>", "<skills>", "<plugins>", "AGENTS.md", "Do not delete files"} {
+		if strings.Contains(result, forbidden) {
+			t.Errorf("follow-up message should NOT contain %q", forbidden)
+		}
+	}
+}
+
+func TestEnrichFollowUpUserMessage_DynamicContext(t *testing.T) {
+	cfg := MessageContextConfig{
+		ConversationID: "conv-123",
+		UserRules: []config.UserRule{
+			{Filename: "AGENTS.md", Content: "rule"},
+		},
+		HostContext: &pb.UserContext{
+			CursorLine: 42,
+		},
+		SettingsChanges: []SettingsChange{
+			{Setting: "Model", OldValue: "gpt-4", NewValue: "claude-3"},
+		},
+		EphemeralMessages: []string{"Be concise"},
+		PendingMessages:   []string{"Task done"},
+	}
+
+	parts := EnrichFollowUpUserMessage("run tests", cfg)
+	result := strings.Join(parts, "\n")
+
+	// Dynamic sections should be present
+	for _, expected := range []string{"<ADDITIONAL_METADATA>", "Cursor is on line: 42", "<USER_SETTINGS_CHANGE>", "claude-3", "<EPHEMERAL_MESSAGE>", "Be concise", "<SYSTEM_MESSAGE>", "Task done", "<USER_REQUEST>", "run tests"} {
+		if !strings.Contains(result, expected) {
+			t.Errorf("follow-up message should contain %q", expected)
+		}
+	}
+
+	// Static sections must NOT be present
+	for _, forbidden := range []string{"<user_information>", "<user_rules>", "conv-123"} {
+		if strings.Contains(result, forbidden) {
+			t.Errorf("follow-up message should NOT contain %q", forbidden)
+		}
+	}
+}

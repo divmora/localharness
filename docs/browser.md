@@ -1,10 +1,10 @@
 # Browser Automation (Playwright)
 
 LocalHarness provides zero-config, built-in browser automation via [Playwright](https://playwright.dev/).
-Whenever Node.js/`npx` is installed in PATH, browser capability (`browser_subagent` and `@playwright/mcp`) is **automatically enabled by default**. Furthermore, LocalHarness **autonomously decides headed vs. headless mode**:
+Whenever Node.js/`npx` is installed in PATH, browser capability (`browser_subagent` and `@playwright/mcp`) is **automatically enabled for web application projects** (detected via `package.json`, `index.html`, etc.) or when explicitly enabled with `--browser`. Furthermore, LocalHarness **autonomously decides headed vs. headless mode**:
 - **Interactive Desktop Sessions** (macOS, Windows, or Linux with `$DISPLAY`/`$WAYLAND_DISPLAY`): The browser launches in **headed** mode with a visible browser window, allowing you to observe agent actions and solve logins/CAPTCHAs.
 - **Detached Daemons / Headless Environments** (`--detach`, CI, headless servers): LocalHarness runs the browser in **headless** mode invisibly.
-- **Explicit Overrides**: Pass `--headless` or `--headed` to force a specific mode, or `--no-browser` to disable browser tools entirely.
+- **Explicit Overrides**: Pass `--browser` to enable on any project, `--headless` or `--headed` to force a specific mode, or `--no-browser` to disable browser tools entirely.
 
 ## Prerequisites
 

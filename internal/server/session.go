@@ -592,10 +592,12 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		globalMcpServers := config.LoadGlobalMcpConfig(s.logger)
 		mergedMcpServers := config.MergeMcpConfigs(globalMcpServers, cfg.McpServers)
 
-		// Auto-inject Playwright MCP server when browser capability is enabled (default: true if npx available)
-		browserEnabled := true
+		// Auto-inject Playwright MCP server when browser capability is enabled
+		browserEnabled := false
 		if cfg.BuiltinTools != nil {
 			browserEnabled = cfg.BuiltinTools.Browser
+		} else {
+			browserEnabled = workspace.HasWebIndicators(workspaceDirs)
 		}
 		if browserEnabled {
 			if _, err := exec.LookPath("npx"); err != nil {

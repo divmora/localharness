@@ -59,7 +59,7 @@ lhctl attach <session-id>
 | `--allow-host` | | Permit full host-wide access (equivalent to `--access-mode=unrestricted`) | `false` |
 | `--voice` | | Enable automatic text-to-speech spoken responses (`autoSpeak: true`) | `false` |
 | `--yolo` | `-y` | Enable YOLO Mode (skip all permission prompts) | `false` |
-| `--browser` | | Explicitly enable browser automation tools (auto-enabled if `npx` installed) | `auto (true if npx found)` |
+| `--browser` | | Explicitly enable browser automation tools (auto-enabled for web projects when `npx` installed) | `auto (true for web projects with npx)` |
 | `--no-browser` | | Explicitly disable browser automation tools | `false` |
 | `--browser-profile` | | Path to custom browser user data directory (defaults to persistent `~/.divmora/localharness/browser_profile`) | `~/.divmora/localharness/browser_profile` |
 | `--isolated` | | Run browser in ephemeral in-memory profile without saving cookies/state across runs | `false` |

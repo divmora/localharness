@@ -330,7 +330,7 @@ func addRunFlags(cmd *cobra.Command, model *string, endpoint *string, skipHealth
 	cmd.Flags().Lookup("resume").NoOptDefVal = "latest"
 	cmd.Flags().StringVar(conv, "continue", "", "Alias for --conversation")
 	cmd.Flags().Lookup("continue").NoOptDefVal = "latest"
-	cmd.Flags().BoolVar(browser, "browser", false, "Explicitly enable browser automation tools (auto-enabled by default if npx is installed)")
+	cmd.Flags().BoolVar(browser, "browser", false, "Explicitly enable browser automation tools (auto-enabled for web projects when npx is available)")
 	cmd.Flags().BoolVar(noBrowser, "no-browser", false, "Explicitly disable browser automation tools")
 	cmd.Flags().BoolVar(desktop, "desktop", false, "Enable native cross-platform desktop computer use tools")
 	cmd.Flags().BoolVar(headed, "headed", false, "Force browser in headed mode (display browser window)")

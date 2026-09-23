@@ -17,6 +17,7 @@ import (
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/llm"
+	"github.com/divmora/localharness/internal/workspace"
 )
 
 type runFlags struct {
@@ -316,12 +317,20 @@ func runInteractiveWithOptions(flags runFlags) error {
 		maxAutoWake = 5
 	}
 
-	// Auto-enable browser capability if npx is available and not explicitly disabled
+	// Auto-decide browser capability:
+	// - If user passed --browser: explicitly enabled
+	// - If user passed --no-browser: explicitly disabled
+	// - Default: auto-detect web project indicators (package.json, html, etc.) if npx is available
 	hasNpx := false
 	if _, err := exec.LookPath("npx"); err == nil {
 		hasNpx = true
 	}
-	browserEnabled := !flags.noBrowser && (flags.browser || hasNpx)
+	browserEnabled := false
+	if flags.browser {
+		browserEnabled = true
+	} else if !flags.noBrowser && hasNpx {
+		browserEnabled = workspace.HasWebIndicators(flags.workspaces)
+	}
 
 	// Auto-decide headed vs headless:
 	// - If user passed --headed: headed
@@ -422,7 +431,7 @@ func runInteractiveWithOptions(flags runFlags) error {
 			Desktop:         flags.desktop,
 		},
 		PromptModules: &pb.PromptModules{
-			EnableWebDevelopment: true,
+			EnableWebDevelopment: browserEnabled,
 			EnablePlanning:       true,
 			EnableSlashCommands:  true,
 			EnableKnowledgeItems: true,
