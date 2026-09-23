@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 
@@ -202,6 +203,9 @@ func (m *Manager) ToolDeclarations() []llm.FunctionDeclaration {
 	for _, entry := range m.tools {
 		decls = append(decls, entry.declaration)
 	}
+	sort.Slice(decls, func(i, j int) bool {
+		return decls[i].Name < decls[j].Name
+	})
 	return decls
 }
 

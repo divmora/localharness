@@ -271,3 +271,32 @@ func createConvPB(t *testing.T, convDir, id, updatedAt string) {
 		t.Fatalf("write error: %v", err)
 	}
 }
+
+func TestAnalyzeConversation_MultiPartUserContent(t *testing.T) {
+	state := &pb.ConversationState{
+		ConversationId: "conv-multipart",
+		Status:         pb.ConversationState_STATUS_ACTIVE,
+		Messages: []*pb.ConversationMessage{
+			{
+				Role: "user",
+				Parts: []string{
+					"<user_information>OS: darwin</user_information>",
+					"<user_rules>rule 1</user_rules>",
+					"<USER_REQUEST>\nexplain the architecture\n</USER_REQUEST>",
+				},
+			},
+			{
+				Role:    "model",
+				Content: "Here is the architecture...",
+			},
+		},
+	}
+
+	result := analyzeConversation(state)
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(result.Messages))
+	}
+	if result.Messages[0].Content != "explain the architecture" {
+		t.Errorf("expected user message content 'explain the architecture', got %q", result.Messages[0].Content)
+	}
+}

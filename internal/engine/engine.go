@@ -964,6 +964,7 @@ drained:
 		e.tracer.TraceRequest(stepForTrace, activeProvider.ModelName(), req)
 
 		var resp *llm.GenerateResponse
+		var streamStepIdx int32 = -1
 		var err error
 		start := time.Now()
 
@@ -972,7 +973,7 @@ drained:
 		callCtx, callCancel := context.WithTimeout(ctx, llmCallTimeout)
 
 		if sp, ok := activeProvider.(llm.StreamingProvider); ok {
-			resp, err = e.streamGenerate(callCtx, sp, req)
+			resp, streamStepIdx, err = e.streamGenerate(callCtx, sp, req)
 		} else {
 			resp, err = activeProvider.Generate(callCtx, req)
 		}
@@ -1078,7 +1079,7 @@ drained:
 
 		// If model returned text with no tool calls → final response
 		if resp.FinishReason == "stop" || len(resp.ToolCalls) == 0 {
-			return e.handleFinalResponse(resp)
+			return e.handleFinalResponse(resp, streamStepIdx)
 		}
 
 		// Model wants to call tools
@@ -1202,8 +1203,10 @@ func (e *Engine) reinjectMetadataAfterCompaction() {
 }
 
 // handleFinalResponse processes the LLM's final text response.
-func (e *Engine) handleFinalResponse(resp *llm.GenerateResponse) error {
-	stepIdx := e.nextStepIndex()
+func (e *Engine) handleFinalResponse(resp *llm.GenerateResponse, stepIdx int32) error {
+	if stepIdx < 0 {
+		stepIdx = e.nextStepIndex()
+	}
 
 	// Emit thinking if present
 	step := &pb.StepUpdate{
@@ -2751,12 +2754,19 @@ func (e *Engine) nextStepIndex() int32 {
 
 // streamGenerate reads from a streaming LLM provider, debouncing and coalescing
 // text and thinking deltas into batched STATE_STREAMING StepUpdates over a flush window,
-// and returns the assembled GenerateResponse.
-func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, req *llm.GenerateRequest) (*llm.GenerateResponse, error) {
+// and returns the assembled GenerateResponse along with the allocated stream step index (-1 if none).
+func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, req *llm.GenerateRequest) (*llm.GenerateResponse, int32, error) {
 	chunksCh, errCh := sp.GenerateStream(ctx, req)
 
-	// Pre-allocate a step index for streaming deltas
-	streamStepIdx := e.nextStepIndex()
+	// Lazily allocate a step index on the first delta so non-text responses (or errors)
+	// don't burn an unused step index and leave phantom gaps in trajectories.
+	var streamStepIdx int32 = -1
+	getStreamStepIdx := func() int32 {
+		if streamStepIdx == -1 {
+			streamStepIdx = e.nextStepIndex()
+		}
+		return streamStepIdx
+	}
 
 	var contentBuf, thinkingBuf strings.Builder
 	var pendingText, pendingThinking strings.Builder
@@ -2774,7 +2784,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 		e.emitStep(&pb.StepUpdate{
 			ConversationId: e.convID,
 			TrajectoryId:   e.trajectoryID,
-			StepIndex:      streamStepIdx,
+			StepIndex:      getStreamStepIdx(),
 			ThinkingDelta:  delta,
 			Source:         pb.StepUpdate_SOURCE_MODEL,
 			State:          pb.StepUpdate_STATE_STREAMING,
@@ -2791,7 +2801,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 		e.emitStep(&pb.StepUpdate{
 			ConversationId: e.convID,
 			TrajectoryId:   e.trajectoryID,
-			StepIndex:      streamStepIdx,
+			StepIndex:      getStreamStepIdx(),
 			TextDelta:      delta,
 			Source:         pb.StepUpdate_SOURCE_MODEL,
 			State:          pb.StepUpdate_STATE_STREAMING,
@@ -2813,7 +2823,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 				e.emitStep(&pb.StepUpdate{
 					ConversationId: e.convID,
 					TrajectoryId:   e.trajectoryID,
-					StepIndex:      streamStepIdx,
+					StepIndex:      getStreamStepIdx(),
 					ThinkingDelta:  chunk.ThinkingDelta,
 					Source:         pb.StepUpdate_SOURCE_MODEL,
 					State:          pb.StepUpdate_STATE_STREAMING,
@@ -2825,7 +2835,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 				e.emitStep(&pb.StepUpdate{
 					ConversationId: e.convID,
 					TrajectoryId:   e.trajectoryID,
-					StepIndex:      streamStepIdx,
+					StepIndex:      getStreamStepIdx(),
 					ThinkingDelta:  chunk.ThinkingDelta,
 					Source:         pb.StepUpdate_SOURCE_MODEL,
 					State:          pb.StepUpdate_STATE_STREAMING,
@@ -2849,7 +2859,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 				e.emitStep(&pb.StepUpdate{
 					ConversationId: e.convID,
 					TrajectoryId:   e.trajectoryID,
-					StepIndex:      streamStepIdx,
+					StepIndex:      getStreamStepIdx(),
 					TextDelta:      chunk.TextDelta,
 					Source:         pb.StepUpdate_SOURCE_MODEL,
 					State:          pb.StepUpdate_STATE_STREAMING,
@@ -2861,7 +2871,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 				e.emitStep(&pb.StepUpdate{
 					ConversationId: e.convID,
 					TrajectoryId:   e.trajectoryID,
-					StepIndex:      streamStepIdx,
+					StepIndex:      getStreamStepIdx(),
 					TextDelta:      chunk.TextDelta,
 					Source:         pb.StepUpdate_SOURCE_MODEL,
 					State:          pb.StepUpdate_STATE_STREAMING,
@@ -2901,7 +2911,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 		for streamOpen {
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, -1, ctx.Err()
 			case <-ticker.C:
 				flushAll()
 			case err, ok := <-errCh:
@@ -2910,7 +2920,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 					continue
 				}
 				if err != nil {
-					return nil, err
+					return nil, -1, err
 				}
 			case chunk, ok := <-chunksCh:
 				if !ok {
@@ -2929,7 +2939,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 		select {
 		case err := <-errCh:
 			if err != nil {
-				return nil, err
+				return nil, -1, err
 			}
 		default:
 		}
@@ -2949,7 +2959,7 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 		ToolCalls:    allToolCalls,
 		Usage:        finalUsage,
 		FinishReason: finishReason,
-	}, nil
+	}, streamStepIdx, nil
 }
 
 // buildToolDeclarations converts registered tools to LLM function declarations.
@@ -2999,6 +3009,12 @@ func (e *Engine) buildToolDeclarations() []llm.FunctionDeclaration {
 	if e.hasDesktopConfig {
 		decls = append(decls, desktopToolDeclarations()...)
 	}
+
+	// Sort all declarations alphabetically by name for deterministic serialization
+	// and maximum prompt prefix cache hits across LLM providers.
+	sort.Slice(decls, func(i, j int) bool {
+		return decls[i].Name < decls[j].Name
+	})
 
 	return decls
 }

@@ -82,6 +82,41 @@ func TestRegisterAndHasTool(t *testing.T) {
 	}
 }
 
+func TestRegistrySchemas_SortedAlphabetically(t *testing.T) {
+	logger := slog.Default()
+	reg := NewRegistry(nil, logger)
+
+	dummyFn := func(ctx context.Context, step *pb.StepUpdate, r *Registry) error { return nil }
+
+	// Register in intentionally unordered sequence
+	names := []string{"zebra", "apple", "banana", "monkey", "cat"}
+	for _, n := range names {
+		reg.Register(n, dummyFn, ToolSchema{
+			Name:        n,
+			Description: "desc for " + n,
+			Parameters:  map[string]interface{}{"type": "object"},
+		})
+	}
+
+	schemas := reg.Schemas()
+	if len(schemas) != 5 {
+		t.Fatalf("expected 5 schemas, got %d", len(schemas))
+	}
+	expectedOrder := []string{"apple", "banana", "cat", "monkey", "zebra"}
+	for i, s := range schemas {
+		if s.Name != expectedOrder[i] {
+			t.Errorf("schema[%d] = %q, want %q", i, s.Name, expectedOrder[i])
+		}
+	}
+
+	jsonSchemas := reg.SchemasAsJSON()
+	for i, js := range jsonSchemas {
+		if js["name"] != expectedOrder[i] {
+			t.Errorf("jsonSchema[%d] = %q, want %q", i, js["name"], expectedOrder[i])
+		}
+	}
+}
+
 func TestExecuteUnknownTool(t *testing.T) {
 	logger := slog.Default()
 	reg := NewRegistry(nil, logger)

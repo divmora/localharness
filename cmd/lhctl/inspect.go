@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/divmora/localharness/cmd/lhctl/tui"
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
 
@@ -193,13 +194,20 @@ func analyzeConversation(state *pb.ConversationState) inspectResult {
 		size := messageSize(msg)
 		cumul += size
 
+		content := msg.Content
+		if content == "" && len(msg.Parts) > 0 {
+			content = tui.ExtractUserPrompt(msg)
+		} else if msg.Role == "user" && strings.Contains(content, "<USER_REQUEST>") {
+			content = tui.ExtractUserPrompt(msg)
+		}
+
 		info := messageInfo{
 			Index:     i,
 			Role:      classifyRole(msg),
 			Size:      size,
 			Cumul:     cumul,
 			Timestamp: msg.Timestamp,
-			Content:   msg.Content,
+			Content:   content,
 		}
 
 		// Extract tool info

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -331,6 +332,7 @@ func (r *Registry) dispatchArtifactFeedback(path, filename string, am *pb.Artifa
 
 // Schemas returns registered tool schemas for LLM function calling.
 // Internal tools (harness-only) are excluded — they are not declared to the LLM.
+// Schemas are returned in deterministic alphabetical order to ensure prompt cache stability.
 func (r *Registry) Schemas() []ToolSchema {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -341,11 +343,15 @@ func (r *Registry) Schemas() []ToolSchema {
 		}
 		result = append(result, s)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
 	return result
 }
 
 // SchemasAsJSON converts tool schemas to the format expected by Gemini function calling.
 // Internal tools are excluded.
+// Schemas are returned in deterministic alphabetical order to ensure prompt cache stability.
 func (r *Registry) SchemasAsJSON() []map[string]interface{} {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -361,6 +367,9 @@ func (r *Registry) SchemasAsJSON() []map[string]interface{} {
 		}
 		result = append(result, tool)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i]["name"].(string) < result[j]["name"].(string)
+	})
 	return result
 }
 

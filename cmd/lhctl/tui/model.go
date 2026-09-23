@@ -1304,8 +1304,12 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) tea.Cmd {
 	var printCmds []tea.Cmd
 
 	if srvMsg.GetInitResponse() != nil {
-		item := m.history.AddSystemMessage(fmt.Sprintf("Connected to LocalHarness session %s (v%s)",
-			srvMsg.GetInitResponse().ConversationId, srvMsg.GetInitResponse().HarnessVersion))
+		ver := strings.TrimSpace(srvMsg.GetInitResponse().HarnessVersion)
+		if ver != "" && !strings.HasPrefix(ver, "v") {
+			ver = "v" + ver
+		}
+		item := m.history.AddSystemMessage(fmt.Sprintf("Connected to LocalHarness session %s (%s)",
+			srvMsg.GetInitResponse().ConversationId, ver))
 		printCmds = append(printCmds, tea.Println(m.history.RenderItem(item, m.getWidth())))
 	}
 

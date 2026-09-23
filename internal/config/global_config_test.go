@@ -389,3 +389,16 @@ func TestGlobalLiteLLMConfig_SaveAndLoad(t *testing.T) {
 		t.Errorf("unexpected fallback endpoints: %v", def.FallbackEndpoints)
 	}
 }
+
+func TestLoadGlobalConfig_NilLoggerDiscard(t *testing.T) {
+	// Should not panic or emit to stderr when logger is nil
+	settings := LoadGlobalSettings(nil)
+	if settings == nil {
+		t.Fatal("expected non-nil settings")
+	}
+
+	liteCfg := LoadGlobalLiteLLMConfig(nil)
+	if liteCfg == nil {
+		t.Fatal("expected non-nil litellm config")
+	}
+}

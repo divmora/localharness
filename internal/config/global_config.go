@@ -5,6 +5,7 @@ package config
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -47,6 +48,9 @@ func DivmoraConfigDir() (string, error) {
 // LoadGlobalSettings reads ~/.divmora/config/settings.json.
 // Returns default settings if the file doesn't exist.
 func LoadGlobalSettings(logger *slog.Logger) *GlobalSettings {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	configDir, err := DivmoraConfigDir()
 	if err != nil {
 		logger.Warn("cannot resolve divmora config dir", "error", err)
@@ -58,6 +62,9 @@ func LoadGlobalSettings(logger *slog.Logger) *GlobalSettings {
 // LoadGlobalSettingsFrom reads settings from a specific path.
 // Returns default settings if the file doesn't exist.
 func LoadGlobalSettingsFrom(path string, logger *slog.Logger) *GlobalSettings {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -74,7 +81,7 @@ func LoadGlobalSettingsFrom(path string, logger *slog.Logger) *GlobalSettings {
 		return &GlobalSettings{}
 	}
 
-	logger.Info("loaded global settings",
+	logger.Debug("loaded global settings",
 		"path", path,
 		"telemetry", settings.EnableTelemetry,
 		"trusted_workspaces", len(settings.TrustedWorkspaces),
@@ -390,7 +397,7 @@ type GlobalLiteLLMConfig struct {
 // Returns an empty config if the file doesn't exist.
 func LoadGlobalLiteLLMConfig(logger *slog.Logger) *GlobalLiteLLMConfig {
 	if logger == nil {
-		logger = slog.Default()
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	configDir, err := DivmoraConfigDir()
 	if err != nil {
@@ -403,7 +410,7 @@ func LoadGlobalLiteLLMConfig(logger *slog.Logger) *GlobalLiteLLMConfig {
 // LoadGlobalLiteLLMConfigFrom reads LiteLLM config from a specific path.
 func LoadGlobalLiteLLMConfigFrom(path string, logger *slog.Logger) *GlobalLiteLLMConfig {
 	if logger == nil {
-		logger = slog.Default()
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -434,7 +441,7 @@ func LoadGlobalLiteLLMConfigFrom(path string, logger *slog.Logger) *GlobalLiteLL
 		}
 	}
 
-	logger.Info("loaded global litellm config",
+	logger.Debug("loaded global litellm config",
 		"path", path,
 		"endpoints", len(cfg.Endpoints),
 		"default", cfg.DefaultEndpoint,
@@ -464,7 +471,7 @@ func SaveGlobalLiteLLMConfigTo(path string, cfg *GlobalLiteLLMConfig, logger *sl
 		return errors.Wrap(err, errors.ErrCodeConfiguration, "cannot write litellm config file")
 	}
 	if logger != nil {
-		logger.Info("saved global litellm config",
+		logger.Debug("saved global litellm config",
 			"path", path,
 			"endpoints", len(cfg.Endpoints),
 			"default", cfg.DefaultEndpoint,

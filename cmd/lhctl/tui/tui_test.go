@@ -876,3 +876,89 @@ func TestModel_SlashCommandModel(t *testing.T) {
 		t.Errorf("expected modelName to update to gpt-4o from server message, got %s", m.modelName)
 	}
 }
+
+func TestExtractUserPrompt_WithXMLAndUserRequest(t *testing.T) {
+	msg := &pb.ConversationMessage{
+		Role: "user",
+		Parts: []string{
+			"<user_information>\nOS: darwin\n</user_information>",
+			"<user_rules>\n# AGENTS.md rules\n</user_rules>",
+			"<skills>\nAvailable skills...\n</skills>",
+			"<artifacts>\nArtifacts dir...\n</artifacts>",
+			"<subagents>\nAvailable subagents...\n</subagents>",
+			"<USER_REQUEST>\nfix the authentication token bug\n</USER_REQUEST>",
+		},
+	}
+
+	got := ExtractUserPrompt(msg)
+	want := "fix the authentication token bug"
+	if got != want {
+		t.Errorf("ExtractUserPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestExtractUserPrompt_SingleContentWithTags(t *testing.T) {
+	msg := &pb.ConversationMessage{
+		Role:    "user",
+		Content: "<user_information>...</user_information>\n<USER_REQUEST>\nhello world\n</USER_REQUEST>",
+	}
+
+	got := ExtractUserPrompt(msg)
+	want := "hello world"
+	if got != want {
+		t.Errorf("ExtractUserPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestExtractUserPrompt_PlainText(t *testing.T) {
+	msg := &pb.ConversationMessage{
+		Role:    "user",
+		Content: "just a normal prompt",
+	}
+
+	got := ExtractUserPrompt(msg)
+	want := "just a normal prompt"
+	if got != want {
+		t.Errorf("ExtractUserPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestModel_InitBannerVersionFormatting(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+
+	// Test 1: Version already starts with 'v'
+	srvMsg1 := &pb.ServerMessage{
+		Payload: &pb.ServerMessage_InitResponse{
+			InitResponse: &pb.InitResponse{
+				ConversationId: "conv-1",
+				HarnessVersion: "v0.3.0-53-g6fe8437-dirty",
+			},
+		},
+	}
+	m.handleServerEvent(srvMsg1)
+	lastItem1 := m.history.items[len(m.history.items)-1].Content
+	if strings.Contains(lastItem1, "vv0.3.0") {
+		t.Errorf("expected clean version without double 'vv', got: %s", lastItem1)
+	}
+	if !strings.Contains(lastItem1, "(v0.3.0-53-g6fe8437-dirty)") {
+		t.Errorf("expected (v0.3.0-53-g6fe8437-dirty), got: %s", lastItem1)
+	}
+
+	// Test 2: Version without 'v' prefix
+	srvMsg2 := &pb.ServerMessage{
+		Payload: &pb.ServerMessage_InitResponse{
+			InitResponse: &pb.InitResponse{
+				ConversationId: "conv-2",
+				HarnessVersion: "0.3.1",
+			},
+		},
+	}
+	m.handleServerEvent(srvMsg2)
+	lastItem2 := m.history.items[len(m.history.items)-1].Content
+	if strings.Contains(lastItem2, "vv0.3.1") {
+		t.Errorf("expected clean version without double 'vv', got: %s", lastItem2)
+	}
+	if !strings.Contains(lastItem2, "(v0.3.1)") {
+		t.Errorf("expected (v0.3.1), got: %s", lastItem2)
+	}
+}

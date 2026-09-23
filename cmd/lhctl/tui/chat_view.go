@@ -210,10 +210,7 @@ func (h *ChatHistory) LoadFromState(state *pb.ConversationState) {
 	for _, msg := range state.Messages {
 		switch msg.Role {
 		case "user":
-			content := msg.Content
-			if content == "" && len(msg.Parts) > 0 {
-				content = strings.Join(msg.Parts, "\n")
-			}
+			content := ExtractUserPrompt(msg)
 			h.items = append(h.items, ChatItem{
 				Type:      ChatItemUser,
 				Content:   content,
@@ -817,4 +814,74 @@ func extractLastCodeBlock(content string) string {
 		}
 	}
 	return ""
+}
+
+// ExtractUserPrompt extracts the clean human-readable prompt from a ConversationMessage,
+// removing internal system XML blocks (<user_information>, <user_rules>, <skills>, etc.)
+// and extracting the actual text from <USER_REQUEST>...</USER_REQUEST>.
+func ExtractUserPrompt(msg *pb.ConversationMessage) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Content != "" {
+		if prompt := parseUserRequestTag(msg.Content); prompt != "" {
+			return prompt
+		}
+		return msg.Content
+	}
+	for i := len(msg.Parts) - 1; i >= 0; i-- {
+		if prompt := parseUserRequestTag(msg.Parts[i]); prompt != "" {
+			return prompt
+		}
+	}
+	var nonBoilerplate []string
+	for _, p := range msg.Parts {
+		trimmed := strings.TrimSpace(p)
+		if isSystemBoilerplatePart(trimmed) {
+			continue
+		}
+		nonBoilerplate = append(nonBoilerplate, p)
+	}
+	if len(nonBoilerplate) > 0 {
+		return strings.Join(nonBoilerplate, "\n")
+	}
+	if len(msg.Parts) > 0 {
+		return strings.Join(msg.Parts, "\n")
+	}
+	return ""
+}
+
+func parseUserRequestTag(s string) string {
+	const openTag = "<USER_REQUEST>"
+	const closeTag = "</USER_REQUEST>"
+	start := strings.Index(s, openTag)
+	if start == -1 {
+		return ""
+	}
+	start += len(openTag)
+	end := strings.Index(s[start:], closeTag)
+	if end == -1 {
+		return strings.TrimSpace(s[start:])
+	}
+	return strings.TrimSpace(s[start : start+end])
+}
+
+func isSystemBoilerplatePart(s string) bool {
+	tags := []string{
+		"<user_information>",
+		"<user_rules>",
+		"<skills>",
+		"<artifacts>",
+		"<subagents>",
+		"<plugins>",
+		"<knowledge_items>",
+		"<slash_commands>",
+		"<ADDITIONAL_METADATA>",
+	}
+	for _, t := range tags {
+		if strings.HasPrefix(s, t) {
+			return true
+		}
+	}
+	return false
 }
