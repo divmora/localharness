@@ -70,48 +70,54 @@ const maxPendingStreamBytes = 512
 // used to execute read-only tools within a single turn.
 const defaultMaxConcurrentToolWorkers = 8
 
+// maxConsecutivePermissionDenials is the threshold of consecutive permission denials
+// or timeouts before the circuit breaker trips to prevent infinite loops and token bleed.
+const maxConsecutivePermissionDenials = 3
+
 // Engine orchestrates the agentic loop.
 type Engine struct {
-	provider                 llm.Provider
-	summarizerProvider       llm.Provider
-	modelTierResolver        ModelTierResolver
-	toolRegistry             *tools.Registry
-	logger                   *slog.Logger
-	stepCB                   StepCallback
-	stepMu                   sync.Mutex // Serializes stepCB invocations across concurrent tool executions
-	trajCB                   TrajectoryCallback
-	stepIndex                atomic.Int32
-	trajectoryID             string
-	convID                   string
-	sysPrompt                string
-	history                  []llm.Message
-	streamFlushInterval      time.Duration
-	maxConcurrentToolWorkers int // Max concurrent workers for parallel read-only tools
-	maxTurns                 int // Safety limit on agentic loop iterations
-	compactionThreshold      int // Token threshold for context compaction (0 = disabled)
-	keepRecentMessages       int // Messages to preserve during compaction
-	lastRealTokenCount       int // Most recent real token count from LLM provider
-	tracer                   *Tracer
-	brainDir                 string                     // For child engine tracing
-	appDataDir               string                     // Root data dir (for subagent inheritance)
-	enablePlanningMode       bool                       // Planning guard: block workspace writes until plan exists
-	researchToolCount        atomic.Int32               // Tracks research tool calls (view_file, list_dir, search_dir)
-	hostToolHandler          HostToolHandler            // Called for SDK-registered tools
-	hostToolNames            map[string]bool            // Fast lookup of host tool names
-	hostToolDecls            []llm.FunctionDeclaration  // Host tool schemas for LLM
-	permissionHandler        PermissionHandler          // Called before tool execution for policy checks
-	permissionGrants         []PermissionGrant          // Grants from ask_permission (session-scoped)
-	questionHandler          QuestionHandler            // Called for ask_question tool
-	mcpMgr                   *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
-	msgCtx                   MessageContextConfig       // Per-message context enrichment config
-	notifyCh                 <-chan tools.SystemMessage // System notifications (timers, task completions)
-	notifySendCh             chan<- tools.SystemMessage // Channel to forward notifications from subagents
-	hasBrowserConfig         bool                       // Explicit browser configuration flag
-	hasDesktopConfig         bool                       // Explicit desktop configuration flag
-	pendingSyntheticMsgs     []string                   // Buffered synthetic notifications to include on next turn
-	rulesFingerprint         string                     // Fingerprint of user rules & workspaces to detect updates
-	running                  atomic.Int32               // 1 = engine is running a turn, 0 = idle
-	preCompletionHook        func()                     // Called before TRAJ_IDLE so session can save state
+	provider                     llm.Provider
+	summarizerProvider           llm.Provider
+	modelTierResolver            ModelTierResolver
+	toolRegistry                 *tools.Registry
+	logger                       *slog.Logger
+	stepCB                       StepCallback
+	stepMu                       sync.Mutex // Serializes stepCB invocations across concurrent tool executions
+	trajCB                       TrajectoryCallback
+	stepIndex                    atomic.Int32
+	trajectoryID                 string
+	convID                       string
+	sysPrompt                    string
+	history                      []llm.Message
+	streamFlushInterval          time.Duration
+	maxConcurrentToolWorkers     int // Max concurrent workers for parallel read-only tools
+	maxTurns                     int // Safety limit on agentic loop iterations
+	compactionThreshold          int // Token threshold for context compaction (0 = disabled)
+	keepRecentMessages           int // Messages to preserve during compaction
+	lastRealTokenCount           int // Most recent real token count from LLM provider
+	tracer                       *Tracer
+	brainDir                     string                     // For child engine tracing
+	appDataDir                   string                     // Root data dir (for subagent inheritance)
+	enablePlanningMode           bool                       // Planning guard: block workspace writes until plan exists
+	researchToolCount            atomic.Int32               // Tracks research tool calls (view_file, list_dir, search_dir)
+	hostToolHandler              HostToolHandler            // Called for SDK-registered tools
+	hostToolNames                map[string]bool            // Fast lookup of host tool names
+	hostToolDecls                []llm.FunctionDeclaration  // Host tool schemas for LLM
+	permissionHandler            PermissionHandler          // Called before tool execution for policy checks
+	permissionGrants             []PermissionGrant          // Grants from ask_permission (session-scoped)
+	questionHandler              QuestionHandler            // Called for ask_question tool
+	mcpMgr                       *mcpbridge.Manager         // MCP server bridge (nil if no MCP servers)
+	msgCtx                       MessageContextConfig       // Per-message context enrichment config
+	notifyCh                     <-chan tools.SystemMessage // System notifications (timers, task completions)
+	notifySendCh                 chan<- tools.SystemMessage // Channel to forward notifications from subagents
+	hasBrowserConfig             bool                       // Explicit browser configuration flag
+	hasDesktopConfig             bool                       // Explicit desktop configuration flag
+	pendingSyntheticMsgs         []string                   // Buffered synthetic notifications to include on next turn
+	rulesFingerprint             string                     // Fingerprint of user rules & workspaces to detect updates
+	running                      atomic.Int32               // 1 = engine is running a turn, 0 = idle
+	preCompletionHook            func()                     // Called before TRAJ_IDLE so session can save state
+	turnCheckpointHook           func()                     // Called after each agentic turn to persist state incrementally
+	consecutivePermissionDenials int                        // Consecutive permission denials/timeouts counter
 
 	// Interruption API channels
 	pauseCh  chan struct{}
@@ -754,6 +760,12 @@ func (e *Engine) SetPreCompletionHook(fn func()) {
 	e.preCompletionHook = fn
 }
 
+// SetTurnCheckpointHook registers a callback that runs after each agentic turn
+// executes tools and updates history, allowing callers to persist state incrementally.
+func (e *Engine) SetTurnCheckpointHook(fn func()) {
+	e.turnCheckpointHook = fn
+}
+
 // RunWithContext executes the agentic loop with optional per-message host context.
 // The host context (active file, cursor, etc.) is injected into the enriched message
 // sent to the LLM, while the raw userMessage is preserved for step updates.
@@ -861,6 +873,7 @@ drained:
 	toolDecls := e.buildToolDeclarations()
 
 	// Agentic loop
+	e.consecutivePermissionDenials = 0
 	emptyRetries := 0
 	for turn := 0; turn < e.maxTurns; turn++ {
 		select {
@@ -1120,9 +1133,17 @@ drained:
 		// Check if finish was called
 		for _, tc := range resp.ToolCalls {
 			if tc.Name == "finish" {
+				if e.turnCheckpointHook != nil {
+					e.turnCheckpointHook()
+				}
 				e.emitTrajectoryState(pb.TrajectoryState_TRAJ_COMPLETED)
 				return nil
 			}
+		}
+
+		// Incremental turn checkpoint hook
+		if e.turnCheckpointHook != nil {
+			e.turnCheckpointHook()
 		}
 	}
 
@@ -1490,6 +1511,7 @@ func (e *Engine) executeReadOnlyTool(ctx context.Context, tc llm.ToolCall, usage
 
 	// Build tool result for history
 	resultJSON := e.extractToolResult(step)
+	e.consecutivePermissionDenials = 0
 	return toolResultMsg(tc, resultJSON, false), nil
 }
 
@@ -1599,6 +1621,22 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 
 	// ── Permission check (if handler registered) ──
 	if e.toolRequiresPermission(tc) {
+		// Circuit breaker: prevent infinite loops and runaway token bleed
+		if e.consecutivePermissionDenials >= maxConsecutivePermissionDenials {
+			e.logger.Warn("permission circuit breaker tripped: blocking tool call",
+				"tool", tc.Name,
+				"consecutive_denials", e.consecutivePermissionDenials,
+			)
+			step.State = pb.StepUpdate_STATE_ERROR
+			step.ErrorInfo = &pb.ErrorInfo{
+				Message: "tool execution blocked by permission circuit breaker (consecutive denials exceeded)",
+				Code:    "PERMISSION_CIRCUIT_BREAKER",
+			}
+			e.emitStep(step)
+			e.history = append(e.history, toolResultMsg(tc, "Error: Tool execution blocked by permission circuit breaker after repeated denials or timeouts. You MUST NOT attempt this tool call again. Please summarize your findings and conclude your response immediately.", true))
+			return nil
+		}
+
 		approved, reason, err := e.requestPermission(ctx, tc, step)
 
 		if err != nil {
@@ -1611,8 +1649,13 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 			return err
 		}
 		if !approved {
+			e.consecutivePermissionDenials++
+			denialMsg := fmt.Sprintf("Permission denied: %s", reason)
+			if e.consecutivePermissionDenials >= 2 {
+				denialMsg = fmt.Sprintf("Permission denied: %s. Multiple consecutive permission denials/timeouts have occurred (%d). Do not retry this command or similar actions. Conclude your response or proceed using available non-restricted tools.", reason, e.consecutivePermissionDenials)
+			}
 			// Feed denial back to LLM as a tool error so it can adapt
-			e.history = append(e.history, toolResultMsg(tc, fmt.Sprintf("Permission denied: %s", reason), true))
+			e.history = append(e.history, toolResultMsg(tc, denialMsg, true))
 			step.State = pb.StepUpdate_STATE_ERROR
 			step.ErrorInfo = &pb.ErrorInfo{
 				Message: fmt.Sprintf("Permission denied for tool '%s': %s", tc.Name, reason),
@@ -1621,6 +1664,9 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 			e.emitStep(step)
 			return nil // Not fatal — LLM can adapt
 		}
+
+		// Reset counter on successful approval
+		e.consecutivePermissionDenials = 0
 	}
 
 	// ── Planning guard ──

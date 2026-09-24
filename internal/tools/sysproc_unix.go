@@ -4,21 +4,22 @@ package tools
 
 import (
 	"os/exec"
-	"syscall"
+
+	"github.com/divmora/localharness/internal/util"
 )
 
 func setProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	util.SetProcessGroup(cmd)
 }
 
 func interruptProcessGroup(pid int) error {
-	return syscall.Kill(-pid, syscall.SIGINT)
+	return util.InterruptProcessGroup(pid)
 }
 
 func killProcessGroup(pid int) error {
-	return syscall.Kill(-pid, syscall.SIGKILL)
+	return util.KillProcessGroup(pid)
 }
 
 func terminateProcessGroup(pid int) error {
-	return syscall.Kill(-pid, syscall.SIGTERM)
+	return util.TerminateProcessGroup(pid)
 }

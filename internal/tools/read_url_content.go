@@ -6,6 +6,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
@@ -80,6 +81,18 @@ func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+	// Inject GitHub auth token if available to prevent 429 rate limit (60 req/hr unauthenticated)
+	if strings.Contains(targetURL, "api.github.com") || strings.Contains(targetURL, "raw.githubusercontent.com") {
+		token := os.Getenv("GITHUB_TOKEN")
+		if token == "" {
+			token = os.Getenv("GH_TOKEN")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Accept", "application/vnd.github.v3+json")
+		}
+	}
+
 	resp, err := webFetchClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http request failed: %w", err)
@@ -106,6 +119,9 @@ func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 
 	content := string(bodyBytes)
+	if int64(len(bodyBytes)) >= limit {
+		content += "\n\n[Content truncated — response reached 50KB limit]"
+	}
 	if strings.Contains(lowerContentType, "html") {
 		content = cleanHTMLContent(content)
 	}

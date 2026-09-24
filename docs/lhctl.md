@@ -144,6 +144,15 @@ When you partially approve (e.g. approving `go test ./...` while denying `go run
 `User approved sub-commands: [go test ./...], but denied: [go run main.go]. Approved sub-commands have been granted permission; please execute approved commands individually if needed.`
 The agent can then immediately execute the approved sub-command on its next step without prompting again!
 
+### Permission Circuit Breaker & Detached Timeouts
+
+- **Permission Circuit Breaker**: To prevent infinite agentic retry loops and token exhaustion when permission requests are rejected or timed out while the user is away, the runtime implements an automatic circuit breaker:
+  - If a tool permission is denied or times out 2 consecutive times, strict guidance is injected instructing the model to stop retrying.
+  - After 3 consecutive denials (`maxConsecutivePermissionDenials = 3`), the circuit breaker trips: subsequent attempts to invoke permission-restricted tools are rejected immediately (`PERMISSION_CIRCUIT_BREAKER`) without blocking or re-prompting, forcing the model to summarize and conclude its response.
+  - Successful execution of an approved action or non-restricted tool resets the circuit breaker counter.
+- **Detached Approval Timeout**: When a headless task is running detached in the background daemon, pending permission requests wait up to **10 minutes** for a client to attach before auto-timing out with clear diagnostic feedback, preventing background daemon worker threads from stalling indefinitely.
+- **Incremental State Checkpoints**: Conversation state (`<conversation-id>.pb`) and accumulated token usage are atomically persisted to disk after every agentic turn, ensuring `lhctl conversation inspect` and `lhctl attach` always display up-to-date messages and token counts even while a turn is actively executing.
+
 ---
 
 ## Interactive Question Cards (`ask_question`)

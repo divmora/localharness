@@ -19,6 +19,7 @@ import (
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/errors"
 	"github.com/divmora/localharness/internal/llm"
+	"github.com/divmora/localharness/internal/util"
 )
 
 // Manager orchestrates connections to multiple MCP servers.
@@ -35,6 +36,7 @@ type serverSession struct {
 	name         string
 	session      *mcp.ClientSession
 	cancel       context.CancelFunc
+	cmd          *exec.Cmd
 	enabledTools map[string]bool // whitelist (nil = all)
 }
 
@@ -82,14 +84,23 @@ func (m *Manager) connectServer(ctx context.Context, cfg *pb.McpServerConfig) er
 
 	// Build transport
 	var transport mcp.Transport
+	var stdioCmd *exec.Cmd
 	switch t := cfg.Transport.(type) {
 	case *pb.McpServerConfig_Stdio:
 		cmd := exec.CommandContext(ctx, t.Stdio.Command, t.Stdio.Args...)
+		util.SetProcessGroup(cmd)
+		cmd.Cancel = func() error {
+			if cmd.Process != nil {
+				return util.KillProcessGroup(cmd.Process.Pid)
+			}
+			return nil
+		}
 		// Set environment variables
 		if len(cfg.Env) > 0 {
 			cmd.Env = append(os.Environ(), mapToEnvSlice(cfg.Env)...)
 		}
 		cmd.Stderr = os.Stderr // Forward server stderr for debugging
+		stdioCmd = cmd
 		transport = &mcp.CommandTransport{Command: cmd}
 
 	case *pb.McpServerConfig_Http:
@@ -130,6 +141,7 @@ func (m *Manager) connectServer(ctx context.Context, cfg *pb.McpServerConfig) er
 		name:         cfg.Name,
 		session:      session,
 		cancel:       cancel,
+		cmd:          stdioCmd,
 		enabledTools: enabledTools,
 	}
 	m.mu.Unlock()
@@ -291,10 +303,17 @@ func (m *Manager) Close() {
 
 	for name, sess := range m.sessions {
 		m.logger.Info("closing MCP server", "name", name)
-		if err := sess.session.Close(); err != nil {
-			m.logger.Warn("error closing MCP session", "name", name, "error", err)
+		if sess.session != nil {
+			if err := sess.session.Close(); err != nil {
+				m.logger.Warn("error closing MCP session", "name", name, "error", err)
+			}
 		}
-		sess.cancel()
+		if sess.cancel != nil {
+			sess.cancel()
+		}
+		if sess.cmd != nil && sess.cmd.Process != nil {
+			_ = util.KillProcessGroup(sess.cmd.Process.Pid)
+		}
 	}
 
 	m.sessions = make(map[string]*serverSession)

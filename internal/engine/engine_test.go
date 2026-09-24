@@ -3446,3 +3446,139 @@ func TestEngine_DynamicAddWorkspace_TriggersFullEnrichment(t *testing.T) {
 		t.Error("turn after AddWorkspace must contain newly loaded rule from ws2")
 	}
 }
+
+func TestEngine_PermissionCircuitBreaker(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	reg := tools.NewRegistry(wsMgr, slog.Default())
+
+	permissionCalls := 0
+	permHandler := func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+		permissionCalls++
+		return false, "timed out waiting for permission", nil
+	}
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			// 1st tool call -> permission requested -> denied (count=1)
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call-1", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create"}},
+				},
+			},
+			// 2nd tool call -> permission requested -> denied (count=2)
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call-2", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create --title 2"}},
+				},
+			},
+			// 3rd tool call -> permission requested -> denied (count=3)
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call-3", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create --title 3"}},
+				},
+			},
+			// 4th tool call -> circuit breaker TRIPPED! Tool call blocked without calling permHandler!
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{ID: "call-4", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create --title 4"}},
+				},
+			},
+			// 5th: Model produces final text response
+			{
+				FinishReason: "stop",
+				Content:      "Operation was cancelled due to repeated permission timeouts.",
+			},
+		},
+	}
+
+	var emittedSteps []*pb.StepUpdate
+	eng := NewEngine(Config{
+		Provider:          provider,
+		ToolRegistry:      reg,
+		Logger:            slog.Default(),
+		MaxTurns:          10,
+		AccessMode:        pb.AccessMode_ACCESS_MODE_WORKSPACE,
+		PermissionHandler: permHandler,
+		OnStep: func(step *pb.StepUpdate) {
+			emittedSteps = append(emittedSteps, step)
+		},
+		ConversationID: "test-cb-conv",
+		TrajectoryID:   "test-cb-traj",
+	})
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "file an issue"); err != nil {
+		t.Fatalf("unexpected engine run error: %v", err)
+	}
+
+	// Permission handler should be called exactly maxConsecutivePermissionDenials (3) times
+	if permissionCalls != maxConsecutivePermissionDenials {
+		t.Errorf("expected %d permission handler calls before circuit breaker tripped, got %d", maxConsecutivePermissionDenials, permissionCalls)
+	}
+
+	// Verify circuit breaker error was emitted in steps
+	foundCircuitBreakerStep := false
+	for _, s := range emittedSteps {
+		if s.ErrorInfo != nil && s.ErrorInfo.Code == "PERMISSION_CIRCUIT_BREAKER" {
+			foundCircuitBreakerStep = true
+			break
+		}
+	}
+	if !foundCircuitBreakerStep {
+		t.Errorf("expected to find PERMISSION_CIRCUIT_BREAKER step, but none found")
+	}
+}
+
+func TestEngine_TurnCheckpointHook(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, _ := workspace.NewManager([]string{wsDir})
+	reg := tools.NewRegistry(wsMgr, slog.Default())
+	tools.RegisterBuiltinTools(reg, nil)
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "list_dir",
+						Args: map[string]interface{}{"DirectoryPath": wsDir},
+					},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Done listing files.",
+			},
+		},
+	}
+
+	eng := NewEngine(Config{
+		Provider:       provider,
+		ToolRegistry:   reg,
+		Logger:         slog.Default(),
+		MaxTurns:       5,
+		ConversationID: "test-checkpoint-conv",
+		TrajectoryID:   "test-checkpoint-traj",
+	})
+
+	checkpoints := 0
+	eng.SetTurnCheckpointHook(func() {
+		checkpoints++
+	})
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "list files"); err != nil {
+		t.Fatalf("unexpected run error: %v", err)
+	}
+
+	if checkpoints < 1 {
+		t.Errorf("expected at least 1 turn checkpoint, got %d", checkpoints)
+	}
+}

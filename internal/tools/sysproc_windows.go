@@ -3,28 +3,23 @@
 package tools
 
 import (
-	"os"
 	"os/exec"
+
+	"github.com/divmora/localharness/internal/util"
 )
 
 func setProcessGroup(cmd *exec.Cmd) {
-	// Not supported in the same way on Windows.
-	// We could use CREATE_NEW_PROCESS_GROUP via SysProcAttr on Windows, but standard process killing works fine for now.
+	util.SetProcessGroup(cmd)
 }
 
 func interruptProcessGroup(pid int) error {
-	return terminateProcessGroup(pid)
+	return util.InterruptProcessGroup(pid)
 }
 
 func killProcessGroup(pid int) error {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return process.Kill()
+	return util.KillProcessGroup(pid)
 }
 
 func terminateProcessGroup(pid int) error {
-	// Windows doesn't have SIGTERM cleanly, just use Kill
-	return killProcessGroup(pid)
+	return util.TerminateProcessGroup(pid)
 }

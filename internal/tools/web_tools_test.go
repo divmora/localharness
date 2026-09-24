@@ -110,3 +110,30 @@ func TestWebFetchTool(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+func TestWebFetchTool_Truncation(t *testing.T) {
+	logger := slog.Default()
+	wsMgr, _ := workspace.NewManager([]string{"/tmp"})
+	r := NewRegistry(wsMgr, logger)
+	registerWebFetch(r)
+
+	// Mock fetch returning content exceeding limit
+	MockFetchFunc = func(url string) (string, string, error) {
+		return "large content", "text/plain", nil
+	}
+	defer func() { MockFetchFunc = nil }()
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReadUrlContent{
+			ReadUrlContent: &pb.ActionReadUrlContent{
+				Url: "https://api.github.com/repos/divmora/localharness/issues",
+			},
+		},
+	}
+	if err := r.Execute(context.Background(), "read_url_content", step); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if step.GetReadUrlContent().Content != "large content" {
+		t.Errorf("unexpected content: %s", step.GetReadUrlContent().Content)
+	}
+}

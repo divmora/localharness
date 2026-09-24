@@ -784,6 +784,26 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		}
 	})
 
+	// Register incremental checkpoint hook to persist conversation state
+	// after every agentic turn. This ensures that in-flight turns, long-running
+	// loops, or unexpected restarts preserve all history and live token counts.
+	s.engine.SetTurnCheckpointHook(func() {
+		history := s.engine.History()
+		var protoMsgs []*pb.ConversationMessage
+		for _, m := range history {
+			protoMsgs = append(protoMsgs, mapLLMMessageToProto(m))
+		}
+		s.conv.SetMessages(protoMsgs)
+		if err := s.conv.SaveAll(); err != nil {
+			s.logger.Warn("turn checkpoint save failed", "error", err)
+		} else {
+			s.logger.Debug("turn checkpoint save complete",
+				"messages", len(protoMsgs),
+				"conv_id", s.conv.ID,
+			)
+		}
+	})
+
 	// Send init response
 	s.sendServerMessage(&pb.ServerMessage{
 		Payload: &pb.ServerMessage_InitResponse{
@@ -1011,6 +1031,13 @@ func (s *Session) permissionHandler(ctx context.Context, req *pb.ActionPermissio
 				DenialReason: "context cancelled",
 			})
 			return false, "cancelled", ctx.Err()
+		case <-time.After(10 * time.Minute):
+			s.approvalQueue.Resolve(req.RequestId, &pb.PermissionResponse{
+				RequestId:    req.RequestId,
+				Approved:     false,
+				DenialReason: "timed out waiting for permission response while detached (10m)",
+			})
+			return false, "timed out waiting for permission response while detached (10m)", nil
 		}
 	}
 
