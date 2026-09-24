@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.1](https://github.com/divmora/localharness/compare/v0.4.0...v0.4.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* prevent infinite permission retry loops, detached session stalls, and MCP process leaks ([611f664](https://github.com/divmora/localharness/commit/611f66436fd268824aef6315db216b60acba4a92))
+
+
+### Performance Improvements
+
+* **engine,cli:** multi-turn context bloat optimization and adaptive browser activation ([#72](https://github.com/divmora/localharness/issues/72)) ([36c60c5](https://github.com/divmora/localharness/commit/36c60c50577b9d132373ed6c66c3ab1768e92d21))
+
 ## [0.4.0](https://github.com/divmora/localharness/compare/v0.3.0...v0.4.0) (2026-09-23)
 
 
