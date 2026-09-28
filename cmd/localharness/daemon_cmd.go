@@ -13,11 +13,20 @@ import (
 
 func runDaemonCommand(args []string, logger *slog.Logger) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: localharness daemon [start|stop|status|run]")
+		fmt.Fprintln(os.Stderr, "Usage: localharness daemon [start|stop|status|run] [--tunnel]")
 		os.Exit(1)
 	}
 
 	subcmd := args[0]
+	subArgs := args[1:]
+	hasTunnel := false
+	for _, a := range subArgs {
+		if a == "--tunnel" || a == "--remote-control" {
+			hasTunnel = true
+			break
+		}
+	}
+
 	switch subcmd {
 	case "status":
 		running, info, err := daemon.IsDaemonRunning()
@@ -33,6 +42,9 @@ func runDaemonCommand(args []string, logger *slog.Logger) {
 		fmt.Printf("  Port:       %d\n", info.Port)
 		fmt.Printf("  Started:    %s\n", info.StartedAt.Format(time.RFC3339))
 		fmt.Printf("  Version:    %s\n", info.Version)
+		if info.TunnelURL != "" {
+			fmt.Printf("  Tunnel URL: %s\n", info.TunnelURL)
+		}
 
 	case "stop":
 		if err := daemon.StopDaemon(logger); err != nil {
@@ -45,6 +57,9 @@ func runDaemonCommand(args []string, logger *slog.Logger) {
 		running, info, _ := daemon.IsDaemonRunning()
 		if running {
 			fmt.Printf("LocalHarness daemon is already running (PID %d, Port %d)\n", info.PID, info.Port)
+			if info.TunnelURL != "" {
+				fmt.Printf("  Tunnel URL: %s\n", info.TunnelURL)
+			}
 			return
 		}
 
@@ -65,7 +80,11 @@ func runDaemonCommand(args []string, logger *slog.Logger) {
 			selfPath = "localharness"
 		}
 
-		cmd := exec.Command(selfPath, "daemon", "run")
+		cmdArgs := []string{"daemon", "run"}
+		if hasTunnel {
+			cmdArgs = append(cmdArgs, "--tunnel")
+		}
+		cmd := exec.Command(selfPath, cmdArgs...)
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 		if err := cmd.Start(); err != nil {
@@ -78,13 +97,16 @@ func runDaemonCommand(args []string, logger *slog.Logger) {
 			time.Sleep(100 * time.Millisecond)
 			if r, info, _ := daemon.IsDaemonRunning(); r && info != nil {
 				fmt.Printf("LocalHarness daemon started successfully (PID %d, Port %d)\n", info.PID, info.Port)
+				if info.TunnelURL != "" {
+					fmt.Printf("Remote Control URL: %s\n", info.TunnelURL)
+				}
 				return
 			}
 		}
 		fmt.Println("LocalHarness daemon started in background.")
 
 	case "run":
-		if err := daemon.RunDaemonServer(logger); err != nil {
+		if err := daemon.RunDaemonServerWithTunnel(logger, hasTunnel); err != nil {
 			logger.Error("daemon server terminated with error", "error", err)
 			os.Exit(1)
 		}

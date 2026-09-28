@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,7 +17,9 @@ import (
 	"github.com/divmora/localharness/cmd/lhctl/tui"
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/config"
+	"github.com/divmora/localharness/internal/daemon"
 	"github.com/divmora/localharness/internal/llm"
+	"github.com/divmora/localharness/internal/tunnel"
 	"github.com/divmora/localharness/internal/workspace"
 )
 
@@ -44,6 +47,9 @@ type runFlags struct {
 	voice              bool
 	accessMode         string
 	allowHost          bool
+	tunnel             bool
+	url                string
+	apiKey             string
 }
 
 // formatResumeCommand builds the CLI command to resume the given conversation session.
@@ -116,6 +122,18 @@ func parseRunFlags(args []string) runFlags {
 			f.accessMode = args[i]
 		case a == "--detach":
 			f.detach = true
+		case a == "--tunnel" || a == "--remote-control":
+			f.tunnel = true
+		case strings.HasPrefix(a, "--url="):
+			f.url = strings.TrimPrefix(a, "--url=")
+		case a == "--url" && i+1 < len(args):
+			i++
+			f.url = args[i]
+		case strings.HasPrefix(a, "--api-key="):
+			f.apiKey = strings.TrimPrefix(a, "--api-key=")
+		case a == "--api-key" && i+1 < len(args):
+			i++
+			f.apiKey = args[i]
 		case a == "--ephemeral":
 			f.ephemeral = true
 		case a == "--browser":
@@ -298,9 +316,37 @@ func runInteractiveWithOptions(flags runFlags) error {
 		return err
 	}
 
-	cl, err := client.ConnectOrStartDaemonWithSession(logger, flags.sessionID)
+	var (
+		cl  *client.Client
+		err error
+	)
+	if flags.url != "" {
+		cl, err = client.ConnectRemote(logger, flags.url, flags.apiKey, flags.sessionID)
+	} else {
+		cl, err = client.ConnectOrStartDaemonWithSession(logger, flags.sessionID)
+	}
 	if err != nil {
 		return fmt.Errorf("connecting to daemon: %w", err)
+	}
+
+	if flags.tunnel {
+		tunMgr := tunnel.NewManager(logger)
+		if running, dInfo, _ := daemon.IsDaemonRunning(); running && dInfo != nil {
+			tunInfo, err := tunMgr.Start(context.Background(), dInfo.Port, flags.sessionID, dInfo.APIKey)
+			if err == nil && tunInfo != nil {
+				fmt.Printf("🌐 Cloudflare Quick Tunnel active (PID %d)\n", tunInfo.PID)
+				fmt.Printf("Remote Control URL: %s\n\n", tunInfo.ControlURL)
+				if qr, err := tunnel.GenerateTerminalQRCode(tunInfo.ControlURL); err == nil {
+					fmt.Println("Scan with phone:")
+					fmt.Println(qr)
+					fmt.Println()
+				}
+				fmt.Println("Note: Remote control persists in background even if you exit this terminal.")
+				fmt.Println()
+			} else if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not start tunnel: %v\n", err)
+			}
+		}
 	}
 
 	var pbWorkspaces []*pb.Workspace
@@ -475,14 +521,19 @@ func runInteractiveWithOptions(flags runFlags) error {
 	return nil
 }
 
-func runAttach(dataDir string, sessionID string, args []string) {
+func runAttach(dataDir string, sessionID string, remoteURL string, apiKey string) {
 	fullID, err := resolveConversationID(dataDir, sessionID)
 	if err != nil {
 		fullID = sessionID
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	cl, err := client.ConnectOrStartDaemonWithSession(logger, fullID)
+	var cl *client.Client
+	if remoteURL != "" {
+		cl, err = client.ConnectRemote(logger, remoteURL, apiKey, fullID)
+	} else {
+		cl, err = client.ConnectOrStartDaemonWithSession(logger, fullID)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error connecting to daemon: %v\n", err)
 		os.Exit(1)

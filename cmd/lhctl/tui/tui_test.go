@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/tunnel"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -960,5 +961,58 @@ func TestModel_InitBannerVersionFormatting(t *testing.T) {
 	}
 	if !strings.Contains(lastItem2, "(v0.3.1)") {
 		t.Errorf("expected (v0.3.1), got: %s", lastItem2)
+	}
+}
+
+func TestModel_SlashCommandTunnel(t *testing.T) {
+	m := InitialModel(nil, []string{"."}, false)
+	m.width = 80
+	m.height = 24
+	m.updateDimensions()
+
+	// 1. /tunnel status when not running
+	cmdStatus, ok := ParseCommand("/tunnel status")
+	if !ok || cmdStatus.Name != "tunnel" {
+		t.Fatalf("expected command tunnel, got %v", cmdStatus)
+	}
+	cmdStatusTea := m.handleSlashCommand(cmdStatus)
+	if cmdStatusTea == nil {
+		t.Errorf("expected non-nil tea.Cmd for /tunnel status")
+	}
+	lastItem := m.history.items[len(m.history.items)-1].Content
+	if !strings.Contains(lastItem, "not running") {
+		t.Errorf("expected not running message, got: %s", lastItem)
+	}
+
+	// 2. /remote-control stop
+	cmdStop, _ := ParseCommand("/remote-control stop")
+	cmdStopTea := m.handleSlashCommand(cmdStop)
+	if cmdStopTea == nil {
+		t.Errorf("expected non-nil tea.Cmd for /remote-control stop")
+	}
+	lastItemStop := m.history.items[len(m.history.items)-1].Content
+	if !strings.Contains(lastItemStop, "stopped") {
+		t.Errorf("expected stopped message, got: %s", lastItemStop)
+	}
+
+	// 3. Test TunnelStartedMsg in Update
+	tunMsg := TunnelStartedMsg{
+		Info: &tunnel.Info{
+			PID:        4321,
+			URL:        "https://random-subdomain.trycloudflare.com",
+			ControlURL: "https://random-subdomain.trycloudflare.com/?key=testkey#test-session",
+		},
+	}
+	newModel, teaMsgCmd := m.Update(tunMsg)
+	if teaMsgCmd == nil {
+		t.Errorf("expected non-nil tea.Cmd from TunnelStartedMsg")
+	}
+	updatedM := newModel.(Model)
+	lastItemMsg := updatedM.history.items[len(updatedM.history.items)-1].Content
+	if !strings.Contains(lastItemMsg, "Cloudflare Quick Tunnel active") {
+		t.Errorf("expected active message, got: %s", lastItemMsg)
+	}
+	if !strings.Contains(lastItemMsg, "https://random-subdomain.trycloudflare.com/?key=testkey#test-session") {
+		t.Errorf("expected control URL in message, got: %s", lastItemMsg)
 	}
 }

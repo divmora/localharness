@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/conversation"
 )
 
 // listFlags holds parsed flags for the list command.
@@ -32,12 +33,13 @@ func parseListFlags(args []string) listFlags {
 
 // convSummary holds summary data for a conversation listing entry.
 type convSummary struct {
-	ID        string
-	CreatedAt string
-	UpdatedAt string
-	Messages  int
-	Status    string
-	SizeBytes int64
+	ID          string
+	Description string
+	CreatedAt   string
+	UpdatedAt   string
+	Messages    int
+	Status      string
+	SizeBytes   int64
 
 	// Agent lineage
 	ParentID  string
@@ -83,17 +85,23 @@ func runList(dataDir string, extraArgs []string) {
 			continue
 		}
 
+		desc := conversation.ExtractDescription(state.Messages)
+		if desc == "" {
+			desc = "Session " + id[:8]
+		}
+
 		summaries = append(summaries, convSummary{
-			ID:        id,
-			CreatedAt: state.CreatedAt,
-			UpdatedAt: state.UpdatedAt,
-			Messages:  len(state.Messages),
-			Status:    formatStatus(state.Status),
-			SizeBytes: info.Size(),
-			ParentID:  state.ParentConversationId,
-			AgentType: state.AgentTypeName,
-			AgentRole: state.AgentRole,
-			Depth:     state.AgentDepth,
+			ID:          id,
+			Description: desc,
+			CreatedAt:   state.CreatedAt,
+			UpdatedAt:   state.UpdatedAt,
+			Messages:    len(state.Messages),
+			Status:      formatStatus(state.Status),
+			SizeBytes:   info.Size(),
+			ParentID:    state.ParentConversationId,
+			AgentType:   state.AgentTypeName,
+			AgentRole:   state.AgentRole,
+			Depth:       state.AgentDepth,
 		})
 	}
 
@@ -113,13 +121,18 @@ func runList(dataDir string, extraArgs []string) {
 	}
 
 	// Print table
-	fmt.Printf("%-38s  %-20s  %8s  %-8s  %-14s  %6s\n", "ID", "Updated", "Messages", "Status", "Agent", "Size")
-	fmt.Println(strings.Repeat("─", 102))
+	fmt.Printf("%-38s  %-16s  %-35s  %8s  %-8s  %-10s\n", "ID", "Updated", "Description", "Messages", "Status", "Agent")
+	fmt.Println(strings.Repeat("─", 125))
 	for _, s := range summaries {
 		// Truncate timestamp to just date+time
 		updated := s.UpdatedAt
-		if len(updated) > 19 {
-			updated = updated[:19]
+		if len(updated) > 16 {
+			updated = strings.Replace(updated[:16], "T", " ", 1)
+		}
+
+		desc := s.Description
+		if len(desc) > 35 {
+			desc = desc[:32] + "..."
 		}
 
 		// Agent column: "root" for top-level, "type (depth N)" for subagents
@@ -132,8 +145,8 @@ func runList(dataDir string, extraArgs []string) {
 			agentCol = fmt.Sprintf("%s (d%d)", agentCol, s.Depth)
 		}
 
-		fmt.Printf("%-38s  %-20s  %8d  %-8s  %-14s  %5dK\n",
-			s.ID, updated, s.Messages, s.Status, agentCol, s.SizeBytes/1024)
+		fmt.Printf("%-38s  %-16s  %-35s  %8d  %-8s  %-10s\n",
+			s.ID, updated, desc, s.Messages, s.Status, agentCol)
 	}
 	fmt.Printf("\nTotal: %d conversations\n", len(summaries))
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,6 +97,22 @@ func New(cfg Config) (*Client, error) {
 	go c.readLoop()
 
 	return c, nil
+}
+
+// ConnectRemote connects to a remote LocalHarness instance over WebSocket (e.g. Cloudflare tunnel).
+func ConnectRemote(logger *slog.Logger, rawURL, apiKey, sessionID string) (*Client, error) {
+	wsURL := rawURL
+	if strings.HasPrefix(wsURL, "https://") {
+		wsURL = "wss://" + strings.TrimPrefix(wsURL, "https://")
+	} else if strings.HasPrefix(wsURL, "http://") {
+		wsURL = "ws://" + strings.TrimPrefix(wsURL, "http://")
+	}
+	return New(Config{
+		URL:       wsURL,
+		APIKey:    apiKey,
+		SessionID: sessionID,
+		Logger:    logger,
+	})
 }
 
 // ConnectOrStartDaemon connects to an existing daemon or starts one automatically.

@@ -1,0 +1,1624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>LocalHarness Remote Control</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card-bg: rgba(22, 27, 34, 0.85);
+      --card-solid: #161b22;
+      --border: rgba(255, 255, 255, 0.1);
+      --border-subtle: rgba(255, 255, 255, 0.05);
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-glow: rgba(88, 166, 255, 0.25);
+      --accent-hover: #1f6feb;
+      --success: #238636;
+      --success-glow: rgba(46, 160, 67, 0.3);
+      --success-hover: #2ea043;
+      --danger: #da3633;
+      --danger-hover: #f85149;
+      --warning: #d29922;
+      --warning-glow: rgba(210, 153, 34, 0.25);
+      --code-bg: #090d13;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Top Header ─── */
+    header {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: max(10px, env(safe-area-inset-top)) 16px 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      z-index: 20;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 15px;
+      color: #fff;
+      letter-spacing: -0.3px;
+      white-space: nowrap;
+    }
+
+    .brand-icon {
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(135deg, #388bfd, #1f6feb);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+    .brand-icon svg { fill: #fff; width: 14px; height: 14px; }
+
+    .session-picker {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--text);
+      cursor: pointer;
+      max-width: min(340px, 45vw);
+      transition: all 0.15s ease;
+    }
+    .session-picker:hover {
+      border-color: var(--accent);
+      background: rgba(88, 166, 255, 0.08);
+    }
+    #activeSessionTitle {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .session-picker .chevron { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.3);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+    .dot-connected {
+      background: #3fb950;
+      box-shadow: 0 0 8px #3fb950;
+      animation: pulse-dot 2s infinite ease-in-out;
+    }
+    .dot-disconnected { background: #f85149; }
+    .dot-running { background: #d29922; box-shadow: 0 0 8px #d29922; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 500;
+      font-family: inherit;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); }
+    .btn:active { transform: scale(0.97); }
+
+    .btn-yolo {
+      border-color: rgba(210, 153, 34, 0.4);
+      color: #e3b341;
+      background: rgba(210, 153, 34, 0.08);
+    }
+    .btn-yolo.active {
+      background: #d29922;
+      color: #000;
+      border-color: #d29922;
+      font-weight: 700;
+      box-shadow: 0 0 12px var(--warning-glow);
+    }
+
+    .btn-danger {
+      border-color: rgba(248, 81, 73, 0.3);
+      color: #f85149;
+    }
+    .btn-danger:hover {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger);
+    }
+
+    /* ─── Main Chat Feed ─── */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .feed-container {
+      max-width: 860px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #1f2937, #161e2e);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px 14px 2px 14px;
+      padding: 10px 14px;
+      max-width: 85%;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      word-break: break-word;
+    }
+
+    .message-assistant {
+      align-self: flex-start;
+      background: var(--card-solid);
+      border: 1px solid var(--border);
+      border-radius: 14px 14px 14px 2px;
+      padding: 14px 16px;
+      width: 100%;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    /* ─── Markdown Content Styles ─── */
+    .prose {
+      line-height: 1.6;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .prose p { margin-bottom: 10px; }
+    .prose p:last-child { margin-bottom: 0; }
+    .prose h1, .prose h2, .prose h3, .prose h4 {
+      color: #fff;
+      margin: 14px 0 6px 0;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .prose h1 { font-size: 1.25em; border-bottom: 1px solid var(--border-subtle); padding-bottom: 4px; }
+    .prose h2 { font-size: 1.15em; }
+    .prose h3 { font-size: 1.05em; }
+    .prose ul, .prose ol { margin: 6px 0 10px 20px; }
+    .prose li { margin-bottom: 4px; }
+    .prose blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 4px 12px;
+      color: var(--text-muted);
+      background: rgba(88, 166, 255, 0.05);
+      border-radius: 0 4px 4px 0;
+      margin: 8px 0;
+    }
+    .prose code:not(.code-block code) {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-subtle);
+      border-radius: 4px;
+      padding: 2px 5px;
+      font-family: var(--font-mono);
+      font-size: 0.88em;
+      color: #f0883e;
+    }
+    .prose a { color: var(--accent); text-decoration: none; }
+    .prose a:hover { text-decoration: underline; }
+
+    /* Fenced Code Block */
+    .code-container {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+    .code-header {
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+    }
+    .btn-copy {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .btn-copy:hover { color: var(--text); border-color: var(--border); }
+    .code-block {
+      padding: 10px 14px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.45;
+      color: #e6edf3;
+      white-space: pre;
+    }
+
+    /* ─── Collapsible Thinking / Reasoning Card ─── */
+    .thought-card {
+      background: rgba(18, 22, 28, 0.7);
+      border: 1px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+      transition: all 0.2s ease;
+    }
+    .thought-card.expanded {
+      background: rgba(18, 22, 28, 0.95);
+      border-style: solid;
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .thought-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 500;
+    }
+    .thought-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .thought-pulse {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse-dot 1.2s infinite ease-in-out;
+    }
+    .thought-chevron {
+      font-size: 10px;
+      transition: transform 0.2s ease;
+    }
+    .thought-card.expanded .thought-chevron {
+      transform: rotate(90deg);
+    }
+    .thought-body {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-subtle);
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.5;
+      color: #9aa4b0;
+      max-height: 240px;
+      overflow-y: auto;
+      display: none;
+    }
+    .thought-card.expanded .thought-body {
+      display: block;
+    }
+
+    /* ─── Tool Call Badges & Cards ─── */
+    .tool-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      margin: 4px 0;
+      color: var(--text);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tool-pill-icon { font-size: 11px; }
+    .tool-pill-command { border-left: 3px solid #d29922; }
+    .tool-pill-edit { border-left: 3px solid #3fb950; }
+    .tool-pill-read { border-left: 3px solid #58a6ff; }
+    .tool-pill-subagent { border-left: 3px solid #a371f7; }
+
+    /* ─── Action Approval Card (Permission) ─── */
+    .approval-card {
+      background: linear-gradient(180deg, rgba(27, 25, 18, 0.95), rgba(20, 18, 12, 0.95));
+      border: 1.5px solid #d29922;
+      box-shadow: 0 4px 20px rgba(210, 153, 34, 0.15);
+      border-radius: 12px;
+      padding: 16px;
+      margin: 12px auto;
+      max-width: 860px;
+      width: 100%;
+      animation: alert-pulse 2.5s infinite ease-in-out;
+    }
+
+    @keyframes alert-pulse {
+      0%, 100% { border-color: #d29922; }
+      50% { border-color: #f1c40f; box-shadow: 0 4px 24px rgba(241, 196, 15, 0.25); }
+    }
+
+    .approval-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .approval-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 700;
+      font-size: 12px;
+      color: #e3b341;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .approval-tool {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 13px;
+      color: #fff;
+    }
+    .approval-desc {
+      color: var(--text);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .diff-preview {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.4;
+      max-height: 220px;
+      overflow-y: auto;
+      white-space: pre;
+      margin: 8px 0;
+    }
+    .diff-del { color: #f85149; background: rgba(248, 81, 73, 0.12); display: block; }
+    .diff-add { color: #3fb950; background: rgba(63, 185, 80, 0.12); display: block; }
+
+    .approval-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .btn-approve {
+      flex: 1;
+      min-width: 120px;
+      background: linear-gradient(135deg, #238636, #2ea043);
+      color: #fff;
+      font-weight: 600;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px var(--success-glow);
+    }
+    .btn-approve:hover { background: #2ea043; }
+    .btn-approve-session {
+      flex: 1;
+      min-width: 140px;
+      background: linear-gradient(135deg, #1f6feb, #388bfd);
+      color: #fff;
+      font-weight: 600;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px var(--accent-glow);
+    }
+    .btn-approve-session:hover { background: #388bfd; }
+    .btn-deny {
+      flex: 1;
+      min-width: 90px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--danger);
+      color: #f85149;
+      font-weight: 600;
+      padding: 10px 16px;
+      border-radius: 8px;
+    }
+    .btn-deny:hover { background: var(--danger); color: #fff; }
+
+    /* ─── Question Card (ask_question) ─── */
+    .question-card {
+      background: linear-gradient(180deg, rgba(16, 25, 36, 0.95), rgba(12, 18, 26, 0.95));
+      border: 1.5px solid var(--accent);
+      box-shadow: 0 4px 20px rgba(88, 166, 255, 0.15);
+      border-radius: 12px;
+      padding: 16px;
+      margin: 12px auto;
+      max-width: 860px;
+      width: 100%;
+    }
+    .question-title {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--accent);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .question-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .question-option:hover {
+      border-color: var(--accent);
+      background: rgba(88, 166, 255, 0.08);
+    }
+    .question-option input[type="radio"], .question-option input[type="checkbox"] {
+      accent-color: var(--accent);
+      transform: scale(1.15);
+    }
+    .write-in-input {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      margin-top: 4px;
+      margin-bottom: 12px;
+      transition: border-color 0.15s;
+    }
+    .write-in-input:focus { border-color: var(--accent); }
+
+    /* ─── Footer Dock & Shortcuts ─── */
+    footer {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-top: 1px solid var(--border);
+      padding: 8px 16px max(12px, env(safe-area-inset-bottom)) 16px;
+      flex-shrink: 0;
+      z-index: 20;
+    }
+
+    .shortcuts-bar {
+      max-width: 860px;
+      margin: 0 auto 8px auto;
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+    .shortcuts-bar::-webkit-scrollbar { display: none; }
+    .shortcut-pill {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .shortcut-pill:hover {
+      color: var(--text);
+      border-color: var(--border);
+      background: rgba(255, 255, 255, 0.09);
+    }
+
+    .prompt-box {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      position: relative;
+    }
+
+    .input-wrap {
+      flex: 1;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    textarea {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: #fff;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      min-height: 44px;
+      max-height: 140px;
+      outline: none;
+      line-height: 1.4;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
+
+    .model-tag {
+      position: absolute;
+      right: 10px;
+      bottom: 8px;
+      font-size: 10px;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 1px 6px;
+      pointer-events: none;
+    }
+
+    .btn-action {
+      height: 44px;
+      width: 44px;
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      color: #000;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 8px var(--accent-glow);
+    }
+    .btn-action:hover { background: #388bfd; }
+    .btn-action:active { transform: scale(0.95); }
+    .btn-action svg { width: 16px; height: 16px; fill: currentColor; }
+
+    .btn-stop {
+      background: var(--danger) !important;
+      color: #fff !important;
+      box-shadow: 0 2px 8px rgba(248, 81, 73, 0.3) !important;
+    }
+
+    /* ─── Modals (Session Switcher & Confirmation) ─── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 16px;
+    }
+
+    .modal {
+      background: var(--card-solid);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 100%;
+      max-width: 520px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      animation: modalScale 0.18s ease-out;
+    }
+
+    @keyframes modalScale {
+      from { transform: scale(0.95); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .modal-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .modal-body {
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .session-item {
+      padding: 12px 14px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .session-item:hover {
+      border-color: var(--accent);
+      background: rgba(88, 166, 255, 0.05);
+    }
+    .session-item.active {
+      border-color: var(--accent);
+      background: rgba(88, 166, 255, 0.1);
+    }
+    .session-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .session-item-title {
+      font-weight: 600;
+      color: #fff;
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 380px;
+    }
+    .session-item-subdesc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      margin-bottom: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-item-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* ─── Scroll-to-bottom Floating Action Button ─── */
+    .btn-scroll-bottom {
+      position: fixed;
+      right: 20px;
+      bottom: 80px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--card-solid);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      z-index: 15;
+      transition: all 0.15s;
+    }
+    .btn-scroll-bottom:hover { color: #fff; border-color: var(--accent); }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <span>LocalHarness</span>
+    </div>
+
+    <div class="session-picker" id="sessionPickerBtn" onclick="openSessionModal()" title="Switch active session">
+      <span id="activeSessionTitle">Loading session...</span>
+      <span class="chevron">▼</span>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-yolo" id="yoloBtn" onclick="toggleYolo()" title="Toggle YOLO Mode">⚡ YOLO</button>
+      <div class="badge" id="connBadge">
+        <span class="dot dot-disconnected" id="connDot"></span>
+        <span id="connText">Connecting</span>
+      </div>
+      <button class="btn btn-danger" onclick="promptStopTunnel()" title="Stop public tunnel">Stop</button>
+    </div>
+  </header>
+
+  <!-- Main Chat Conversation Feed -->
+  <main id="chatFeed" onscroll="checkScroll(this)">
+    <div class="feed-container" id="feedContainer">
+      <!-- Chat and agent events injected dynamically -->
+    </div>
+  </main>
+
+  <!-- Interactive Action & Question Prompts -->
+  <div id="interactionArea">
+    <!-- Dynamic Approval & Question Cards -->
+  </div>
+
+  <button class="btn-scroll-bottom" id="scrollBottomBtn" onclick="scrollToBottom(true)" title="Scroll to latest">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M7 13l5 5 5-5M7 6l5 5 5-5"/></svg>
+  </button>
+
+  <!-- Footer Input Dock -->
+  <footer>
+    <div class="shortcuts-bar">
+      <span class="shortcut-pill" onclick="insertShortcut('/plan ')">/plan</span>
+      <span class="shortcut-pill" onclick="insertShortcut('/btw ')">/btw</span>
+      <span class="shortcut-pill" onclick="insertShortcut('/status')">/status</span>
+      <span class="shortcut-pill" onclick="insertShortcut('/compact')">/compact</span>
+      <span class="shortcut-pill" onclick="insertShortcut('/help')">/help</span>
+      <span class="shortcut-pill" onclick="toggleThinkingVisibility()">💭 Toggle Reasoning</span>
+    </div>
+
+    <div class="prompt-box">
+      <div class="input-wrap">
+        <textarea id="promptInput" placeholder="Message LocalHarness agent..." rows="1" oninput="autoGrow(this)" onkeydown="handleKeyDown(event)"></textarea>
+        <span class="model-tag" id="modelTag">gpt-4o</span>
+      </div>
+      <button class="btn-action" id="actionBtn" onclick="handleActionButton()" title="Send instructions">
+        <svg id="sendIcon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Session Switcher Modal -->
+  <div class="modal-overlay" id="sessionModal" onclick="closeSessionModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span>Active & Recent Sessions</span>
+        <button class="btn" style="color: var(--accent);" onclick="createNewSession()">+ New Session</button>
+      </div>
+      <div style="padding: 10px 14px 4px 14px; border-bottom: 1px solid var(--border);">
+        <input type="text" id="sessionSearchInput" placeholder="🔍 Search sessions by title, prompt, or workspace..." oninput="filterSessions(this.value)" class="write-in-input" style="margin-bottom: 0;">
+      </div>
+      <div class="modal-body" id="sessionList">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Stop Tunnel Confirmation Modal -->
+  <div class="modal-overlay" id="stopTunnelModal" onclick="closeStopTunnelModal(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span>Stop Cloudflare Tunnel</span>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text); font-size: 13px;">Are you sure you want to stop the Cloudflare Quick Tunnel? This will immediately terminate remote access from this URL.</p>
+        <div style="display: flex; gap: 10px; margin-top: 14px; justify-content: flex-end;">
+          <button class="btn" onclick="closeStopTunnelModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="confirmStopTunnel()">Yes, Stop Tunnel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ─── State Management ───
+    const urlParams = new URLSearchParams(window.location.search);
+    let apiKey = urlParams.get('key') || urlParams.get('api_key') || localStorage.getItem('localharness_api_key') || '';
+    if (!apiKey) {
+      apiKey = prompt('Enter LocalHarness API Key:') || '';
+      if (apiKey) localStorage.setItem('localharness_api_key', apiKey);
+    } else {
+      localStorage.setItem('localharness_api_key', apiKey);
+    }
+
+    let currentSessionId = window.location.hash.replace('#', '') || urlParams.get('session_id') || '';
+    let cachedSessions = [];
+    let ws = null;
+    let isYolo = false;
+    let isRunning = false;
+    let activeStreamCard = null;
+    let activeProseDiv = null;
+    let activeThoughtCard = null;
+    let activeThoughtBody = null;
+    let thoughtStartTime = 0;
+    let thoughtInterval = null;
+    let rawAccumulatedText = '';
+    let userScrolledUp = false;
+
+    // ─── WebSocket Connection ───
+    function getWsUrl(sessionId) {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      let url = `${proto}//${window.location.host}/?api_key=${encodeURIComponent(apiKey)}&format=json`;
+      if (sessionId) {
+        url += `&session_id=${encodeURIComponent(sessionId)}`;
+      }
+      return url;
+    }
+
+    function connectWebSocket() {
+      if (ws) {
+        try { ws.close(); } catch(e){}
+      }
+
+      updateStatus('connecting', 'Connecting...');
+      ws = new WebSocket(getWsUrl(currentSessionId));
+
+      ws.onopen = () => {
+        updateStatus('connected', 'Connected');
+        fetchSessions();
+      };
+
+      ws.onclose = () => {
+        updateStatus('disconnected', 'Disconnected');
+        setRunningState(false);
+        setTimeout(connectWebSocket, 3000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          handleServerMessage(msg);
+        } catch (e) {
+          console.error('JSON parse error:', e, event.data);
+        }
+      };
+    }
+
+    function updateStatus(state, text) {
+      const dot = document.getElementById('connDot');
+      const label = document.getElementById('connText');
+      if (state === 'connected') {
+        dot.className = 'dot dot-connected';
+      } else if (state === 'running') {
+        dot.className = 'dot dot-running';
+      } else {
+        dot.className = 'dot dot-disconnected';
+      }
+      label.innerText = text;
+    }
+
+    function setRunningState(running) {
+      isRunning = running;
+      const btn = document.getElementById('actionBtn');
+      if (running) {
+        btn.className = 'btn-action btn-stop';
+        btn.title = 'Stop / Interrupt execution';
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+        updateStatus('running', 'Running');
+      } else {
+        btn.className = 'btn-action';
+        btn.title = 'Send message';
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+        updateStatus('connected', 'Connected');
+      }
+    }
+
+    // ─── Dispatch Server Messages ───
+    function handleServerMessage(msg) {
+      if (msg.init_response) {
+        currentSessionId = msg.init_response.conversation_id;
+        window.location.hash = currentSessionId;
+        fetchSessions();
+      }
+
+      if (msg.switch_model_response && msg.switch_model_response.model) {
+        document.getElementById('modelTag').innerText = msg.switch_model_response.model;
+      }
+
+      if (msg.step_update) {
+        handleStepUpdate(msg.step_update);
+      }
+    }
+
+    function handleStepUpdate(su) {
+      setRunningState(true);
+
+      // Model Thinking / Chain of Thought
+      const thinkingText = su.thinking || su.thinking_delta || '';
+      if (thinkingText) {
+        ensureAssistantCard();
+        appendThinking(thinkingText);
+      }
+
+      // Streamed Markdown Text Content
+      const contentText = su.text || su.text_delta || su.content || '';
+      if (contentText) {
+        ensureAssistantCard();
+        // If thinking was active, conclude it
+        concludeThinking();
+        rawAccumulatedText += contentText;
+        activeProseDiv.innerHTML = renderMarkdown(rawAccumulatedText);
+        scrollToBottom();
+      }
+
+      // Tool Call Action Notifications
+      if (su.action) {
+        handleToolAction(su.action, su.state);
+      }
+
+      // Permission / Action Approval Request
+      if (su.permission_request) {
+        vibratePhone();
+        renderApprovalCard(su.permission_request);
+      } else if (su.action && su.action.permission_request) {
+        vibratePhone();
+        renderApprovalCard(su.action.permission_request);
+      }
+
+      // Question Request (ask_question)
+      if (su.question_request) {
+        vibratePhone();
+        renderQuestionCard(su.question_request);
+      } else if (su.action && su.action.user_question) {
+        vibratePhone();
+        renderQuestionCard(su.action.user_question);
+      }
+
+      // Turn Completion
+      if (su.state === 'STATE_COMPLETED' || su.state === 'STATE_DONE' || su.state === 2) {
+        if (!su.action) {
+          activeStreamCard = null;
+          activeProseDiv = null;
+          concludeThinking();
+          rawAccumulatedText = '';
+          setRunningState(false);
+        }
+      }
+    }
+
+    function ensureAssistantCard() {
+      if (!activeStreamCard) {
+        const feed = document.getElementById('feedContainer');
+        const wrap = document.createElement('div');
+        wrap.className = 'message';
+        activeStreamCard = document.createElement('div');
+        activeStreamCard.className = 'message-assistant';
+        activeProseDiv = document.createElement('div');
+        activeProseDiv.className = 'prose';
+        activeStreamCard.appendChild(activeProseDiv);
+        wrap.appendChild(activeStreamCard);
+        feed.appendChild(wrap);
+        rawAccumulatedText = '';
+        scrollToBottom();
+      }
+    }
+
+    function appendThinking(delta) {
+      if (!activeThoughtCard) {
+        thoughtStartTime = Date.now();
+        activeThoughtCard = document.createElement('div');
+        activeThoughtCard.className = 'thought-card expanded';
+        activeThoughtCard.innerHTML = `
+          <div class="thought-header" onclick="this.parentElement.classList.toggle('expanded')">
+            <span class="thought-title">
+              <span class="thought-pulse"></span>
+              <span id="thoughtTimer">Thinking for 1s...</span>
+            </span>
+            <span class="thought-chevron">▶</span>
+          </div>
+          <div class="thought-body" id="activeThoughtBody"></div>
+        `;
+        activeStreamCard.insertBefore(activeThoughtCard, activeProseDiv);
+        activeThoughtBody = activeThoughtCard.querySelector('#activeThoughtBody');
+
+        thoughtInterval = setInterval(() => {
+          const sec = Math.max(1, Math.round((Date.now() - thoughtStartTime) / 1000));
+          const tLabel = activeThoughtCard.querySelector('#thoughtTimer');
+          if (tLabel) tLabel.innerText = `Thinking for ${sec}s...`;
+        }, 1000);
+      }
+
+      activeThoughtBody.innerText += delta;
+      scrollToBottom();
+    }
+
+    function concludeThinking() {
+      if (thoughtInterval) {
+        clearInterval(thoughtInterval);
+        thoughtInterval = null;
+      }
+      if (activeThoughtCard) {
+        const sec = Math.max(1, Math.round((Date.now() - thoughtStartTime) / 1000));
+        const tLabel = activeThoughtCard.querySelector('#thoughtTimer');
+        if (tLabel) {
+          tLabel.innerHTML = `💭 Thought for ${sec}s`;
+        }
+        const pulse = activeThoughtCard.querySelector('.thought-pulse');
+        if (pulse) pulse.remove();
+        // Collapse by default once completed
+        activeThoughtCard.classList.remove('expanded');
+        activeThoughtCard = null;
+        activeThoughtBody = null;
+      }
+    }
+
+    function handleToolAction(action, state) {
+      ensureAssistantCard();
+      let toolName = 'tool';
+      let summary = '';
+      let typeClass = 'tool-pill-read';
+
+      if (action.run_command) {
+        toolName = 'run_command';
+        summary = action.run_command.command_line || '';
+        typeClass = 'tool-pill-command';
+      } else if (action.replace_file_content) {
+        toolName = 'replace_file_content';
+        summary = action.replace_file_content.target_file || '';
+        typeClass = 'tool-pill-edit';
+      } else if (action.write_to_file) {
+        toolName = 'write_to_file';
+        summary = action.write_to_file.target_file || '';
+        typeClass = 'tool-pill-edit';
+      } else if (action.view_file) {
+        toolName = 'view_file';
+        summary = action.view_file.absolute_path || '';
+        typeClass = 'tool-pill-read';
+      } else if (action.grep_search) {
+        toolName = 'grep_search';
+        summary = action.grep_search.query || '';
+        typeClass = 'tool-pill-read';
+      } else if (action.invoke_subagent) {
+        toolName = 'subagent';
+        summary = action.invoke_subagent.subagents?.[0]?.role || 'child agent';
+        typeClass = 'tool-pill-subagent';
+      }
+
+      const pill = document.createElement('div');
+      pill.className = `tool-pill ${typeClass}`;
+      pill.title = summary;
+      pill.innerHTML = `
+        <span class="tool-pill-icon">⚙️</span>
+        <strong>${escapeHtml(toolName)}</strong>
+        <span style="opacity: 0.75; font-size: 11px;">${escapeHtml(summary)}</span>
+      `;
+      activeStreamCard.insertBefore(pill, activeProseDiv);
+      scrollToBottom();
+    }
+
+    // ─── Sending Messages & Actions ───
+    function handleActionButton() {
+      if (isRunning) {
+        // Send interrupt
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ interrupt: {} }));
+        }
+        setRunningState(false);
+        return;
+      }
+      sendPrompt();
+    }
+
+    function cleanPromptTitle(text) {
+      if (!text) return 'New Session';
+      let clean = text.replace(/<[^>]*>/g, '').trim();
+      if (clean.startsWith('/plan ')) clean = 'Plan: ' + clean.substring(6).trim();
+      else if (clean.startsWith('/teamwork ')) clean = 'Teamwork: ' + clean.substring(10).trim();
+      else if (clean.startsWith('/')) clean = clean.substring(1).trim();
+      if (clean.length > 50) {
+        clean = clean.substring(0, 47) + '...';
+      }
+      return clean ? (clean.charAt(0).toUpperCase() + clean.slice(1)) : 'New Session';
+    }
+
+    function sendPrompt() {
+      const input = document.getElementById('promptInput');
+      const text = input.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+      // Optimistically update session title if currently generic
+      const titleElem = document.getElementById('activeSessionTitle');
+      const curTitle = titleElem ? titleElem.innerText : '';
+      if (!curTitle || curTitle === 'Loading session...' || curTitle.startsWith('Session: ') || curTitle === 'New Session') {
+        const optimistic = cleanPromptTitle(text);
+        if (optimistic && titleElem) {
+          titleElem.innerText = optimistic;
+        }
+      }
+
+      // Render locally
+      const feed = document.getElementById('feedContainer');
+      const wrap = document.createElement('div');
+      wrap.className = 'message';
+      const userBox = document.createElement('div');
+      userBox.className = 'message-user';
+      userBox.innerText = text;
+      wrap.appendChild(userBox);
+      feed.appendChild(wrap);
+
+      input.value = '';
+      input.style.height = '44px';
+      scrollToBottom();
+
+      // Reset assistant stream state for next response
+      activeStreamCard = null;
+      activeProseDiv = null;
+      rawAccumulatedText = '';
+      setRunningState(true);
+
+      const clientMsg = {
+        user_message: {
+          content: text,
+          conversation_id: currentSessionId
+        }
+      };
+      ws.send(JSON.stringify(clientMsg));
+    }
+
+    // ─── Action Approvals & Modals ───
+    function renderApprovalCard(req) {
+      const area = document.getElementById('interactionArea');
+      area.innerHTML = '';
+
+      const card = document.createElement('div');
+      card.className = 'approval-card';
+      card.innerHTML = `
+        <div class="approval-header">
+          <span class="approval-badge">⚠️ Action Approval Requested</span>
+          <span class="approval-tool">${escapeHtml(req.tool_name || 'Tool')}</span>
+        </div>
+        <div class="approval-desc">${escapeHtml(req.args_summary || '')}</div>
+        ${req.diff_preview ? `<div class="diff-preview">${formatDiff(req.diff_preview)}</div>` : ''}
+        <div class="approval-actions">
+          <button class="btn btn-approve" onclick="respondPermission('${req.request_id}', true, false)">✓ Allow Once</button>
+          <button class="btn btn-approve-session" onclick="respondPermission('${req.request_id}', true, true)">⚡ Allow in Session</button>
+          <button class="btn btn-deny" onclick="respondPermission('${req.request_id}', false, false)">✗ Deny</button>
+        </div>
+      `;
+      area.appendChild(card);
+      scrollToBottom(true);
+    }
+
+    function respondPermission(reqId, approved, sessionScope) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const resp = {
+        permission_response: {
+          request_id: reqId,
+          approved: approved,
+          allow_in_conversation: sessionScope
+        }
+      };
+      ws.send(JSON.stringify(resp));
+      document.getElementById('interactionArea').innerHTML = '';
+    }
+
+    function renderQuestionCard(req) {
+      const area = document.getElementById('interactionArea');
+      area.innerHTML = '';
+
+      const card = document.createElement('div');
+      card.className = 'question-card';
+      let optionsHtml = '';
+      if (req.options) {
+        req.options.forEach((opt, idx) => {
+          optionsHtml += `
+            <label class="question-option">
+              <input type="radio" name="q_opt" value="${escapeHtml(opt)}" ${idx === 0 ? 'checked' : ''}>
+              <span>${escapeHtml(opt)}</span>
+            </label>
+          `;
+        });
+      }
+
+      card.innerHTML = `
+        <div class="question-title">❓ ${escapeHtml(req.question || 'Clarification Question')}</div>
+        ${optionsHtml}
+        <input type="text" class="write-in-input" id="qWriteIn" placeholder="Or type custom instructions...">
+        <button class="btn btn-primary" style="width: 100%; padding: 10px; font-weight: 600; border-radius: 8px;" onclick="submitQuestionAnswer('${req.request_id}')">Submit Answer</button>
+      `;
+      area.appendChild(card);
+      scrollToBottom(true);
+    }
+
+    function submitQuestionAnswer(reqId) {
+      const writeIn = document.getElementById('qWriteIn')?.value.trim();
+      let answer = writeIn;
+      if (!answer) {
+        const checked = document.querySelector('input[name="q_opt"]:checked');
+        if (checked) answer = checked.value;
+      }
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      const resp = {
+        question_response: {
+          request_id: reqId,
+          answers: [{ answer: answer }]
+        }
+      };
+      ws.send(JSON.stringify(resp));
+      document.getElementById('interactionArea').innerHTML = '';
+    }
+
+    function toggleYolo() {
+      isYolo = !isYolo;
+      const btn = document.getElementById('yoloBtn');
+      if (isYolo) {
+        btn.classList.add('active');
+        btn.innerText = '⚡ YOLO: ON';
+      } else {
+        btn.classList.remove('active');
+        btn.innerText = '⚡ YOLO';
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ set_yolo_mode: { enabled: isYolo } }));
+      }
+    }
+
+    // ─── Session Switcher ───
+    function fetchSessions() {
+      fetch(`/api/sessions?api_key=${encodeURIComponent(apiKey)}`)
+        .then(r => r.json())
+        .then(sessions => {
+          cachedSessions = sessions || [];
+          // Update active session title if found in list
+          if (currentSessionId) {
+            const cur = cachedSessions.find(s => s.id === currentSessionId);
+            if (cur) {
+              const displayTitle = cur.title || cur.description || ('Session ' + cur.id.slice(0, 8));
+              const titleElem = document.getElementById('activeSessionTitle');
+              if (titleElem) {
+                titleElem.innerText = displayTitle;
+                titleElem.title = `${displayTitle} (${cur.id})`;
+              }
+            } else {
+              const titleElem = document.getElementById('activeSessionTitle');
+              if (titleElem && titleElem.innerText === 'Loading session...') {
+                titleElem.innerText = 'Session: ' + currentSessionId.slice(0, 8);
+              }
+            }
+          }
+          const searchInput = document.getElementById('sessionSearchInput');
+          const query = searchInput ? searchInput.value : '';
+          filterSessions(query);
+        })
+        .catch(err => console.warn('Could not list sessions:', err));
+    }
+
+    function filterSessions(query) {
+      const q = (query || '').toLowerCase().trim();
+      if (!q) {
+        renderSessionList(cachedSessions);
+        return;
+      }
+      const filtered = cachedSessions.filter(s => {
+        const title = (s.title || '').toLowerCase();
+        const desc = (s.description || '').toLowerCase();
+        const ws = (s.workspace || '').toLowerCase();
+        const id = (s.id || '').toLowerCase();
+        return title.includes(q) || desc.includes(q) || ws.includes(q) || id.includes(q);
+      });
+      renderSessionList(filtered);
+    }
+
+    function renderSessionList(sessions) {
+      const list = document.getElementById('sessionList');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!sessions || sessions.length === 0) {
+        list.innerHTML = '<div style="color: var(--text-muted); padding: 16px; text-align: center;">No matching sessions found.</div>';
+        return;
+      }
+      sessions.forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'session-item ' + (s.id === currentSessionId ? 'active' : '');
+        const titleText = s.title || s.description || ('Session ' + s.id.slice(0, 8));
+        item.onclick = () => switchSession(s.id, titleText);
+
+        const showSubdesc = s.description && s.title && s.title !== s.description;
+        const tokensFormatted = (s.tokenCount || 0).toLocaleString();
+        const wsFormatted = s.workspace ? escapeHtml(s.workspace) : 'Workspace';
+
+        item.innerHTML = `
+          <div class="session-item-header">
+            <span class="session-item-title" title="${escapeHtml(titleText)}">${escapeHtml(titleText)}</span>
+            <span class="badge" style="font-size: 10px;">${escapeHtml(s.status || 'active')}</span>
+          </div>
+          ${showSubdesc ? `<div class="session-item-subdesc" title="${escapeHtml(s.description)}">${escapeHtml(s.description)}</div>` : ''}
+          <div class="session-item-meta">${wsFormatted} • ID: ${escapeHtml(s.id.slice(0, 8))} • ${tokensFormatted} tokens</div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    function switchSession(id, title) {
+      currentSessionId = id;
+      window.location.hash = id;
+      const displayTitle = title || ('Session: ' + id.slice(0, 8));
+      const titleElem = document.getElementById('activeSessionTitle');
+      if (titleElem) {
+        titleElem.innerText = displayTitle;
+        titleElem.title = `${displayTitle} (${id})`;
+      }
+      closeSessionModal();
+      document.getElementById('feedContainer').innerHTML = '';
+      document.getElementById('interactionArea').innerHTML = '';
+      connectWebSocket();
+    }
+
+    function createNewSession() {
+      fetch(`/api/sessions/new?api_key=${encodeURIComponent(apiKey)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.session_id) switchSession(res.session_id, 'New Session');
+        })
+        .catch(() => {
+          // Fallback: generate client UUID
+          const uuid = 'sess-' + Math.random().toString(36).substring(2, 10);
+          switchSession(uuid, 'New Session');
+        });
+    }
+
+    function openSessionModal() {
+      const searchInput = document.getElementById('sessionSearchInput');
+      if (searchInput) searchInput.value = '';
+      fetchSessions();
+      document.getElementById('sessionModal').style.display = 'flex';
+      if (searchInput) searchInput.focus();
+    }
+
+    function closeSessionModal() {
+      document.getElementById('sessionModal').style.display = 'none';
+    }
+
+    // ─── Stop Tunnel Flow ───
+    function promptStopTunnel() {
+      document.getElementById('stopTunnelModal').style.display = 'flex';
+    }
+
+    function closeStopTunnelModal() {
+      document.getElementById('stopTunnelModal').style.display = 'none';
+    }
+
+    function confirmStopTunnel() {
+      closeStopTunnelModal();
+      fetch(`/api/tunnel/stop?api_key=${encodeURIComponent(apiKey)}`, { method: 'POST' })
+        .then(() => {
+          document.body.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; padding: 24px; text-align: center;">
+              <h2 style="color: #fff; margin-bottom: 8px;">🌐 Tunnel Stopped</h2>
+              <p style="color: #8b949e; max-width: 400px; margin-bottom: 16px;">The Cloudflare Quick Tunnel has been stopped and remote public ingress is now closed.</p>
+              <p style="color: #58a6ff; font-size: 13px;">To resume, run <code>lhctl --tunnel</code> or <code>/remote-control</code> in your local terminal.</p>
+            </div>
+          `;
+        })
+        .catch(err => alert('Failed to stop tunnel: ' + err));
+    }
+
+    // ─── Shortcuts & Input Helpers ───
+    function insertShortcut(text) {
+      const input = document.getElementById('promptInput');
+      input.value = text;
+      input.focus();
+      autoGrow(input);
+    }
+
+    function toggleThinkingVisibility() {
+      document.querySelectorAll('.thought-card').forEach(c => c.classList.toggle('expanded'));
+    }
+
+    function autoGrow(element) {
+      element.style.height = '44px';
+      element.style.height = Math.min(140, element.scrollHeight) + 'px';
+    }
+
+    function handleKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleActionButton();
+      }
+    }
+
+    function checkScroll(el) {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      userScrolledUp = distanceFromBottom > 60;
+      document.getElementById('scrollBottomBtn').style.display = userScrolledUp ? 'flex' : 'none';
+    }
+
+    function scrollToBottom(force = false) {
+      const feed = document.getElementById('chatFeed');
+      if (force || !userScrolledUp) {
+        feed.scrollTop = feed.scrollHeight;
+      }
+    }
+
+    function vibratePhone() {
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate([40, 60, 40]); } catch(e){}
+      }
+    }
+
+    // ─── Markdown & Diff Renderer ───
+    function renderMarkdown(md) {
+      if (!md) return '';
+      let html = escapeHtml(md);
+
+      // Fenced Code Blocks (```lang ... ```)
+      html = html.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (match, lang, code) => {
+        const id = 'code-' + Math.random().toString(36).substring(2, 9);
+        return `
+          <div class="code-container">
+            <div class="code-header">
+              <span>${lang || 'code'}</span>
+              <button class="btn-copy" onclick="copyCode('${id}', this)">📋 Copy</button>
+            </div>
+            <pre class="code-block" id="${id}"><code>${code.trim()}</code></pre>
+          </div>
+        `;
+      });
+
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // Headers
+      html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+      html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+      html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+
+      // Bold & Italic
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+      // Unordered Lists
+      html = html.replace(/^\s*[-*]\s+(.*)$/gim, '<li>$1</li>');
+      html = html.replace(/(<li>.*<\/li>)/sim, '<ul>$1</ul>');
+
+      // Paragraphs & Newlines
+      html = html.split('\n\n').map(p => {
+        p = p.trim();
+        if (!p) return '';
+        if (p.startsWith('<h') || p.startsWith('<div') || p.startsWith('<ul') || p.startsWith('<ol')) {
+          return p;
+        }
+        return `<p>${p.replace(/\n/g, '<br>')}</p>`;
+      }).join('');
+
+      return html;
+    }
+
+    function formatDiff(diff) {
+      if (!diff) return '';
+      return diff.split('\n').map(line => {
+        if (line.startsWith('+')) {
+          return `<span class="diff-add">${escapeHtml(line)}</span>`;
+        } else if (line.startsWith('-')) {
+          return `<span class="diff-del">${escapeHtml(line)}</span>`;
+        }
+        return escapeHtml(line);
+      }).join('\n');
+    }
+
+    function copyCode(id, btn) {
+      const codeEl = document.getElementById(id);
+      if (!codeEl) return;
+      navigator.clipboard.writeText(codeEl.innerText).then(() => {
+        btn.innerText = '✓ Copied';
+        setTimeout(() => { btn.innerText = '📋 Copy'; }, 2000);
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // ─── Initialize ───
+    connectWebSocket();
+  </script>
+</body>
+</html>

@@ -47,6 +47,8 @@ var AvailableSlashCommands = []SlashCommandDef{
 	{"/compact", "Compact conversation context history"},
 	{"/context", "Visualize 2D context usage, tokens & active items"},
 	{"/btw", "Ask a side question without interrupting current task"},
+	{"/remote-control", "Start zero-login Cloudflare Quick Tunnel for remote access"},
+	{"/tunnel", "Manage Cloudflare Quick Tunnel and QR code (on, off, status)"},
 	{"/version", "Display client & daemon version and runtime"},
 	{"/clear", "Clear chat viewport history"},
 	{"/detach", "Detach TUI (agents continue in background)"},

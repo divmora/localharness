@@ -19,8 +19,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 2. Protocol & Wire Format
 
-- [ ] **JSON Wire Format Debug Option**
-  - Provide a toggle for JSON wire format alongside Protobuf for simplified debugging, curl-friendly testing, and third-party WebSocket integrations.
 - [ ] **Multimedia User Messages & Multimodal Vision Pipeline**
   - Support multi-part user messages including image, audio, and binary inputs across pipe and WebSocket transports.
   - Convert screenshot artifacts from `desktop_subagent`, `desktop_screenshot`, and `browser_subagent` into base64 `image_url` data parts in `llm.Message` so vision models (GPT-4o, Claude 3.5 Sonnet, Gemini 2.0 Flash) can directly inspect screen layout and visual UI elements.

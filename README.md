@@ -20,6 +20,12 @@ lhctl (Interactive TUI) / SDK ◄── WebSocket + Protobuf ──► LocalHarn
                                                                  │   ├── Ephemeral Subprocess (Stdin/Stdout pipe handshake)
                                                                  │   └── Persistent Background Daemon (Unix socket + TCP)
                                                                  │
+                                                                 ├── Web Remote Control (Cloudflare Quick Tunnels)
+                                                                 │   ├── Zero-login trycloudflare.com ephemeral tunnels
+                                                                 │   ├── ANSI terminal QR code generation for mobile pairing
+                                                                 │   ├── Dual-protocol engine (protojson for browsers, protobuf for CLI)
+                                                                 │   └── Mobile web app with streaming tokens & approval cards
+                                                                 │
                                                                  ├── Interactive TUI (lhctl)
                                                                  │   ├── Real-time token streaming & markdown rendering
                                                                  │   ├── Animated tool spinners & execution duration
@@ -114,14 +120,28 @@ make build-lhctl
 
 > In `lhctl`, sessions always start fresh by default. Use `-c` to resume the most recent conversation or `-c <id>` to resume by ID. On exit, `lhctl` displays the exact command to resume your session. Press **`Shift+Tab`** to cycle between **`DEFAULT`** (Safe Mode), **`ACCEPT-EDITS`** (Auto-Accept Edits), and **`PLAN`** (Plan-Before-Act) modes. Type `/` for instant command autocomplete or `@` for workspace file mentions. See [docs/lhctl.md](docs/lhctl.md) for full documentation.
 
-### 2. Build Engine from Source
+### 2. Web Remote Control & Mobile Access
+
+Control LocalHarness sessions from your phone, tablet, or secondary browser over a zero-login Cloudflare Quick Tunnel:
+
+```bash
+# Launch session with remote control enabled
+./bin/lhctl --tunnel
+
+# Or start tunnel inside active TUI
+/remote-control
+```
+
+Prints an instant scannable ANSI QR code and secure link (`https://<subdomain>.trycloudflare.com/?key=...#<session-id>`). See [docs/remote-control.md](docs/remote-control.md) for full details.
+
+### 3. Build Engine from Source
 
 ```bash
 make build
 # Binary created at bin/localharness
 ```
 
-### 3. Run via Test Client
+### 4. Run via Test Client
 
 ```bash
 # Run a prompt (requires Gemini / LiteLLM API key)

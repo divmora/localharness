@@ -3,6 +3,8 @@ package server
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,6 +14,22 @@ import (
 	"github.com/divmora/localharness/internal/config"
 	"github.com/gorilla/websocket"
 )
+
+//go:embed web/remote_control.html
+var remoteControlHTML []byte
+
+// SessionSummary represents concise metadata for a running or saved session.
+type SessionSummary struct {
+	ID              string `json:"id"`
+	Title           string `json:"title,omitempty"`
+	Description     string `json:"description,omitempty"`
+	Workspace       string `json:"workspace,omitempty"`
+	Model           string `json:"model,omitempty"`
+	Status          string `json:"status"` // RUNNING, WAITING, IDLE, SAVED
+	WaitingApproval bool   `json:"waitingApproval"`
+	TokenCount      int64  `json:"tokenCount"`
+	UpdatedAt       string `json:"updatedAt,omitempty"`
+}
 
 // Server is the WebSocket server for LocalHarness.
 type Server struct {
@@ -23,6 +41,10 @@ type Server struct {
 	SessionHandler func(conn *websocket.Conn)
 	// SessionHandlerWithReq is called for each new WebSocket connection with HTTP request metadata.
 	SessionHandlerWithReq func(conn *websocket.Conn, r *http.Request)
+	// ActiveSessionsProvider returns list of active sessions for the Web Remote Control dashboard.
+	ActiveSessionsProvider func() []SessionSummary
+	// StopTunnelHandler is invoked when the Web Remote Control requests stopping the public tunnel.
+	StopTunnelHandler func() error
 
 	activeSession *Session
 	sessionMu     sync.RWMutex
@@ -65,7 +87,11 @@ func (s *Server) StartWithListener(ctx context.Context, ln net.Listener) error {
 	mux := http.NewServeMux()
 
 	// Secure endpoints
-	mux.HandleFunc("/", AuthMiddleware(s.apiKey, s.handleWebSocket))
+	mux.HandleFunc("/", AuthMiddleware(s.apiKey, s.handleRoot))
+	mux.HandleFunc("/control", AuthMiddleware(s.apiKey, s.handleRemoteControlWeb))
+	mux.HandleFunc("/ui", AuthMiddleware(s.apiKey, s.handleRemoteControlWeb))
+	mux.HandleFunc("/api/sessions", AuthMiddleware(s.apiKey, s.handleListSessions))
+	mux.HandleFunc("/api/tunnel/stop", AuthMiddleware(s.apiKey, s.handleStopTunnel))
 	mux.HandleFunc("/status", AuthMiddleware(s.apiKey, s.handleStatus))
 
 	// Public endpoints
@@ -78,6 +104,51 @@ func (s *Server) StartWithListener(ctx context.Context, ln net.Listener) error {
 	)
 
 	return http.Serve(ln, mux)
+}
+
+// handleRoot dispatches to WebSocket upgrade if requested, or serves the Web Remote Control UI.
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Upgrade") == "websocket" {
+		s.handleWebSocket(w, r)
+		return
+	}
+	s.handleRemoteControlWeb(w, r)
+}
+
+// handleRemoteControlWeb serves the embedded Web Remote Control single-page application.
+func (s *Server) handleRemoteControlWeb(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(remoteControlHTML)
+}
+
+// handleListSessions returns active sessions for the remote control multi-session switcher.
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var sessions []SessionSummary
+	if s.ActiveSessionsProvider != nil {
+		sessions = s.ActiveSessionsProvider()
+	} else {
+		s.sessionMu.RLock()
+		sess := s.activeSession
+		s.sessionMu.RUnlock()
+		if sess != nil {
+			sessions = append(sessions, sess.Summary())
+		}
+	}
+	_ = json.NewEncoder(w).Encode(sessions)
+}
+
+// handleStopTunnel stops the Cloudflare tunnel upon remote request.
+func (s *Server) handleStopTunnel(w http.ResponseWriter, r *http.Request) {
+	if s.StopTunnelHandler != nil {
+		if err := s.StopTunnelHandler(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status":"stopped"}`)
 }
 
 // handleWebSocket upgrades HTTP to WebSocket and creates a session.

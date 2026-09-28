@@ -70,6 +70,10 @@ lhctl attach <session-id>
 | `--max-auto-wake` | | Maximum consecutive auto-wake turns for background tasks/subagents | `5` |
 | `--detach` | `-d` | Launch prompt in background daemon without blocking | `false` |
 | `--prompt` | `-p` | Initial prompt to execute immediately | `""` |
+| `--tunnel` | | Start zero-login Cloudflare Quick Tunnel for remote control | `false` |
+| `--remote-control` | | Alias for `--tunnel` | `false` |
+| `--url` | | Connect to remote LocalHarness daemon/tunnel URL (e.g. `wss://...`) | `""` |
+| `--api-key` | | API key for authenticating with remote daemon | `""` |
 | `--data-dir` | | Global data directory override | `~/.divmora/localharness/` |
 
 ---
@@ -196,6 +200,8 @@ When the model calls the `ask_question` tool to clarify ambiguous requirements, 
 | `/voice [start|stop|auto]` | Toggle voice dictation recording or toggle auto-spoken response playback |
 | `/speak [auto|stop|<text>]` | Speak assistant response aloud with native TTS (or toggle auto-speech) |
 | `/yolo` | Toggle YOLO Mode on/off (bypass all approval queues) |
+| `/remote-control` | Start zero-login Cloudflare Quick Tunnel for remote access |
+| `/tunnel [on|off|status]` | Manage Cloudflare Quick Tunnel and display terminal QR code |
 | `/detach` | Detach TUI while agent runs in background |
 | `/clear` | Clear the chat history viewport |
 | `/exit`, `/quit` | Exit the TUI session |
@@ -323,6 +329,31 @@ lhctl daemon stop
 ```
 
 > **Self-Hosting Daemon**: If the `localharness` binary is not found in system `$PATH` or cache, `lhctl` automatically self-hosts the background daemon using its internal runtime (`lhctl daemon run`), making `lhctl` completely self-contained with no external binary dependency.
+
+---
+
+## Remote Control & Cloudflare Quick Tunnels
+
+Securely monitor, prompt, and approve actions from mobile phones, tablets, or remote browsers via zero-login Cloudflare Quick Tunnels:
+
+```bash
+# Start background daemon with Cloudflare tunnel enabled
+lhctl daemon start --tunnel
+
+# Start dedicated tunnel forwarding to local daemon
+lhctl tunnel start
+
+# Inspect tunnel status and display the terminal ANSI QR code
+lhctl tunnel status
+
+# Stop active tunnel
+lhctl tunnel stop
+
+# Attach a remote terminal over tunnel
+lhctl attach <session-id> --url wss://<subdomain>.trycloudflare.com --api-key <key>
+```
+
+In the interactive TUI, type `/remote-control` or `/tunnel on` to start the tunnel on demand, display the ANSI QR code, and scan it with your phone camera. See [docs/remote-control.md](remote-control.md) for full architecture and security details.
 
 ---
 

@@ -18,6 +18,8 @@ type Info struct {
 	APIKey    string    `json:"apiKey"`
 	StartedAt time.Time `json:"startedAt"`
 	Version   string    `json:"version"`
+	TunnelURL string    `json:"tunnelUrl,omitempty"`
+	TunnelPID int       `json:"tunnelPid,omitempty"`
 }
 
 // GetDaemonDir returns ~/.divmora/localharness/.
@@ -135,7 +137,15 @@ func StopDaemon(logger *slog.Logger) error {
 	if p, err := os.FindProcess(info.PID); err == nil {
 		_ = p.Kill()
 	}
+	if info.TunnelPID > 0 {
+		if tp, err := os.FindProcess(info.TunnelPID); err == nil {
+			_ = tp.Kill()
+		}
+	}
 	_ = RemoveDaemonInfo()
+	if daemonDir, err := GetDaemonDir(); err == nil {
+		_ = os.Remove(filepath.Join(daemonDir, "tunnel.json"))
+	}
 	if logger != nil {
 		logger.Info("daemon killed", "pid", info.PID)
 	}

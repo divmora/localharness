@@ -69,10 +69,16 @@ type wsWriter struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	logger    *slog.Logger
+	isJSON    bool
 }
 
-// newWSWriter creates a new wsWriter for the given connection.
+// newWSWriter creates a new wsWriter for the given connection in binary mode.
 func newWSWriter(conn *websocket.Conn, logger *slog.Logger) *wsWriter {
+	return newWSWriterWithMode(conn, logger, false)
+}
+
+// newWSWriterWithMode creates a new wsWriter specifying whether it should write text JSON or binary protobuf.
+func newWSWriterWithMode(conn *websocket.Conn, logger *slog.Logger, isJSON bool) *wsWriter {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -81,6 +87,7 @@ func newWSWriter(conn *websocket.Conn, logger *slog.Logger) *wsWriter {
 		outCh:  make(chan *[]byte, wsWriteQueueSize),
 		done:   make(chan struct{}),
 		logger: logger,
+		isJSON: isJSON,
 	}
 }
 
@@ -122,7 +129,11 @@ func (w *wsWriter) writePump() {
 				return
 			}
 			_ = w.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
-			err := w.conn.WriteMessage(websocket.BinaryMessage, *bufPtr)
+			msgType := websocket.BinaryMessage
+			if w.isJSON {
+				msgType = websocket.TextMessage
+			}
+			err := w.conn.WriteMessage(msgType, *bufPtr)
 			putProtoBuf(bufPtr)
 			if err != nil {
 				w.logger.Error("WebSocket write error", "error", err)

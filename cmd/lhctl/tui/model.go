@@ -21,6 +21,7 @@ import (
 	"github.com/divmora/localharness/internal/config"
 	"github.com/divmora/localharness/internal/daemon"
 	"github.com/divmora/localharness/internal/llm"
+	"github.com/divmora/localharness/internal/tunnel"
 )
 
 // Model is the main Bubbletea TUI application model.
@@ -182,6 +183,23 @@ func discoverLiteLLMModelsCmd() tea.Cmd {
 	}
 }
 
+// TunnelStartedMsg carries the result of async Cloudflare Quick Tunnel startup.
+type TunnelStartedMsg struct {
+	Info *tunnel.Info
+	Err  error
+}
+
+func startTunnelCmd(port int, sessionID, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		tunMgr := tunnel.NewManager(nil)
+		info, err := tunMgr.Start(context.Background(), port, sessionID, apiKey)
+		return TunnelStartedMsg{
+			Info: info,
+			Err:  err,
+		}
+	}
+}
+
 // Init initializes Bubbletea subscriptions.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
@@ -251,6 +269,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelCatalog = append(m.modelCatalog, msg.Models...)
 		}
 		return m, nil
+
+	case TunnelStartedMsg:
+		if msg.Err != nil {
+			item := m.history.AddSystemMessage(fmt.Sprintf("⚠️ Failed to start tunnel: %v", msg.Err))
+			return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
+		}
+		res := fmt.Sprintf("🌐 Cloudflare Quick Tunnel active (PID %d)\nRemote Control URL: %s",
+			msg.Info.PID, msg.Info.ControlURL)
+		if qr, err := tunnel.GenerateTerminalQRCode(msg.Info.ControlURL); err == nil {
+			res += "\n\nScan with phone:\n" + qr
+		}
+		item := m.history.AddSystemMessage(res)
+		return m, tea.Println(m.history.RenderItem(item, m.getWidth()))
 
 	case tea.KeyMsg:
 		// Active audio recording handling: Enter/F5/Ctrl+R transcribes, Esc/Ctrl+C cancels
@@ -1267,6 +1298,74 @@ func (m *Model) handleSlashCommand(cmd *Command) tea.Cmd {
 			_ = m.client.Close()
 		}
 		return tea.Quit
+
+	case "remote-control", "tunnel":
+		sub := "on"
+		if len(cmd.Args) > 0 {
+			sub = strings.ToLower(cmd.Args[0])
+		}
+
+		tunMgr := tunnel.NewManager(nil)
+		switch sub {
+		case "off", "stop":
+			if err := tunMgr.Stop(); err != nil {
+				item := m.history.AddSystemMessage(fmt.Sprintf("⚠️ Failed to stop tunnel: %v", err))
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+			item := m.history.AddSystemMessage("🌐 Cloudflare Quick Tunnel stopped.")
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+
+		case "status":
+			running, tunInfo, err := tunnel.IsTunnelRunning()
+			if err != nil || !running || tunInfo == nil {
+				item := m.history.AddSystemMessage("🌐 Cloudflare Quick Tunnel: not running. Start with /remote-control or /tunnel on")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+			msg := fmt.Sprintf("🌐 Cloudflare Quick Tunnel: active (PID %d)\nPublic URL: %s\nRemote Control URL: %s",
+				tunInfo.PID, tunInfo.URL, tunInfo.ControlURL)
+			if qr, err := tunnel.GenerateTerminalQRCode(tunInfo.ControlURL); err == nil {
+				msg += "\n\nScan with phone:\n" + qr
+			}
+			item := m.history.AddSystemMessage(msg)
+			return tea.Println(m.history.RenderItem(item, m.getWidth()))
+
+		case "on", "start":
+			fallthrough
+		default:
+			if running, tunInfo, _ := tunnel.IsTunnelRunning(); running && tunInfo != nil {
+				msg := fmt.Sprintf("🌐 Cloudflare Quick Tunnel is already active (PID %d)\nRemote Control URL: %s",
+					tunInfo.PID, tunInfo.ControlURL)
+				if qr, err := tunnel.GenerateTerminalQRCode(tunInfo.ControlURL); err == nil {
+					msg += "\n\nScan with phone:\n" + qr
+				}
+				item := m.history.AddSystemMessage(msg)
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+
+			port := 0
+			apiKey := ""
+			sessionID := ""
+			if m.client != nil {
+				sessionID = m.client.SessionID()
+				apiKey = m.client.APIKey()
+			}
+			if running, dInfo, _ := daemon.IsDaemonRunning(); running && dInfo != nil {
+				port = dInfo.Port
+				if apiKey == "" {
+					apiKey = dInfo.APIKey
+				}
+			}
+			if port == 0 {
+				item := m.history.AddSystemMessage("⚠️ Cannot determine daemon port to expose. Ensure the daemon is running.")
+				return tea.Println(m.history.RenderItem(item, m.getWidth()))
+			}
+
+			item := m.history.AddSystemMessage("🌐 Starting zero-login Cloudflare Quick Tunnel in background...")
+			return tea.Batch(
+				tea.Println(m.history.RenderItem(item, m.getWidth())),
+				startTunnelCmd(port, sessionID, apiKey),
+			)
+		}
 
 	case "exit", "quit":
 		if m.client != nil {

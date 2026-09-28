@@ -69,6 +69,8 @@ func RenderHelpViewWithCustom(width int, customMgr *CustomCommandManager) string
 		{"/detach", "Detach TUI while background agents continue running"},
 		{"/thinking [on|off]", "Toggle reasoning and chain-of-thought (Ctrl+O)"},
 		{"/yolo", "Toggle YOLO Mode (bypass all approval queues)"},
+		{"/remote-control", "Start zero-login Cloudflare Quick Tunnel for remote access"},
+		{"/tunnel [on|off|status]", "Manage Cloudflare Quick Tunnel and QR code"},
 		{"/version", "Display client & daemon version and runtime"},
 		{"/clear", "Clear chat viewport history"},
 		{"/exit, /quit", "Exit the TUI session"},

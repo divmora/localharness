@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
@@ -60,6 +61,7 @@ type Session struct {
 	yoloMode               bool
 	isRestricted           bool
 	isDaemon               bool
+	isJSON                 bool
 	detached               bool
 	ringBuffer             *EventRingBuffer
 	approvalQueue          *ApprovalQueue
@@ -69,9 +71,14 @@ type Session struct {
 
 // NewSession creates a new session for a WebSocket connection.
 func NewSession(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *slog.Logger) *Session {
+	return NewSessionWithMode(conn, serverCfg, logger, false)
+}
+
+// NewSessionWithMode creates a new session specifying whether the client uses text JSON or binary protobuf.
+func NewSessionWithMode(conn *websocket.Conn, serverCfg *config.ServerConfig, logger *slog.Logger, isJSON bool) *Session {
 	var writer *wsWriter
 	if conn != nil {
-		writer = newWSWriter(conn, logger)
+		writer = newWSWriterWithMode(conn, logger, isJSON)
 	}
 	return &Session{
 		conn:               conn,
@@ -116,6 +123,63 @@ func (s *Session) Status() string {
 	}
 
 	return "RUNNING"
+}
+
+// Summary returns a SessionSummary describing the current session.
+func (s *Session) Summary() SessionSummary {
+	desc := ""
+	workspace := ""
+	var tokenCount int64 = 0
+	updatedAt := ""
+
+	if s.conv != nil {
+		desc = s.conv.Description()
+		if s.conv.State != nil {
+			if s.conv.State.TotalUsage != nil {
+				tokenCount = int64(s.conv.State.TotalUsage.TotalTokens)
+			}
+			if s.conv.State.Config != nil && len(s.conv.State.Config.Workspaces) > 0 {
+				if s.conv.State.Config.Workspaces[0].Name != "" {
+					workspace = s.conv.State.Config.Workspaces[0].Name
+				} else if s.conv.State.Config.Workspaces[0].Directory != "" {
+					workspace = filepath.Base(s.conv.State.Config.Workspaces[0].Directory)
+				}
+			}
+			updatedAt = s.conv.State.UpdatedAt
+		}
+	}
+	if workspace == "" && s.serverCfg != nil && s.serverCfg.Workspace != "" {
+		workspace = filepath.Base(s.serverCfg.Workspace)
+	}
+	if desc == "" {
+		desc = "New Session"
+	}
+
+	model := ""
+	sessionID := ""
+	if s.serverCfg != nil {
+		sessionID = s.serverCfg.SessionID
+	}
+	if sessionID == "" && s.conv != nil {
+		sessionID = s.conv.ID
+	}
+
+	waitingApproval := false
+	if s.approvalQueue != nil {
+		waitingApproval = len(s.approvalQueue.List()) > 0
+	}
+
+	return SessionSummary{
+		ID:              sessionID,
+		Title:           desc,
+		Description:     desc,
+		Workspace:       workspace,
+		Model:           model,
+		Status:          s.Status(),
+		WaitingApproval: waitingApproval,
+		TokenCount:      tokenCount,
+		UpdatedAt:       updatedAt,
+	}
 }
 
 const (
@@ -235,15 +299,23 @@ func (s *Session) readLoop(conn *websocket.Conn, ch chan<- *pb.ClientMessage) {
 			return
 		}
 
-		if msgType != websocket.BinaryMessage {
-			s.logger.Warn("received non-binary message, ignoring", "type", msgType)
-			continue
-		}
-
 		var clientMsg pb.ClientMessage
-		if err := proto.Unmarshal(data, &clientMsg); err != nil {
-			s.logger.Error("protobuf unmarshal error", "error", err)
-			s.sendError("PROTO_ERROR", fmt.Sprintf("invalid protobuf: %v", err), false)
+		if msgType == websocket.TextMessage {
+			// JSON client (e.g. Web Remote Control or curl)
+			if err := protojson.Unmarshal(data, &clientMsg); err != nil {
+				s.logger.Error("protojson unmarshal error", "error", err)
+				s.sendError("JSON_ERROR", fmt.Sprintf("invalid json payload: %v", err), false)
+				continue
+			}
+		} else if msgType == websocket.BinaryMessage {
+			// Binary protobuf client (SDK, lhctl)
+			if err := proto.Unmarshal(data, &clientMsg); err != nil {
+				s.logger.Error("protobuf unmarshal error", "error", err)
+				s.sendError("PROTO_ERROR", fmt.Sprintf("invalid protobuf: %v", err), false)
+				continue
+			}
+		} else {
+			s.logger.Warn("received unsupported message type, ignoring", "type", msgType)
 			continue
 		}
 
@@ -1621,12 +1693,22 @@ func (s *Session) sendServerMessageToWriter(w *wsWriter, msg *pb.ServerMessage, 
 		return
 	}
 	buf := getProtoBuf()
-	var err error
-	*buf, err = proto.MarshalOptions{}.MarshalAppend(*buf, msg)
-	if err != nil {
-		putProtoBuf(buf)
-		s.logger.Error("protobuf marshal error", "error", err)
-		return
+	if w.isJSON {
+		data, err := protojson.Marshal(msg)
+		if err != nil {
+			putProtoBuf(buf)
+			s.logger.Error("protojson marshal error", "error", err)
+			return
+		}
+		*buf = append(*buf, data...)
+	} else {
+		var err error
+		*buf, err = proto.MarshalOptions{}.MarshalAppend(*buf, msg)
+		if err != nil {
+			putProtoBuf(buf)
+			s.logger.Error("protobuf marshal error", "error", err)
+			return
+		}
 	}
 	w.Send(buf, droppable)
 }
@@ -1638,14 +1720,30 @@ func (s *Session) SetDaemon(d bool) {
 	s.isDaemon = d
 }
 
-// Attach connects a new client WebSocket connection to an active session.
+// SetJSON sets whether this session is communicating via JSON instead of binary protobuf.
+func (s *Session) SetJSON(j bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.isJSON = j
+	if s.wsWriter != nil {
+		s.wsWriter.isJSON = j
+	}
+}
+
+// Attach connects a new client WebSocket connection to an active session in binary protobuf mode.
 func (s *Session) Attach(conn *websocket.Conn) {
+	s.AttachWithMode(conn, false)
+}
+
+// AttachWithMode connects a new client WebSocket connection specifying binary or JSON mode.
+func (s *Session) AttachWithMode(conn *websocket.Conn, isJSON bool) {
 	s.mu.Lock()
 	if s.wsWriter != nil {
 		s.wsWriter.Close()
 	}
 	s.conn = conn
-	s.wsWriter = newWSWriter(conn, s.logger)
+	s.isJSON = isJSON
+	s.wsWriter = newWSWriterWithMode(conn, s.logger, isJSON)
 	s.detached = false
 	writer := s.wsWriter
 	go writer.writePump()
