@@ -65,6 +65,11 @@ func (m *Model) SetAutoSpeak(enabled bool) {
 	}
 }
 
+// SetMode sets the active interactive mode.
+func (m *Model) SetMode(mode AgentMode) {
+	m.mode = mode
+}
+
 // VoiceManager returns the active voice manager instance.
 func (m *Model) VoiceManager() *VoiceManager {
 	return m.voice

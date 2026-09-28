@@ -46,6 +46,7 @@ func newRootCommand() *cobra.Command {
 		isolatedFlag        bool
 		maxAutoWakeFlag     int
 		tunnelFlag          bool
+		planFlag            bool
 		urlFlag             string
 		apiKeyFlag          string
 	)
@@ -87,6 +88,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 				isolated:           isolatedFlag,
 				maxAutoWake:        maxAutoWakeFlag,
 				tunnel:             tunnelFlag,
+				plan:               planFlag,
 				url:                urlFlag,
 				apiKey:             apiKeyFlag,
 			}
@@ -102,7 +104,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	rootCmd.PersistentFlags().StringVar(&globalDataDir, "data-dir", getDefaultDataDir(), "Override data directory")
 
 	// Run / Interactive flags on root
-	addRunFlags(rootCmd, &modelFlag, &endpointFlag, &skipHealthCheckFlag, &offlineFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag, &browserFlag, &noBrowserFlag, &desktopFlag, &headedFlag, &headlessFlag, &connectBrowserFlag, &browserProfileFlag, &isolatedFlag, &maxAutoWakeFlag, &tunnelFlag, &urlFlag, &apiKeyFlag)
+	addRunFlags(rootCmd, &modelFlag, &endpointFlag, &skipHealthCheckFlag, &offlineFlag, &workspacesFlag, &yoloFlag, &detachFlag, &promptFlag, &convFlag, &browserFlag, &noBrowserFlag, &desktopFlag, &headedFlag, &headlessFlag, &connectBrowserFlag, &browserProfileFlag, &isolatedFlag, &maxAutoWakeFlag, &tunnelFlag, &planFlag, &urlFlag, &apiKeyFlag)
 
 	// Subcommand: run
 	var (
@@ -125,6 +127,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 		runIsolatedFlag        bool
 		runMaxAutoWakeFlag     int
 		runTunnelFlag          bool
+		runPlanFlag            bool
 		runUrlFlag             string
 		runApiKeyFlag          string
 	)
@@ -159,13 +162,14 @@ detach and attach to headless sessions, and inspect conversation state and trace
 				isolated:           runIsolatedFlag,
 				maxAutoWake:        runMaxAutoWakeFlag,
 				tunnel:             runTunnelFlag,
+				plan:               runPlanFlag,
 				url:                runUrlFlag,
 				apiKey:             runApiKeyFlag,
 			}
 			return runInteractiveWithOptions(flags)
 		},
 	}
-	addRunFlags(runCmd, &runModelFlag, &runEndpointFlag, &runSkipHealthCheckFlag, &runOfflineFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag, &runBrowserFlag, &runNoBrowserFlag, &runDesktopFlag, &runHeadedFlag, &runHeadlessFlag, &runConnectBrowserFlag, &runBrowserProfileFlag, &runIsolatedFlag, &runMaxAutoWakeFlag, &runTunnelFlag, &runUrlFlag, &runApiKeyFlag)
+	addRunFlags(runCmd, &runModelFlag, &runEndpointFlag, &runSkipHealthCheckFlag, &runOfflineFlag, &runWorkspacesFlag, &runYoloFlag, &runDetachFlag, &runPromptFlag, &runConvFlag, &runBrowserFlag, &runNoBrowserFlag, &runDesktopFlag, &runHeadedFlag, &runHeadlessFlag, &runConnectBrowserFlag, &runBrowserProfileFlag, &runIsolatedFlag, &runMaxAutoWakeFlag, &runTunnelFlag, &runPlanFlag, &runUrlFlag, &runApiKeyFlag)
 	rootCmd.AddCommand(runCmd)
 
 	// Subcommand: attach
@@ -372,7 +376,7 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	return rootCmd
 }
 
-func addRunFlags(cmd *cobra.Command, model *string, endpoint *string, skipHealthCheck *bool, offline *bool, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string, browser *bool, noBrowser *bool, desktop *bool, headed *bool, headless *bool, connectBrowser *string, browserProfile *string, isolated *bool, maxAutoWake *int, tunnel *bool, url *string, apiKey *string) {
+func addRunFlags(cmd *cobra.Command, model *string, endpoint *string, skipHealthCheck *bool, offline *bool, workspaces *[]string, yolo *bool, detach *bool, prompt *string, conv *string, browser *bool, noBrowser *bool, desktop *bool, headed *bool, headless *bool, connectBrowser *string, browserProfile *string, isolated *bool, maxAutoWake *int, tunnel *bool, plan *bool, url *string, apiKey *string) {
 	cmd.Flags().StringVarP(model, "model", "m", "", "Target LLM model (e.g. gpt-4o, claude-3-5-sonnet)")
 	cmd.Flags().StringVarP(endpoint, "endpoint", "e", "", "Target LiteLLM endpoint name (from ~/.divmora/config/litellm.json)")
 	cmd.Flags().BoolVar(skipHealthCheck, "skip-health-check", false, "Skip pre-flight LiteLLM connection and health verification")
@@ -398,6 +402,7 @@ func addRunFlags(cmd *cobra.Command, model *string, endpoint *string, skipHealth
 	cmd.Flags().IntVar(maxAutoWake, "max-auto-wake", 5, "Maximum consecutive auto-wake turns for background tasks/subagents")
 	cmd.Flags().BoolVar(tunnel, "tunnel", false, "Start zero-login Cloudflare Quick Tunnel for remote control")
 	cmd.Flags().BoolVar(tunnel, "remote-control", false, "Alias for --tunnel")
+	cmd.Flags().BoolVar(plan, "plan", false, "Start session in plan-before-act mode (enforces research & plan before code changes)")
 	cmd.Flags().StringVar(url, "url", "", "Connect to a remote LocalHarness daemon/tunnel URL (e.g. wss://xyz.trycloudflare.com)")
 	cmd.Flags().StringVar(apiKey, "api-key", "", "API key for authenticating with remote daemon")
 }

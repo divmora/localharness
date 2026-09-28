@@ -58,6 +58,7 @@ lhctl attach <session-id>
 | `--access-mode` | | Agent access mode: `workspace` (default), `system` (supervised host-wide), `unrestricted` | `workspace` |
 | `--allow-host` | | Permit full host-wide access (equivalent to `--access-mode=unrestricted`) | `false` |
 | `--voice` | | Enable automatic text-to-speech spoken responses (`autoSpeak: true`) | `false` |
+| `--plan` | | Start session in plan-before-act mode (enforces research & plan before code changes) | `false` |
 | `--yolo` | `-y` | Enable YOLO Mode (skip all permission prompts) | `false` |
 | `--browser` | | Explicitly enable browser automation tools (auto-enabled for web projects when `npx` installed) | `auto (true for web projects with npx)` |
 | `--no-browser` | | Explicitly disable browser automation tools | `false` |

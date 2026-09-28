@@ -22,6 +22,7 @@ func TestParseRunFlags(t *testing.T) {
 		wantDetach    bool
 		wantPrompt    string
 		wantWsCount   int
+		wantPlan      bool
 	}{
 		{
 			name:          "default starts new conversation",
@@ -93,6 +94,11 @@ func TestParseRunFlags(t *testing.T) {
 			args:        []string{"--add-dir=/tmp/repo2", "--voice=auto"},
 			wantWsCount: 1,
 		},
+		{
+			name:     "plan flag",
+			args:     []string{"--plan"},
+			wantPlan: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -115,6 +121,9 @@ func TestParseRunFlags(t *testing.T) {
 			}
 			if tt.wantWsCount > 0 && len(f.explicitWorkspaces) != tt.wantWsCount {
 				t.Errorf("explicitWorkspaces count = %d, want %d", len(f.explicitWorkspaces), tt.wantWsCount)
+			}
+			if tt.wantPlan != f.plan {
+				t.Errorf("plan = %v, want %v", f.plan, tt.wantPlan)
 			}
 		})
 	}
@@ -166,6 +175,14 @@ func TestFormatResumeCommand(t *testing.T) {
 				voice: true,
 			},
 			wantCmd: "lhctl -c conv-voice --voice",
+		},
+		{
+			name:      "with plan flag",
+			sessionID: "conv-plan",
+			flags: runFlags{
+				plan: true,
+			},
+			wantCmd: "lhctl -c conv-plan --plan",
 		},
 	}
 

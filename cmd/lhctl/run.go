@@ -48,6 +48,7 @@ type runFlags struct {
 	accessMode         string
 	allowHost          bool
 	tunnel             bool
+	plan               bool
 	url                string
 	apiKey             string
 }
@@ -97,6 +98,9 @@ func formatResumeCommand(sessionID string, flags runFlags) string {
 	if flags.voice {
 		parts = append(parts, "--voice")
 	}
+	if flags.plan {
+		parts = append(parts, "--plan")
+	}
 	if flags.accessMode != "" {
 		parts = append(parts, fmt.Sprintf("--access-mode=%s", flags.accessMode))
 	}
@@ -136,6 +140,8 @@ func parseRunFlags(args []string) runFlags {
 			f.apiKey = args[i]
 		case a == "--ephemeral":
 			f.ephemeral = true
+		case a == "--plan":
+			f.plan = true
 		case a == "--browser":
 			f.browser = true
 		case a == "--no-browser":
@@ -478,7 +484,7 @@ func runInteractiveWithOptions(flags runFlags) error {
 		},
 		PromptModules: &pb.PromptModules{
 			EnableWebDevelopment: browserEnabled,
-			EnablePlanning:       true,
+			EnablePlanning:       flags.plan,
 			EnableSlashCommands:  true,
 			EnableKnowledgeItems: true,
 		},
@@ -502,6 +508,9 @@ func runInteractiveWithOptions(flags runFlags) error {
 	m := tui.InitialModelWithHistory(cl, flags.workspaces, flags.yolo, initialState)
 	if flags.voice {
 		m.SetAutoSpeak(true)
+	}
+	if flags.plan {
+		m.SetMode(tui.ModePlan)
 	}
 	p := tea.NewProgram(m)
 
