@@ -606,6 +606,21 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		s.logger.Warn("failed to allow knowledge dir in workspace manager", "error", err)
 	}
 
+	// Register client-configured allowed paths and scratch directory
+	for _, p := range cfg.AllowedPaths {
+		if p != "" {
+			if err := wsMgr.AddAllowedPath(p); err != nil {
+				s.logger.Warn("failed to allow custom path in workspace manager", "path", p, "error", err)
+			}
+		}
+	}
+	if cfg.ScratchDir != "" {
+		if err := wsMgr.AddAllowedPath(cfg.ScratchDir); err != nil {
+			s.logger.Warn("failed to allow scratch dir in workspace manager", "dir", cfg.ScratchDir, "error", err)
+		}
+		_ = os.MkdirAll(cfg.ScratchDir, 0755)
+	}
+
 	// Set up LLM provider
 	provider, err := s.createProvider(cfg)
 	if err != nil {
@@ -786,49 +801,53 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 	}
 
 	s.engine = engine.NewEngine(engine.Config{
-		Conversation:           s.conv,
-		Provider:               provider,
-		ToolRegistry:           toolRegistry,
-		SystemPrompt:           cfg.SystemInstructions,
-		StructuredInstructions: cfg.StructuredInstructions,
-		ConversationID:         s.conv.ID,
-		TrajectoryID:           trajID,
-		OnStep:                 s.onStep,
-		OnTrajectory:           s.onTrajectory,
-		CompactionThreshold:    resolveCompactionThreshold(int(cfg.CompactionThreshold)),
-		KeepRecentMessages:     int(cfg.KeepRecentMessages),
-		BrainDir:               s.conv.BrainDir,
-		AppDataDir:             appDataDir,
-		Logger:                 s.logger,
-		HostToolHandler:        s.hostToolHandler,
-		HostToolNames:          hostToolNames,
-		HostToolDecls:          hostToolDecls,
-		PermissionHandler:      s.permissionHandler,
-		QuestionHandler:        s.questionHandler,
-		MCPManager:             mcpMgr,
-		Workspaces:             workspaceDirs,
-		WorkspaceInfos:         workspaceInfos,
-		UserRules:              userRules,
-		MaxDepth:               int(cfg.MaxSubagentDepth),
-		MaxSubagents:           int(cfg.MaxConcurrentSubagents),
-		SubagentsEnabled:       builtinCfg.InvokeSubagent,
-		InitialHistory:         initialHistory,
-		EnableWebDev:           cfg.PromptModules != nil && cfg.PromptModules.EnableWebDevelopment,
-		EnablePlanningMode:     cfg.PromptModules != nil && cfg.PromptModules.EnablePlanning,
-		EnableSlashCommands:    cfg.PromptModules != nil && cfg.PromptModules.EnableSlashCommands,
-		SlashCommands:          protoSlashCommandsToEngine(cfg.SlashCommands),
-		EnableKnowledgeItems:   cfg.PromptModules != nil && cfg.PromptModules.EnableKnowledgeItems,
-		EnableCodeGraph:        cfg.PromptModules != nil && cfg.PromptModules.EnableCodeGraph,
-		Skills:                 allSkills,
-		Plugins:                allPlugins,
-		NotifyCh:               notifyCh,
-		NotifySendCh:           notifySendCh,
-		HasBrowserConfig:       builtinCfg.Browser,
-		HasDesktopConfig:       builtinCfg.Desktop,
-		ProjectRegistry:        projectRegistry,
-		ConversationManager:    convMgr,
-		YoloMode:               s.yoloMode,
-		AccessMode:             accessMode,
+		Conversation:                s.conv,
+		Provider:                    provider,
+		ToolRegistry:                toolRegistry,
+		SystemPrompt:                cfg.SystemInstructions,
+		StructuredInstructions:      cfg.StructuredInstructions,
+		ConversationID:              s.conv.ID,
+		TrajectoryID:                trajID,
+		OnStep:                      s.onStep,
+		OnTrajectory:                s.onTrajectory,
+		CompactionThreshold:         resolveCompactionThreshold(int(cfg.CompactionThreshold)),
+		KeepRecentMessages:          int(cfg.KeepRecentMessages),
+		BrainDir:                    s.conv.BrainDir,
+		AppDataDir:                  appDataDir,
+		Logger:                      s.logger,
+		HostToolHandler:             s.hostToolHandler,
+		HostToolNames:               hostToolNames,
+		HostToolDecls:               hostToolDecls,
+		PermissionHandler:           s.permissionHandler,
+		QuestionHandler:             s.questionHandler,
+		MCPManager:                  mcpMgr,
+		Workspaces:                  workspaceDirs,
+		WorkspaceInfos:              workspaceInfos,
+		UserRules:                   userRules,
+		MaxDepth:                    int(cfg.MaxSubagentDepth),
+		MaxSubagents:                int(cfg.MaxConcurrentSubagents),
+		SubagentsEnabled:            builtinCfg.InvokeSubagent,
+		SubagentTypes:               protoSubagentTypesToEngine(cfg.SubagentTypes, cfg.InheritSubagentCapabilities),
+		ExcludeBuiltinSubagents:     cfg.ExcludeBuiltinSubagents,
+		DisableAllBuiltins:          cfg.DisableAllBuiltinSubagents,
+		InheritSubagentCapabilities: cfg.InheritSubagentCapabilities,
+		InitialHistory:              initialHistory,
+		EnableWebDev:                cfg.PromptModules != nil && cfg.PromptModules.EnableWebDevelopment,
+		EnablePlanningMode:          cfg.PromptModules != nil && cfg.PromptModules.EnablePlanning,
+		EnableSlashCommands:         cfg.PromptModules != nil && cfg.PromptModules.EnableSlashCommands,
+		SlashCommands:               protoSlashCommandsToEngine(cfg.SlashCommands),
+		EnableKnowledgeItems:        cfg.PromptModules != nil && cfg.PromptModules.EnableKnowledgeItems,
+		EnableCodeGraph:             cfg.PromptModules != nil && cfg.PromptModules.EnableCodeGraph,
+		Skills:                      allSkills,
+		Plugins:                     allPlugins,
+		NotifyCh:                    notifyCh,
+		NotifySendCh:                notifySendCh,
+		HasBrowserConfig:            builtinCfg.Browser,
+		HasDesktopConfig:            builtinCfg.Desktop,
+		ProjectRegistry:             projectRegistry,
+		ConversationManager:         convMgr,
+		YoloMode:                    s.yoloMode,
+		AccessMode:                  accessMode,
 	})
 
 	// Store notification channel on session for auto-wake in Run() select loop
@@ -2272,4 +2291,25 @@ func resolveCompactionThreshold(adkValue int) int {
 	default:
 		return adkValue
 	}
+}
+
+// protoSubagentTypesToEngine converts proto SubagentTypeConfig to engine SubagentTypeDef.
+func protoSubagentTypesToEngine(defs []*pb.SubagentTypeConfig, defaultInherit bool) []engine.SubagentTypeDef {
+	if len(defs) == 0 {
+		return nil
+	}
+	result := make([]engine.SubagentTypeDef, len(defs))
+	for i, d := range defs {
+		inherit := d.InheritCapabilities || defaultInherit
+		result[i] = engine.SubagentTypeDef{
+			Name:                d.Name,
+			Description:         d.Description,
+			SystemPrompt:        d.SystemPrompt,
+			EnableWriteTools:    d.EnableWriteTools,
+			EnableMCPTools:      d.EnableMcpTools,
+			EnableSubagentTools: d.EnableSubagentTools,
+			InheritCapabilities: inherit,
+		}
+	}
+	return result
 }

@@ -155,6 +155,13 @@ func (r *Registry) Clone() *Registry {
 	return cloned
 }
 
+// CloneWithWorkspaceManager creates an isolated copy of the tool registry with a custom workspace manager.
+func (r *Registry) CloneWithWorkspaceManager(wsMgr *workspace.Manager) *Registry {
+	cloned := r.Clone()
+	cloned.wsMgr = wsMgr
+	return cloned
+}
+
 // Register adds a tool to the registry.
 func (r *Registry) Register(name string, fn ToolFunc, schema ToolSchema) {
 	r.mu.Lock()

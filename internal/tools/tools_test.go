@@ -170,9 +170,9 @@ func TestRegisterBuiltinToolsNoneEnabled(t *testing.T) {
 
 	reg, _ := testRegistryWithConfig(t, cfg)
 
-	// ask_question + 3 knowledge tools + publish are visible (permission tools are Internal, hidden from LLM)
-	if len(reg.Schemas()) != 5 {
-		t.Errorf("expected 5 visible tools (ask_question + 3 knowledge + publish; permission tools are internal), got %d", len(reg.Schemas()))
+	// ask_question + 4 knowledge tools + publish are visible (permission tools are Internal, hidden from LLM)
+	if len(reg.Schemas()) != 6 {
+		t.Errorf("expected 6 visible tools (ask_question + 4 knowledge + publish; permission tools are internal), got %d", len(reg.Schemas()))
 	}
 }
 

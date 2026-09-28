@@ -4,6 +4,35 @@ package tools
 // These tools are engine-intercepted — the engine handles execution directly.
 // The schemas are registered so the LLM can discover and call them.
 func registerKnowledgeTools(r *Registry) {
+	r.RegisterSchemaOnly("knowledge_read", ToolSchema{
+		Group:       ToolGroupRead,
+		Name:        "knowledge_read",
+		Description: "Read the content of a Knowledge Item (KI) artifact or inspect KI metadata and available artifacts. Use this to retrieve persisted, curated knowledge about the codebase (patterns, conventions, known issues, architecture).",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"ki_name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name of the knowledge item (kebab-case, e.g. 'error-handling-patterns')",
+				},
+				"artifact_path": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional relative filename within the KI (e.g. 'overview.md', 'patterns.md'). If omitted, returns KI summary, references, and list of artifacts.",
+				},
+				"scope": map[string]interface{}{
+					"type":        "string",
+					"enum":        []interface{}{"workspace", "global"},
+					"description": "Whether this knowledge item is in workspace scope or global scope (default: 'workspace')",
+				},
+				"workspace_path": map[string]interface{}{
+					"type":        "string",
+					"description": "Required only if multiple workspaces are attached and scope is 'workspace'. The absolute path of the workspace the KI resides in.",
+				},
+			},
+			"required": []string{"ki_name"},
+		},
+	})
+
 	r.RegisterSchemaOnly("knowledge_write", ToolSchema{
 		Group:       ToolGroupWrite,
 		Name:        "knowledge_write",

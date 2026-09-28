@@ -75,7 +75,14 @@ func NewAgent(config *LocalAgentConfig) (*Agent, error) {
 	activePolicies := config.Policies
 	if len(config.Workspaces) > 0 {
 		wsDirs := workspaceDirs(config.Workspaces)
-		wsPolicies := policy.WorkspaceOnly(wsDirs)
+		var opts []policy.WorkspaceOnlyOption
+		if len(config.AllowedPaths) > 0 {
+			opts = append(opts, policy.WithAllowedPaths(config.AllowedPaths...))
+		}
+		if config.ScratchDir != "" {
+			opts = append(opts, policy.WithAllowedPaths(config.ScratchDir))
+		}
+		wsPolicies := policy.WorkspaceOnly(wsDirs, opts...)
 		activePolicies = append(wsPolicies, activePolicies...)
 	}
 
@@ -813,18 +820,21 @@ func buildHarnessConfig(cfg *LocalAgentConfig) *pb.HarnessConfig {
 	}
 
 	harnessCfg := &pb.HarnessConfig{
-		SystemInstructions:     cfg.SystemInstructions,
-		StructuredInstructions: structuredPromptToProto(cfg.StructuredPrompt),
-		BuiltinTools:           builtin,
-		ConversationId:         cfg.ConversationID,
-		CompactionThreshold:    int32(cfg.CompactionThreshold),
-		MaxSubagentDepth:       int32(cfg.MaxSubagentDepth),
-		MaxConcurrentSubagents: int32(cfg.MaxConcurrentSubagents),
-		MaxAutoWakeTurns:       int32(cfg.MaxAutoWakeTurns),
-		LitellmEndpoint:        cfg.LitellmEndpoint,
-		LitellmApiKey:          cfg.LitellmAPIKey,
-		LitellmBaseUrl:         cfg.LitellmBaseURL,
-		LitellmModel:           cfg.LitellmModel,
+		SystemInstructions:          cfg.SystemInstructions,
+		StructuredInstructions:      structuredPromptToProto(cfg.StructuredPrompt),
+		BuiltinTools:                builtin,
+		ConversationId:              cfg.ConversationID,
+		CompactionThreshold:         int32(cfg.CompactionThreshold),
+		MaxSubagentDepth:            int32(cfg.MaxSubagentDepth),
+		MaxConcurrentSubagents:      int32(cfg.MaxConcurrentSubagents),
+		MaxAutoWakeTurns:            int32(cfg.MaxAutoWakeTurns),
+		LitellmEndpoint:             cfg.LitellmEndpoint,
+		LitellmApiKey:               cfg.LitellmAPIKey,
+		LitellmBaseUrl:              cfg.LitellmBaseURL,
+		LitellmModel:                cfg.LitellmModel,
+		AllowedPaths:                cfg.AllowedPaths,
+		ScratchDir:                  cfg.ScratchDir,
+		InheritSubagentCapabilities: cfg.InheritSubagentCapabilities,
 	}
 
 	// Prompt modules — only set if any module is enabled
@@ -890,6 +900,7 @@ func buildHarnessConfig(cfg *LocalAgentConfig) *pb.HarnessConfig {
 			EnableWriteTools:    st.EnableWriteTools,
 			EnableMcpTools:      st.EnableMCPTools,
 			EnableSubagentTools: st.EnableSubagentTools,
+			InheritCapabilities: st.InheritCapabilities,
 		})
 	}
 

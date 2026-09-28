@@ -51,6 +51,12 @@ type LocalAgentConfig struct {
 	// Default: current working directory.
 	Workspaces []WorkspaceDef
 
+	// AllowedPaths defines additional allowed directories beyond workspace roots (e.g. scratch directories).
+	AllowedPaths []string
+
+	// ScratchDir defines a dedicated scratch directory for temporary scripts and artifacts.
+	ScratchDir string
+
 	// ConversationID resumes an existing conversation. Empty = new conversation.
 	ConversationID string
 
@@ -84,6 +90,10 @@ type LocalAgentConfig struct {
 	// MaxConcurrentSubagents is the maximum number of concurrent child agents.
 	// Default: 5.
 	MaxConcurrentSubagents int
+
+	// InheritSubagentCapabilities enables capability inheritance (write tools, commands, MCP)
+	// for all subagents by default unless explicitly disabled per SubagentTypeDef.
+	InheritSubagentCapabilities bool
 
 	// McpServers configures connections to external MCP servers.
 	// MCP tools are discovered at session init and treated identically to built-in tools.

@@ -19,6 +19,7 @@ type SubagentTypeDef struct {
 	EnableWriteTools    bool   // create_file, edit_file, run_command, etc.
 	EnableMCPTools      bool   // MCP server tools
 	EnableSubagentTools bool   // define_subagent, invoke_subagent (recursive)
+	InheritCapabilities bool   // Inherit parent agent's write, MCP, and subagent tool capabilities
 	DefaultModelTier    string // Default model tier ("flash_lite", "flash", "pro", "inherit")
 	IsBuiltin           bool   // true for LH-provided types (not serialized)
 }
@@ -60,6 +61,7 @@ Be thorough but efficient. Your response will be sent back to the parent agent a
 		EnableWriteTools:    true,
 		EnableMCPTools:      true,
 		EnableSubagentTools: true,
+		InheritCapabilities: true,
 		DefaultModelTier:    string(ModelTierInherit),
 		IsBuiltin:           true,
 	},

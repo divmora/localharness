@@ -791,6 +791,15 @@ message HarnessConfig {
   // Access mode controls the agent's host-wide filesystem and execution scope.
   // Defaults to ACCESS_MODE_WORKSPACE (strict workspace isolation).
   AccessMode access_mode = 32;
+
+  // Additional allowed directories accepted by workspace path validation (e.g. scratch directories).
+  repeated string allowed_paths = 33;
+
+  // Dedicated scratch directory for temporary scripts and artifacts.
+  string scratch_dir = 34;
+
+  // Enable capability inheritance (write tools, commands, MCP) for all subagents by default.
+  bool inherit_subagent_capabilities = 35;
 }
 
 // UserRuleConfig is an SDK-injected user rule with inline content.
@@ -870,6 +879,7 @@ message SubagentTypeConfig {
   bool enable_write_tools = 4;       // Give write tools (create_file, edit_file, run_command)
   bool enable_mcp_tools = 5;         // Give MCP server tools
   bool enable_subagent_tools = 6;    // Give subagent tools (recursive)
+  bool inherit_capabilities = 7;     // Inherit parent capabilities (write, MCP, subagent tools)
 }
 
 // StructuredSystemInstructions enables modular system prompt composition.

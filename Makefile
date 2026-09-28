@@ -15,7 +15,7 @@ endif
 # Proto generation using buf
 proto:
 	@echo "==> Generating protobuf code..."
-	buf generate
+	PATH="$(shell go env GOPATH)/bin:$$PATH" buf generate
 	@echo "==> Done."
 
 # Build the binary

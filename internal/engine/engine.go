@@ -124,14 +124,15 @@ type Engine struct {
 	resumeCh chan string
 
 	// Subagent support
-	depth              int               // Nesting depth (0 = root)
-	maxDepth           int               // Max nesting depth (default: 3)
-	maxSubagents       int               // Max concurrent children (default: 5)
-	activeSubagents    int32             // Atomic counter of running children
-	parentTrajectoryID string            // Empty for root trajectory
-	subagentsEnabled   bool              // Whether subagent tools are available
-	subagentRegistry   *SubagentRegistry // Type registry (built-in + SDK + agent-defined)
-	subagentTracker    *SubagentTracker  // Active instance tracker
+	depth                       int               // Nesting depth (0 = root)
+	maxDepth                    int               // Max nesting depth (default: 3)
+	maxSubagents                int               // Max concurrent children (default: 5)
+	activeSubagents             int32             // Atomic counter of running children
+	parentTrajectoryID          string            // Empty for root trajectory
+	subagentsEnabled            bool              // Whether subagent tools are available
+	inheritSubagentCapabilities bool              // Whether subagents inherit capabilities by default
+	subagentRegistry            *SubagentRegistry // Type registry (built-in + SDK + agent-defined)
+	subagentTracker             *SubagentTracker  // Active instance tracker
 
 	// Tool group filtering — used by subagents to restrict tool access.
 	// Keys are ToolGroup values ("read", "write"). If a group is in this set,
@@ -208,9 +209,10 @@ type Config struct {
 	SubagentsEnabled   bool   // Whether subagent tools are available
 
 	// Subagent types — SDK-registered custom types to merge with built-ins.
-	SubagentTypes           []SubagentTypeDef // SDK-registered custom types
-	ExcludeBuiltinSubagents []string          // Built-in type names to exclude
-	DisableAllBuiltins      bool              // Disable ALL built-in subagent types
+	SubagentTypes               []SubagentTypeDef // SDK-registered custom types
+	ExcludeBuiltinSubagents     []string          // Built-in type names to exclude
+	DisableAllBuiltins          bool              // Disable ALL built-in subagent types
+	InheritSubagentCapabilities bool              // Default to inheriting capabilities for all subagents
 
 	// Prompt modules
 	EnableWebDev         bool              // Enable the <web_application_development> section (off by default)
@@ -441,33 +443,34 @@ func NewEngine(cfg Config) *Engine {
 			SlashCommands:  cfg.SlashCommands,
 			SubagentTypes:  subagentTypes,
 		},
-		notifyCh:                 cfg.NotifyCh,
-		notifySendCh:             cfg.NotifySendCh,
-		hasBrowserConfig:         cfg.HasBrowserConfig,
-		hasDesktopConfig:         cfg.HasDesktopConfig,
-		depth:                    cfg.Depth,
-		maxDepth:                 cfg.MaxDepth,
-		maxSubagents:             cfg.MaxSubagents,
-		parentTrajectoryID:       cfg.ParentTrajectoryID,
-		subagentsEnabled:         cfg.SubagentsEnabled,
-		subagentRegistry:         subagentRegistry,
-		subagentTracker:          subagentTracker,
-		excludeToolGroups:        cfg.ExcludeToolGroups,
-		excludeHostTools:         cfg.ExcludeHostTools,
-		excludeMCPTools:          cfg.ExcludeMCPTools,
-		globalKnowledgeStore:     globalKnowledgeStore,
-		workspaceKnowledgeStores: workspaceKnowledgeStores,
-		codeGraphManager:         codeGraphMgr,
-		projectRegistry:          cfg.ProjectRegistry,
-		agentBus:                 bus,
-		convMgr:                  cfg.ConversationManager,
-		conv:                     cfg.Conversation,
-		workspaces:               cfg.Workspaces,
-		workspaceInfos:           cfg.WorkspaceInfos,
-		userRules:                cfg.UserRules,
-		yoloMode:                 cfg.YoloMode,
-		accessMode:               cfg.AccessMode,
-		globalSettings:           config.LoadGlobalSettings(cfg.Logger),
+		notifyCh:                    cfg.NotifyCh,
+		notifySendCh:                cfg.NotifySendCh,
+		hasBrowserConfig:            cfg.HasBrowserConfig,
+		hasDesktopConfig:            cfg.HasDesktopConfig,
+		depth:                       cfg.Depth,
+		maxDepth:                    cfg.MaxDepth,
+		maxSubagents:                cfg.MaxSubagents,
+		parentTrajectoryID:          cfg.ParentTrajectoryID,
+		subagentsEnabled:            cfg.SubagentsEnabled,
+		inheritSubagentCapabilities: cfg.InheritSubagentCapabilities,
+		subagentRegistry:            subagentRegistry,
+		subagentTracker:             subagentTracker,
+		excludeToolGroups:           cfg.ExcludeToolGroups,
+		excludeHostTools:            cfg.ExcludeHostTools,
+		excludeMCPTools:             cfg.ExcludeMCPTools,
+		globalKnowledgeStore:        globalKnowledgeStore,
+		workspaceKnowledgeStores:    workspaceKnowledgeStores,
+		codeGraphManager:            codeGraphMgr,
+		projectRegistry:             cfg.ProjectRegistry,
+		agentBus:                    bus,
+		convMgr:                     cfg.ConversationManager,
+		conv:                        cfg.Conversation,
+		workspaces:                  cfg.Workspaces,
+		workspaceInfos:              cfg.WorkspaceInfos,
+		userRules:                   cfg.UserRules,
+		yoloMode:                    cfg.YoloMode,
+		accessMode:                  cfg.AccessMode,
+		globalSettings:              config.LoadGlobalSettings(cfg.Logger),
 	}
 
 	if len(cfg.Env) > 0 {
@@ -1717,6 +1720,8 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 
 	// Check if this is a knowledge tool (handled by engine directly)
 	switch tc.Name {
+	case "knowledge_read":
+		return e.executeKnowledgeRead(ctx, tc, step)
 	case "knowledge_write":
 		return e.executeKnowledgeWrite(ctx, tc, step)
 	case "knowledge_replace":
@@ -3173,7 +3178,7 @@ func (e *Engine) knownToolNames() map[string]bool {
 	for _, name := range []string{
 		"invoke_subagent", "define_subagent", "manage_subagents",
 		"send_message", "ask_question", "ask_permission", "list_permissions",
-		"knowledge_write", "knowledge_replace", "knowledge_delete",
+		"knowledge_read", "knowledge_write", "knowledge_replace", "knowledge_delete",
 		"publish", "finish", "browser_subagent", "desktop_subagent",
 		"desktop_screenshot", "desktop_list_windows", "desktop_focus_window",
 		"desktop_click", "desktop_type", "desktop_shortcut",

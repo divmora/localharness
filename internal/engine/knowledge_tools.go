@@ -3,10 +3,59 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/llm"
 )
+
+// executeKnowledgeRead handles the knowledge_read tool call.
+// Reads an artifact from a KI or returns metadata and artifact listing.
+func (e *Engine) executeKnowledgeRead(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) error {
+	store, err := e.getKnowledgeStoreForTool(tc)
+	if err != nil {
+		return fmt.Errorf("knowledge_read: %w", err)
+	}
+
+	kiName, _ := tc.Args["ki_name"].(string)
+	artifactPath, _ := tc.Args["artifact_path"].(string)
+
+	if kiName == "" {
+		return fmt.Errorf("knowledge_read: ki_name is required")
+	}
+
+	if artifactPath != "" {
+		content, err := store.ReadArtifact(kiName, artifactPath)
+		if err != nil {
+			return fmt.Errorf("knowledge_read: %w", err)
+		}
+		step.Text = content
+	} else {
+		// Read metadata and list artifacts
+		ki, ok := store.Get(kiName)
+		if !ok {
+			return fmt.Errorf("knowledge_read: KI %q not found", kiName)
+		}
+		var artifactNames []string
+		for _, a := range ki.Artifacts {
+			artPath := filepath.Join(ki.BasePath, "artifacts", a)
+			sizeStr := ""
+			if info, err := os.Stat(artPath); err == nil {
+				sizeStr = fmt.Sprintf(" (%d bytes)", info.Size())
+			}
+			artifactNames = append(artifactNames, fmt.Sprintf("%s%s", a, sizeStr))
+		}
+		res := fmt.Sprintf("KI '%s':\nSummary: %s\nUpdated: %s\nReferences: %v\nArtifacts:\n- %s",
+			ki.Name, ki.Summary, ki.UpdatedAt.Format("2006-01-02 15:04:05 UTC"), ki.References, strings.Join(artifactNames, "\n- "))
+		step.Text = res
+	}
+
+	step.State = pb.StepUpdate_STATE_DONE
+	e.emitStep(step)
+	return nil
+}
 
 // executeKnowledgeWrite handles the knowledge_write tool call.
 // Creates or updates a KI and writes an artifact file.

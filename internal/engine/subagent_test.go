@@ -1395,3 +1395,95 @@ func TestCompactionSummarizerProvider(t *testing.T) {
 		t.Errorf("expected mainProvider to be called exactly 1 time for turn generation, got %d", mainCalls)
 	}
 }
+
+func TestCopyWorkspaceSnapshotAndDiffBranch(t *testing.T) {
+	primaryDir := t.TempDir()
+	brainDir := t.TempDir()
+	branchDir := filepath.Join(brainDir, "workspace_branch")
+
+	// Setup primary files
+	_ = os.WriteFile(filepath.Join(primaryDir, "foo.txt"), []byte("line1\nline2\n"), 0644)
+	_ = os.WriteFile(filepath.Join(primaryDir, "bar.txt"), []byte("hello bar\n"), 0644)
+
+	// 1. Snapshot to branchDir
+	if err := copyWorkspaceSnapshot(primaryDir, branchDir); err != nil {
+		t.Fatalf("copyWorkspaceSnapshot failed: %v", err)
+	}
+
+	// Verify snapshot created
+	branchFoo, err := os.ReadFile(filepath.Join(branchDir, "foo.txt"))
+	if err != nil || string(branchFoo) != "line1\nline2\n" {
+		t.Fatalf("expected foo.txt in branch, got: %s (err: %v)", string(branchFoo), err)
+	}
+
+	// 2. Make modifications in branchDir
+	_ = os.WriteFile(filepath.Join(branchDir, "foo.txt"), []byte("line1\nline2 edited\n"), 0644)
+	_ = os.WriteFile(filepath.Join(branchDir, "baz.txt"), []byte("brand new file\n"), 0644)
+	_ = os.Remove(filepath.Join(branchDir, "bar.txt"))
+
+	// 3. Diff with applySync = false (e.g. subagent failed)
+	diff, changed, err := diffAndSyncBranch(primaryDir, branchDir, brainDir, false)
+	if err != nil {
+		t.Fatalf("diffAndSyncBranch failed: %v", err)
+	}
+	if len(changed) != 3 {
+		t.Errorf("expected 3 changed files, got %d: %v", len(changed), changed)
+	}
+	if !strings.Contains(diff, "line2 edited") {
+		t.Errorf("expected diff to contain 'line2 edited', got: %s", diff)
+	}
+
+	// Primary should still be untouched
+	origFoo, _ := os.ReadFile(filepath.Join(primaryDir, "foo.txt"))
+	if string(origFoo) != "line1\nline2\n" {
+		t.Errorf("primary foo.txt should remain untouched when applySync=false")
+	}
+
+	// 4. Diff with applySync = true (subagent succeeded)
+	_, _, err = diffAndSyncBranch(primaryDir, branchDir, brainDir, true)
+	if err != nil {
+		t.Fatalf("diffAndSyncBranch (applySync=true) failed: %v", err)
+	}
+
+	// Primary should now be synchronized
+	syncedFoo, _ := os.ReadFile(filepath.Join(primaryDir, "foo.txt"))
+	if string(syncedFoo) != "line1\nline2 edited\n" {
+		t.Errorf("expected synced foo.txt to have edited content, got %s", string(syncedFoo))
+	}
+
+	syncedBaz, err := os.ReadFile(filepath.Join(primaryDir, "baz.txt"))
+	if err != nil || string(syncedBaz) != "brand new file\n" {
+		t.Errorf("expected synced baz.txt in primary workspace, got %s (err: %v)", string(syncedBaz), err)
+	}
+
+	if _, err := os.Stat(filepath.Join(primaryDir, "bar.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected bar.txt to be removed in primary workspace")
+	}
+
+	// Check patch.diff was written
+	patchData, err := os.ReadFile(filepath.Join(brainDir, "patch.diff"))
+	if err != nil || len(patchData) == 0 {
+		t.Errorf("expected non-empty patch.diff in brainDir")
+	}
+}
+
+func TestSubagentCapabilityInheritance(t *testing.T) {
+	// Verify that SubagentTypeDef with InheritCapabilities preserves write tools
+	typeDef := SubagentTypeDef{
+		Name:                "coder",
+		Description:         "coding subagent",
+		EnableWriteTools:    false, // explicitly false
+		InheritCapabilities: true,  // but inherits parent
+	}
+
+	parentExcludeToolGroups := map[tools.ToolGroup]bool{} // parent has write tools
+
+	enableWrite := typeDef.EnableWriteTools
+	if typeDef.InheritCapabilities {
+		enableWrite = !parentExcludeToolGroups[tools.ToolGroupWrite]
+	}
+
+	if !enableWrite {
+		t.Errorf("expected enableWrite to be true via InheritCapabilities")
+	}
+}

@@ -340,3 +340,38 @@ func TestKnowledgeStore_PathTraversalPrevention(t *testing.T) {
 		t.Errorf("expected path traversal error, got: %v", err)
 	}
 }
+
+func TestKnowledgeStore_ReadArtifact(t *testing.T) {
+	dir := t.TempDir()
+	ks := NewKnowledgeStore(dir)
+
+	content := "# Overview\nArchitecture documentation content."
+	err := ks.WriteArtifact("arch-docs", "Architecture overview", "overview.md", content, nil)
+	if err != nil {
+		t.Fatalf("WriteArtifact failed: %v", err)
+	}
+
+	// Successful read
+	read, err := ks.ReadArtifact("arch-docs", "overview.md")
+	if err != nil {
+		t.Fatalf("ReadArtifact failed: %v", err)
+	}
+	if read != content {
+		t.Errorf("expected %q, got %q", content, read)
+	}
+
+	// Missing KI
+	if _, err := ks.ReadArtifact("nonexistent", "overview.md"); err == nil {
+		t.Error("expected error for nonexistent KI")
+	}
+
+	// Missing artifact
+	if _, err := ks.ReadArtifact("arch-docs", "nonexistent.md"); err == nil {
+		t.Error("expected error for nonexistent artifact")
+	}
+
+	// Path traversal rejected
+	if _, err := ks.ReadArtifact("arch-docs", "../../../etc/passwd"); err == nil {
+		t.Error("expected error for path traversal in ReadArtifact")
+	}
+}

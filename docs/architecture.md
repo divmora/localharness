@@ -25,7 +25,7 @@ lhctl (Interactive TUI / CLI) / SDK ◄── WebSocket + Protobuf ──► Loc
                                                                  │   ├── run_command, manage_task, finish
                                                                  │   ├── invoke_subagent, define_subagent, manage_subagents
                                                                  │   ├── search_web, read_url_content, schedule
-                                                                 │   └── knowledge_write/replace/delete, browser (Playwright)
+                                                                 │   └── knowledge_read/write/replace/delete, browser (Playwright)
                                                                  ├── Agentic Engine (LLM ↔ Tools loop with interrupt/resume)
                                                                  ├── LLM Providers (OpenAI-compatible with jittered backoff)
                                                                  └── Conversation & Transcript Persistence
@@ -277,6 +277,7 @@ At session init, the engine finds/creates a project matching the current workspa
 
 | Tool | Description |
 |:---|:---|
+| `knowledge_read` | Read a KI artifact content or inspect KI metadata and artifacts |
 | `knowledge_write` | Create/update a KI + write artifact file |
 | `knowledge_replace` | Search-and-replace within a KI artifact |
 | `knowledge_delete` | Delete an entire KI or specific artifact |

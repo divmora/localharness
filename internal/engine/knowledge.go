@@ -120,6 +120,32 @@ func (ks *KnowledgeStore) Get(name string) (*KnowledgeItem, bool) {
 	return &copy, true
 }
 
+// ReadArtifact reads the content of an artifact file within a KI.
+func (ks *KnowledgeStore) ReadArtifact(kiName, artifactPath string) (string, error) {
+	kiName = normalizeKIName(kiName)
+	if artifactPath == "" {
+		return "", fmt.Errorf("knowledge: artifact_path is required")
+	}
+	if strings.Contains(artifactPath, "..") || filepath.IsAbs(artifactPath) {
+		return "", fmt.Errorf("knowledge: artifact_path must be a relative path without '..'")
+	}
+
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+
+	ki, ok := ks.items[kiName]
+	if !ok {
+		return "", fmt.Errorf("knowledge: KI %q not found", kiName)
+	}
+
+	fullPath := filepath.Join(ki.BasePath, "artifacts", artifactPath)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("knowledge: read artifact %s: %w", fullPath, err)
+	}
+	return string(data), nil
+}
+
 // WriteArtifact creates or updates a KI and writes an artifact file.
 // If the KI doesn't exist, a new directory and metadata.json are created.
 // If it exists, metadata (summary, references, updatedAt) is updated.

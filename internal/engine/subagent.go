@@ -17,6 +17,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"github.com/divmora/localharness/internal/llm"
 	"github.com/divmora/localharness/internal/tools"
 	"github.com/divmora/localharness/internal/util"
+	"github.com/divmora/localharness/internal/workspace"
 )
 
 const (
@@ -431,22 +433,37 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 		// Determine system prompt
 		sysPrompt := typeDef.SystemPrompt
 		if sysPrompt == "" {
-			sysPrompt = defaultSubagentSystemPrompt
+			if inv.TypeName == "self" {
+				sysPrompt = e.sysPrompt
+			} else {
+				sysPrompt = defaultSubagentSystemPrompt
+			}
 		}
 
 		atomic.AddInt32(&e.activeSubagents, 1)
 
-		// Build tool group filter from type definition flags.
-		// If write tools are disabled, exclude the "write" group and host tools.
-		var excludeGroups map[tools.ToolGroup]bool
+		// Build tool group filter from type definition flags and capability inheritance.
+		enableWrite := typeDef.EnableWriteTools
+		enableMCP := typeDef.EnableMCPTools
+		enableSubagents := typeDef.EnableSubagentTools
+
+		if typeDef.InheritCapabilities || e.inheritSubagentCapabilities {
+			enableWrite = (e.excludeToolGroups == nil || !e.excludeToolGroups[tools.ToolGroupWrite])
+			enableMCP = !e.excludeMCPTools
+			enableSubagents = e.subagentsEnabled
+		}
+
+		excludeGroups := make(map[tools.ToolGroup]bool)
+		for k, v := range e.excludeToolGroups {
+			excludeGroups[k] = v
+		}
 		excludeHostTools := false
-		if !typeDef.EnableWriteTools {
-			excludeGroups = map[tools.ToolGroup]bool{
-				tools.ToolGroupWrite: true,
-			}
-			// Host tools are typically write-capable (SDK-registered custom actions),
-			// so exclude them when write tools are disabled.
+		if !enableWrite {
+			excludeGroups[tools.ToolGroupWrite] = true
 			excludeHostTools = true
+		} else {
+			delete(excludeGroups, tools.ToolGroupWrite)
+			excludeHostTools = e.excludeHostTools
 		}
 
 		// Resolve child engine model provider
@@ -460,12 +477,50 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 		}
 		childProvider := ResolveSubagentProvider(e.provider, reqModel, e.modelTierResolver)
 
+		// Setup isolated workspace for "branch" mode if requested
+		childWorkspaces := e.workspaces
+		childWorkspaceInfos := e.workspaceInfos
+		childRegistry := e.toolRegistry
+		var branchedWorkspaceDir string
+
+		if inv.Workspace == "branch" && len(e.workspaces) > 0 && childBrainDir != "" {
+			branchedWorkspaceDir = filepath.Join(childBrainDir, "workspace_branch")
+			if err := copyWorkspaceSnapshot(e.workspaces[0], branchedWorkspaceDir); err != nil {
+				e.logger.Warn("failed to snapshot workspace for branch mode", "error", err)
+				branchedWorkspaceDir = ""
+			} else {
+				childWorkspaces = []string{branchedWorkspaceDir}
+				var corpus string
+				if len(e.workspaceInfos) > 0 {
+					corpus = e.workspaceInfos[0].CorpusName
+				}
+				childWorkspaceInfos = []WorkspaceInfo{
+					{
+						Directory:  branchedWorkspaceDir,
+						CorpusName: corpus,
+					},
+				}
+				branchWsMgr, err := workspace.NewManagerWithAccessMode([]string{branchedWorkspaceDir}, e.accessMode)
+				if err == nil {
+					if childBrainDir != "" {
+						_ = branchWsMgr.AddAllowedPath(childBrainDir)
+					}
+					if e.appDataDir != "" {
+						_ = branchWsMgr.AddAllowedPath(e.appDataDir)
+					}
+					if e.toolRegistry != nil {
+						childRegistry = e.toolRegistry.CloneWithWorkspaceManager(branchWsMgr)
+					}
+				}
+			}
+		}
+
 		// Create child engine with its own flat brain dir and shared bus.
 		childEngine := NewEngine(Config{
 			Provider:                 childProvider,
 			SummarizerProvider:       e.summarizerProvider,
 			ModelTierResolver:        e.modelTierResolver,
-			ToolRegistry:             e.toolRegistry,
+			ToolRegistry:             childRegistry,
 			SystemPrompt:             sysPrompt,
 			ConversationID:           childConvID,
 			TrajectoryID:             childTrajID,
@@ -488,18 +543,18 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			HostToolDecls:            e.hostToolDecls,
 			PermissionHandler:        e.permissionHandler,
 			QuestionHandler:          e.questionHandler,
-			SubagentsEnabled:         typeDef.EnableSubagentTools,
+			SubagentsEnabled:         enableSubagents,
 			ExcludeToolGroups:        excludeGroups,
 			ExcludeHostTools:         excludeHostTools,
-			ExcludeMCPTools:          !typeDef.EnableMCPTools,
+			ExcludeMCPTools:          !enableMCP,
 			MCPManager:               e.mcpMgr,
 			AgentBus:                 e.agentBus,
 			ConversationManager:      e.convMgr,
 			ParentConversationID:     e.convID,
 			AgentRole:                inv.Role,
 			AgentTypeName:            inv.TypeName,
-			Workspaces:               e.workspaces,
-			WorkspaceInfos:           e.workspaceInfos,
+			Workspaces:               childWorkspaces,
+			WorkspaceInfos:           childWorkspaceInfos,
 			UserRules:                e.userRules,
 			YoloMode:                 e.yoloMode,
 			Conversation:             childConv,
@@ -508,8 +563,9 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 			Env:                      e.Env(),
 		})
 
-		// Register instance in tracker
-		childCtx, cancel := context.WithCancel(ctx)
+		// Register instance in tracker with a long-lived context tied to the tracker lifecycle
+		// (not the ephemeral parent turn context, which cancels when the turn finishes)
+		childCtx, cancel := context.WithCancel(context.Background())
 		instance := &SubagentInstance{
 			ConversationID: childConvID,
 			TypeName:       inv.TypeName,
@@ -523,7 +579,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 		e.subagentTracker.Register(instance)
 
 		// Launch in background goroutine
-		go func(inst *SubagentInstance, prompt string) {
+		go func(inst *SubagentInstance, prompt string, branchedDir string) {
 			defer atomic.AddInt32(&e.activeSubagents, -1)
 
 			childErr := inst.Engine.Run(childCtx, prompt)
@@ -550,6 +606,37 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 				}
 			}
 
+			// Workspace branch synchronization and diff generation
+			var branchSyncInfo string
+			if branchedDir != "" && len(e.workspaces) > 0 {
+				primaryWS := e.workspaces[0]
+				applySync := (childErr == nil)
+				patchContent, changedFiles, syncErr := diffAndSyncBranch(primaryWS, branchedDir, inst.Engine.brainDir, applySync)
+				if syncErr != nil {
+					e.logger.Warn("failed to diff/sync branched workspace", "error", syncErr)
+				}
+				if len(changedFiles) > 0 {
+					patchPath := ""
+					if inst.Engine.brainDir != "" && patchContent != "" {
+						patchPath = filepath.Join(inst.Engine.brainDir, "patch.diff")
+					}
+					var sb strings.Builder
+					sb.WriteString("\n\n### Branched Workspace Changes\n")
+					if applySync {
+						sb.WriteString(fmt.Sprintf("**Merged %d changed file(s) into primary workspace:**\n", len(changedFiles)))
+					} else {
+						sb.WriteString(fmt.Sprintf("**Subagent failed. %d changed file(s) NOT merged to primary workspace:**\n", len(changedFiles)))
+					}
+					for _, cf := range changedFiles {
+						sb.WriteString(fmt.Sprintf("- `%s`\n", cf))
+					}
+					if patchPath != "" {
+						sb.WriteString(fmt.Sprintf("\nUnified patch saved to: [%s](file://%s)\n", filepath.Base(patchPath), filepath.ToSlash(patchPath)))
+					}
+					branchSyncInfo = sb.String()
+				}
+			}
+
 			// Save handoff briefing artifact in child brain directory if available
 			handoffPath := ""
 			if inst.Engine.brainDir != "" {
@@ -557,6 +644,9 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 				briefingContent := resultText
 				if briefingContent == "" && childErr != nil {
 					briefingContent = fmt.Sprintf("Error: %v\n", childErr)
+				}
+				if branchSyncInfo != "" {
+					briefingContent += branchSyncInfo
 				}
 				if briefingContent != "" {
 					_ = os.WriteFile(handoffPath, []byte(briefingContent), 0644)
@@ -585,6 +675,9 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 
 			notifyContent := fmt.Sprintf("Subagent '%s' (%s) %s (Conversation ID: %s).\nHandoff Briefing: %s\nSummary: %s",
 				inst.TypeName, inst.Role, statusStr, inst.ConversationID, briefingRef, summary)
+			if branchSyncInfo != "" {
+				notifyContent += branchSyncInfo
+			}
 
 			e.subagentTracker.NotifyParent(tools.SystemMessage{
 				Source:  "subagent_complete",
@@ -606,7 +699,7 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 				"result_len", len(resultText),
 				"error", childErr,
 			)
-		}(instance, inv.Prompt)
+		}(instance, inv.Prompt, branchedWorkspaceDir)
 
 		results = append(results, launchResult{
 			ConversationID: childConvID,
@@ -900,4 +993,163 @@ func mapProtoMessageToLLM(msg *pb.ConversationMessage) llm.Message {
 		}
 	}
 	return llmMsg
+}
+
+var branchSkipDirs = map[string]bool{
+	".git": true, "node_modules": true, "__pycache__": true,
+	".venv": true, "vendor": true, ".idea": true, ".vscode": true,
+	"dist": true, "build": true, ".next": true, "target": true,
+	"bin": true, ".gemini": true, ".divmora": true, ".cache": true,
+	".turbo": true, ".agents": true,
+}
+
+func copyWorkspaceSnapshot(src, dst string) error {
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if branchSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dst, rel), 0755)
+		}
+		if d.Type().IsRegular() {
+			srcData, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			info, err := d.Info()
+			mode := os.FileMode(0644)
+			if err == nil {
+				mode = info.Mode()
+			}
+			targetPath := filepath.Join(dst, rel)
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+				return nil
+			}
+			return os.WriteFile(targetPath, srcData, mode)
+		}
+		return nil
+	})
+}
+
+func diffAndSyncBranch(primaryWS, branchWS, brainDir string, applySync bool) (string, []string, error) {
+	var patches []string
+	var changedFiles []string
+	branchFiles := make(map[string]bool)
+
+	// Walk branch workspace to find modified or added files
+	err := filepath.WalkDir(branchWS, func(bPath string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(branchWS, bPath)
+		if err != nil || rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if branchSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		branchFiles[rel] = true
+		bContent, err := os.ReadFile(bPath)
+		if err != nil {
+			return nil
+		}
+
+		pPath := filepath.Join(primaryWS, rel)
+		pContent, pErr := os.ReadFile(pPath)
+		if pErr != nil {
+			// New file added in branch
+			diff := util.UnifiedDiff("a/"+rel, "b/"+rel, "", string(bContent))
+			if diff != "" {
+				patches = append(patches, diff)
+				changedFiles = append(changedFiles, rel+" (created)")
+				if applySync {
+					_ = os.MkdirAll(filepath.Dir(pPath), 0755)
+					info, _ := d.Info()
+					mode := os.FileMode(0644)
+					if info != nil {
+						mode = info.Mode()
+					}
+					_ = os.WriteFile(pPath, bContent, mode)
+				}
+			}
+		} else if !bytes.Equal(pContent, bContent) {
+			// File modified in branch
+			diff := util.UnifiedDiff("a/"+rel, "b/"+rel, string(pContent), string(bContent))
+			if diff != "" {
+				patches = append(patches, diff)
+				changedFiles = append(changedFiles, rel)
+				if applySync {
+					info, _ := d.Info()
+					mode := os.FileMode(0644)
+					if info != nil {
+						mode = info.Mode()
+					}
+					_ = os.WriteFile(pPath, bContent, mode)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+
+	// Walk primary workspace to find deleted files
+	_ = filepath.WalkDir(primaryWS, func(pPath string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(primaryWS, pPath)
+		if err != nil || rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if branchSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		if !branchFiles[rel] {
+			// File was deleted in branch
+			pContent, err := os.ReadFile(pPath)
+			if err == nil {
+				diff := util.UnifiedDiff("a/"+rel, "b/"+rel, string(pContent), "")
+				if diff != "" {
+					patches = append(patches, diff)
+					changedFiles = append(changedFiles, rel+" (deleted)")
+					if applySync {
+						_ = os.Remove(pPath)
+					}
+				}
+			}
+		}
+		return nil
+	})
+
+	fullPatch := strings.Join(patches, "\n")
+	if brainDir != "" && fullPatch != "" {
+		_ = os.WriteFile(filepath.Join(brainDir, "patch.diff"), []byte(fullPatch), 0644)
+	}
+	return fullPatch, changedFiles, nil
 }

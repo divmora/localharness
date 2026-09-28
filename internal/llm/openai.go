@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -73,7 +74,23 @@ func NewOpenAIProvider(cfg OpenAIConfig, logger *slog.Logger) (*OpenAIProvider, 
 			WithComponent("llm_provider")
 	}
 
-	client := &http.Client{}
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20, // Increased from default 2 for subagent concurrency
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+
+	client := &http.Client{
+		Transport: tr,
+	}
 	if cfg.Timeout > 0 {
 		client.Timeout = cfg.Timeout
 	}

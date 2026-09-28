@@ -5088,9 +5088,15 @@ type HarnessConfig struct {
 	IsolatedBrowser bool `protobuf:"varint,31,opt,name=isolated_browser,json=isolatedBrowser,proto3" json:"isolated_browser,omitempty"`
 	// Access mode controls the agent's host-wide filesystem and execution scope.
 	// Defaults to ACCESS_MODE_WORKSPACE (strict workspace isolation).
-	AccessMode    AccessMode `protobuf:"varint,32,opt,name=access_mode,json=accessMode,proto3,enum=localharness.v1.AccessMode" json:"access_mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AccessMode AccessMode `protobuf:"varint,32,opt,name=access_mode,json=accessMode,proto3,enum=localharness.v1.AccessMode" json:"access_mode,omitempty"`
+	// Additional allowed directories accepted by workspace path validation (e.g. scratch directories).
+	AllowedPaths []string `protobuf:"bytes,33,rep,name=allowed_paths,json=allowedPaths,proto3" json:"allowed_paths,omitempty"`
+	// Dedicated scratch directory for temporary scripts and artifacts.
+	ScratchDir string `protobuf:"bytes,34,opt,name=scratch_dir,json=scratchDir,proto3" json:"scratch_dir,omitempty"`
+	// Enable capability inheritance (write tools, commands, MCP) for all subagents by default.
+	InheritSubagentCapabilities bool `protobuf:"varint,35,opt,name=inherit_subagent_capabilities,json=inheritSubagentCapabilities,proto3" json:"inherit_subagent_capabilities,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *HarnessConfig) Reset() {
@@ -5338,6 +5344,27 @@ func (x *HarnessConfig) GetAccessMode() AccessMode {
 		return x.AccessMode
 	}
 	return AccessMode_ACCESS_MODE_UNSPECIFIED
+}
+
+func (x *HarnessConfig) GetAllowedPaths() []string {
+	if x != nil {
+		return x.AllowedPaths
+	}
+	return nil
+}
+
+func (x *HarnessConfig) GetScratchDir() string {
+	if x != nil {
+		return x.ScratchDir
+	}
+	return ""
+}
+
+func (x *HarnessConfig) GetInheritSubagentCapabilities() bool {
+	if x != nil {
+		return x.InheritSubagentCapabilities
+	}
+	return false
 }
 
 // UserRuleConfig is an SDK-injected user rule with inline content.
@@ -5690,6 +5717,7 @@ type SubagentTypeConfig struct {
 	EnableWriteTools    bool                   `protobuf:"varint,4,opt,name=enable_write_tools,json=enableWriteTools,proto3" json:"enable_write_tools,omitempty"`          // Give write tools (create_file, edit_file, run_command)
 	EnableMcpTools      bool                   `protobuf:"varint,5,opt,name=enable_mcp_tools,json=enableMcpTools,proto3" json:"enable_mcp_tools,omitempty"`                // Give MCP server tools
 	EnableSubagentTools bool                   `protobuf:"varint,6,opt,name=enable_subagent_tools,json=enableSubagentTools,proto3" json:"enable_subagent_tools,omitempty"` // Give subagent tools (recursive)
+	InheritCapabilities bool                   `protobuf:"varint,7,opt,name=inherit_capabilities,json=inheritCapabilities,proto3" json:"inherit_capabilities,omitempty"`   // Inherit parent capabilities (write, MCP, subagent tools)
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -5762,6 +5790,13 @@ func (x *SubagentTypeConfig) GetEnableMcpTools() bool {
 func (x *SubagentTypeConfig) GetEnableSubagentTools() bool {
 	if x != nil {
 		return x.EnableSubagentTools
+	}
+	return false
+}
+
+func (x *SubagentTypeConfig) GetInheritCapabilities() bool {
+	if x != nil {
+		return x.InheritCapabilities
 	}
 	return false
 }
@@ -9303,7 +9338,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\n" +
 	"SCOPE_ONCE\x10\x01\x12\x16\n" +
 	"\x12SCOPE_CONVERSATION\x10\x02\x12\x10\n" +
-	"\fSCOPE_GLOBAL\x10\x03\"\xab\r\n" +
+	"\fSCOPE_GLOBAL\x10\x03\"\xb5\x0e\n" +
 	"\rHarnessConfig\x12)\n" +
 	"\x10litellm_endpoint\x18\x01 \x01(\tR\x0flitellmEndpoint\x12&\n" +
 	"\x0flitellm_api_key\x18\x02 \x01(\tR\rlitellmApiKey\x12(\n" +
@@ -9341,7 +9376,11 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x13browser_profile_dir\x18\x1e \x01(\tR\x11browserProfileDir\x12)\n" +
 	"\x10isolated_browser\x18\x1f \x01(\bR\x0fisolatedBrowser\x12<\n" +
 	"\vaccess_mode\x18  \x01(\x0e2\x1b.localharness.v1.AccessModeR\n" +
-	"accessMode\"@\n" +
+	"accessMode\x12#\n" +
+	"\rallowed_paths\x18! \x03(\tR\fallowedPaths\x12\x1f\n" +
+	"\vscratch_dir\x18\" \x01(\tR\n" +
+	"scratchDir\x12B\n" +
+	"\x1dinherit_subagent_capabilities\x18# \x01(\bR\x1binheritSubagentCapabilities\"@\n" +
 	"\x0eUserRuleConfig\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\"\x84\x02\n" +
@@ -9363,14 +9402,15 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x12\n" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x121\n" +
-	"\x06skills\x18\x04 \x03(\v2\x19.localharness.v1.SkillDefR\x06skills\"\xfb\x01\n" +
+	"\x06skills\x18\x04 \x03(\v2\x19.localharness.v1.SkillDefR\x06skills\"\xae\x02\n" +
 	"\x12SubagentTypeConfig\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12#\n" +
 	"\rsystem_prompt\x18\x03 \x01(\tR\fsystemPrompt\x12,\n" +
 	"\x12enable_write_tools\x18\x04 \x01(\bR\x10enableWriteTools\x12(\n" +
 	"\x10enable_mcp_tools\x18\x05 \x01(\bR\x0eenableMcpTools\x122\n" +
-	"\x15enable_subagent_tools\x18\x06 \x01(\bR\x13enableSubagentTools\"\xc7\x01\n" +
+	"\x15enable_subagent_tools\x18\x06 \x01(\bR\x13enableSubagentTools\x121\n" +
+	"\x14inherit_capabilities\x18\a \x01(\bR\x13inheritCapabilities\"\xc7\x01\n" +
 	"\x1cStructuredSystemInstructions\x12\x1a\n" +
 	"\bidentity\x18\x01 \x01(\tR\bidentity\x12\x1e\n" +
 	"\n" +

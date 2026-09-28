@@ -165,6 +165,10 @@ type SubagentTypeDef struct {
 	// EnableSubagentTools allows the subagent to define and invoke its own subagents.
 	// Default: false.
 	EnableSubagentTools bool
+
+	// InheritCapabilities allows the subagent to inherit the parent agent's full capabilities
+	// (write tools, MCP tools, and subagent invocation tools).
+	InheritCapabilities bool
 }
 
 // UserRule is a labeled user rule to inject into the agent's per-message context.
