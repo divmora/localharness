@@ -76,6 +76,13 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 6. Terminal User Interface (`lhctl` TUI) & Desktop GUI
 
+- [ ] **Unified Agent-Driven React Frontend Architecture (`ui/` with `pnpm`)**
+  - Establish a modular React + TypeScript + Tailwind CSS Single-Page Application (SPA) in `ui/` managed by `pnpm`.
+  - Implement an agent-driven 3-pane layout inspired by Devin and Antigravity UI:
+    - **Left**: Sessions, workspaces, model selection, and tunnel controls.
+    - **Middle**: Real-time conversation stream, collapsible reasoning blocks, live tool execution cards, interactive approvals, and prompt dock.
+    - **Right**: Artifact viewer (Markdown/HTML/Mermaid), file diffs, subagents DAG hierarchy, and live terminal streaming.
+  - Dual deployment: embedded into Go daemon for Web Remote Control and wrapped via Tauri for the local desktop GUI.
 - [ ] **Collapsible Streaming Tool Execution Cards**
   - Interactive foldable tool blocks with live spinner indicators, execution duration timers, and collapsible stdout/stderr stream viewers.
 - [ ] **Rich Syntax-Highlighted Markdown & Inline Diffs**
