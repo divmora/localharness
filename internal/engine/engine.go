@@ -2521,6 +2521,23 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 		}
 	}
 
+	// If workspaces are defined, only block writes targeting paths inside a workspace.
+	// Non-workspace files (scratch files, temp scripts, system directories) are not
+	// workspace code changes and should not be blocked by the planning guard.
+	if len(e.workspaces) > 0 {
+		inWorkspace := false
+		for _, ws := range e.workspaces {
+			rel, err := filepath.Rel(ws, targetPath)
+			if err == nil && !strings.HasPrefix(rel, "..") && rel != "." {
+				inWorkspace = true
+				break
+			}
+		}
+		if !inWorkspace {
+			return false, ""
+		}
+	}
+
 	// Research heuristic: only block if the agent has done 2+ research calls.
 	// If the agent goes straight to writing without research, it's a simple
 	// fix that doesn't need a plan.

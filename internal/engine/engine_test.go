@@ -2270,6 +2270,35 @@ func TestCheckPlanningGuard_AllowsBrainDirWrites(t *testing.T) {
 	}
 }
 
+func TestCheckPlanningGuard_AllowsNonWorkspaceWrites(t *testing.T) {
+	wsDir := t.TempDir()
+	brainDir := t.TempDir()
+	eng := &Engine{
+		enablePlanningMode: true,
+		brainDir:           brainDir,
+		workspaces:         []string{wsDir},
+	}
+	eng.researchToolCount.Store(5) // Lots of research done
+
+	// Writing a file inside workspace without plan should be blocked
+	denied, _ := eng.checkPlanningGuard(llm.ToolCall{
+		Name: "write_to_file",
+		Args: map[string]interface{}{"path": filepath.Join(wsDir, "main.go")},
+	})
+	if !denied {
+		t.Error("should block workspace writes when no plan exists")
+	}
+
+	// Writing a non-workspace file (e.g. /tmp/issue.md or temp script) should NOT be blocked
+	denied, _ = eng.checkPlanningGuard(llm.ToolCall{
+		Name: "write_to_file",
+		Args: map[string]interface{}{"path": "/tmp/issue4.md"},
+	})
+	if denied {
+		t.Error("should allow non-workspace writes (e.g. /tmp/issue4.md) even without a plan")
+	}
+}
+
 func TestCheckPlanningGuard_AllowsAfterPlanExists(t *testing.T) {
 	brainDir := t.TempDir()
 	eng := &Engine{
