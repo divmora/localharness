@@ -36,6 +36,15 @@ func TestDefaultMaxTokens(t *testing.T) {
 	if got := DefaultMaxTokens("gpt-4o"); got != 128000 {
 		t.Errorf("expected 128000 for gpt-4o, got %d", got)
 	}
+	if got := DefaultMaxTokens("qwen2.5-coder:32b"); got != 32768 {
+		t.Errorf("expected 32768 for qwen, got %d", got)
+	}
+	if got := DefaultMaxTokens("llama-3.1-70b"); got != 131072 {
+		t.Errorf("expected 131072 for llama-3.1, got %d", got)
+	}
+	if got := DefaultMaxTokens("deepseek-r1:14b"); got != 64000 {
+		t.Errorf("expected 64000 for deepseek-r1, got %d", got)
+	}
 }
 
 func TestRenderContextView(t *testing.T) {

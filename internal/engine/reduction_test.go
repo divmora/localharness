@@ -301,6 +301,84 @@ func TestTrimLargeResults_SmallFile(t *testing.T) {
 	}
 }
 
+func TestTrimLargeResults_RunCommand(t *testing.T) {
+	largeOutput := strings.Repeat("test output line\n", 120)
+	messages := []llm.Message{
+		{Role: "user", Content: "run tests"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "run_command", Args: map[string]interface{}{"command": "go test -v ./..."}}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "run_command", Content: largeOutput}},
+		// 8 fresh messages
+		{Role: "model", Content: "ok"},
+		{Role: "user", Content: "m1"},
+		{Role: "model", Content: "m2"},
+		{Role: "user", Content: "m3"},
+		{Role: "model", Content: "m4"},
+		{Role: "user", Content: "m5"},
+		{Role: "model", Content: "m6"},
+		{Role: "user", Content: "m7"},
+	}
+
+	result, stats := ReduceHistory(messages, 8)
+
+	if stats.TrimmedResults != 1 {
+		t.Fatalf("expected 1 trimmed command result, got %d", stats.TrimmedResults)
+	}
+	trimmed := result[2].ToolResult.Content
+	if !strings.Contains(trimmed, "command output trimmed") {
+		t.Fatalf("expected trimmed marker, got: %s", trimmed[:100])
+	}
+}
+
+func TestTrimLargeResults_ListDir(t *testing.T) {
+	largeDir := strings.Repeat("file.go\n", 100)
+	messages := []llm.Message{
+		{Role: "user", Content: "list files"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "list_dir", Args: map[string]interface{}{"path": "."}}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "list_dir", Content: largeDir}},
+		// 8 fresh messages
+		{Role: "model", Content: "ok"},
+		{Role: "user", Content: "m1"},
+		{Role: "model", Content: "m2"},
+		{Role: "user", Content: "m3"},
+		{Role: "model", Content: "m4"},
+		{Role: "user", Content: "m5"},
+		{Role: "model", Content: "m6"},
+		{Role: "user", Content: "m7"},
+	}
+
+	result, stats := ReduceHistory(messages, 8)
+
+	if stats.TrimmedResults != 1 {
+		t.Fatalf("expected 1 trimmed list_dir result, got %d", stats.TrimmedResults)
+	}
+	trimmed := result[2].ToolResult.Content
+	if !strings.Contains(trimmed, "directory entries trimmed") {
+		t.Fatalf("expected trimmed marker, got: %s", trimmed[:100])
+	}
+}
+
+func TestEmergencyTrimHistory(t *testing.T) {
+	messages := []llm.Message{
+		{Role: "user", Content: "do work"},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "run_command", Content: strings.Repeat("error line\n", 50)}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "2", Name: "view_file", Content: strings.Repeat("file line\n", 80)}},
+		// 2 recent messages
+		{Role: "user", Content: "recent prompt"},
+		{Role: "model", Content: "recent response"},
+	}
+
+	result, saved := EmergencyTrimHistory(messages, 2)
+	if saved <= 0 {
+		t.Fatalf("expected tokens saved > 0, got %d", saved)
+	}
+	if !strings.Contains(result[1].ToolResult.Content, "emergency context trim") {
+		t.Errorf("expected emergency marker in msg 1, got %s", result[1].ToolResult.Content)
+	}
+	if !strings.Contains(result[2].ToolResult.Content, "emergency context trim") {
+		t.Errorf("expected emergency marker in msg 2, got %s", result[2].ToolResult.Content)
+	}
+}
+
 // --- Combined Tests ---
 
 func TestReduceHistory_NoOp(t *testing.T) {

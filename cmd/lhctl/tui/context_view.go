@@ -23,16 +23,34 @@ type ContextInfo struct {
 
 // DefaultMaxTokens returns the context window size for common models.
 func DefaultMaxTokens(modelName string) int {
-	lower := strings.ToLower(modelName)
+	lower := strings.ToLower(strings.TrimSpace(modelName))
 	switch {
 	case strings.Contains(lower, "gemini"):
 		return 1048576 // 1.0M
 	case strings.Contains(lower, "claude"):
 		return 200000 // 200k
-	case strings.Contains(lower, "gpt-4"), strings.Contains(lower, "o1"), strings.Contains(lower, "o3"):
+	case strings.Contains(lower, "o1"), strings.Contains(lower, "o3"), strings.Contains(lower, "o4"):
+		return 200000 // 200k
+	case strings.Contains(lower, "gpt-4"), strings.Contains(lower, "chatgpt"):
 		return 128000 // 128k
+	case strings.Contains(lower, "deepseek-r1"), strings.Contains(lower, "deepseek-coder"):
+		return 64000 // 64k
+	case strings.Contains(lower, "deepseek"):
+		return 128000 // 128k
+	case strings.Contains(lower, "llama-3.1"), strings.Contains(lower, "llama-3.2"), strings.Contains(lower, "llama-3.3"):
+		return 131072 // 131k
+	case strings.Contains(lower, "llama-3"), strings.Contains(lower, "llama-2"):
+		return 8192 // 8k
+	case strings.Contains(lower, "qwen"):
+		return 32768 // 32k
+	case strings.Contains(lower, "phi-4"):
+		return 16384 // 16k
+	case strings.Contains(lower, "mistral-nemo"):
+		return 128000 // 128k
+	case strings.Contains(lower, "mistral"), strings.Contains(lower, "codestral"):
+		return 32768 // 32k
 	default:
-		return 1000000 // 1.0M default
+		return 128000 // 128k default
 	}
 }
 

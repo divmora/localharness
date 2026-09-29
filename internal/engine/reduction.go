@@ -297,6 +297,89 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			continue
 		}
 
+		// Handle stale run_command / exec_command results (>40 lines or >2000 bytes)
+		if msg.ToolResult.Name == "run_command" || msg.ToolResult.Name == "exec_command" {
+			content := msg.ToolResult.Content
+			if strings.HasPrefix(content, "[Command re-run") || strings.Contains(content, "lines of command output trimmed") {
+				continue
+			}
+			numLines := lineCount(content)
+			if numLines <= 40 && len(content) <= 2000 {
+				continue
+			}
+			oldTokens := estimateStringTokens(content)
+			topLines, bottomLines := splitTopBottomLines(content, 15, 15)
+			trimmedCount := numLines - 30
+			if trimmedCount < 1 {
+				trimmedCount = 1
+			}
+
+			var sb strings.Builder
+			sb.WriteString(topLines)
+			sb.WriteString(fmt.Sprintf("\n\n[... %d lines of command output trimmed — archived in session log ...]\n\n", trimmedCount))
+			sb.WriteString(bottomLines)
+
+			newContent := sb.String()
+			messages[i].ToolResult = &llm.ToolCallResult{
+				CallID:           msg.ToolResult.CallID,
+				Name:             msg.ToolResult.Name,
+				Content:          newContent,
+				IsError:          msg.ToolResult.IsError,
+				ThoughtSignature: msg.ToolResult.ThoughtSignature,
+			}
+
+			tokensSaved += oldTokens - estimateStringTokens(newContent)
+			trimmed++
+			continue
+		}
+
+		// Handle stale list_dir, grep_search, and web content results (>60 lines or >3000 bytes)
+		if msg.ToolResult.Name == "list_dir" || msg.ToolResult.Name == "grep_search" ||
+			msg.ToolResult.Name == "read_url_content" || msg.ToolResult.Name == "web_fetch" {
+			content := msg.ToolResult.Content
+			if strings.Contains(content, "lines trimmed —") {
+				continue
+			}
+			numLines := lineCount(content)
+			if numLines <= 60 && len(content) <= 3000 {
+				continue
+			}
+			oldTokens := estimateStringTokens(content)
+			topLines, bottomLines := splitTopBottomLines(content, 20, 10)
+			trimmedCount := numLines - 30
+			if trimmedCount < 1 {
+				trimmedCount = 1
+			}
+
+			var label string
+			switch msg.ToolResult.Name {
+			case "list_dir":
+				label = fmt.Sprintf("[... %d directory entries trimmed — re-run tool if needed ...]", trimmedCount)
+			case "grep_search":
+				label = fmt.Sprintf("[... %d search matches trimmed — re-run tool if needed ...]", trimmedCount)
+			default:
+				label = fmt.Sprintf("[... %d lines trimmed — re-run tool if needed ...]", trimmedCount)
+			}
+
+			var sb strings.Builder
+			sb.WriteString(topLines)
+			sb.WriteString("\n\n" + label + "\n\n")
+			sb.WriteString(bottomLines)
+
+			newContent := sb.String()
+			messages[i].ToolResult = &llm.ToolCallResult{
+				CallID:           msg.ToolResult.CallID,
+				Name:             msg.ToolResult.Name,
+				Content:          newContent,
+				IsError:          msg.ToolResult.IsError,
+				ThoughtSignature: msg.ToolResult.ThoughtSignature,
+			}
+
+			tokensSaved += oldTokens - estimateStringTokens(newContent)
+			trimmed++
+			continue
+		}
+
 		if msg.ToolResult.Name != "view_file" {
 			continue
 		}
@@ -336,6 +419,51 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 	}
 
 	return trimmed, tokensSaved
+}
+
+// EmergencyTrimHistory performs aggressive trimming of historical tool results
+// when the conversation is approaching the model context ceiling.
+// It trims every tool result outside keepRecent down to first 5 + last 5 lines.
+func EmergencyTrimHistory(messages []llm.Message, keepRecent int) ([]llm.Message, int) {
+	if len(messages) == 0 || keepRecent <= 0 {
+		return messages, 0
+	}
+	cutoff := len(messages) - keepRecent
+	if cutoff <= 0 {
+		return messages, 0
+	}
+
+	tokensSaved := 0
+
+	for i := 0; i < cutoff; i++ {
+		msg := messages[i]
+		if msg.ToolResult == nil {
+			continue
+		}
+		content := msg.ToolResult.Content
+		numLines := lineCount(content)
+		if numLines <= 15 && len(content) <= 500 {
+			continue
+		}
+		oldTokens := estimateStringTokens(content)
+		topLines, bottomLines := splitTopBottomLines(content, 5, 5)
+		trimmedLines := numLines - 10
+		if trimmedLines < 1 {
+			trimmedLines = 1
+		}
+
+		newContent := fmt.Sprintf("%s\n\n[... emergency context trim: %d lines omitted ...]\n\n%s", topLines, trimmedLines, bottomLines)
+		messages[i].ToolResult = &llm.ToolCallResult{
+			CallID:           msg.ToolResult.CallID,
+			Name:             msg.ToolResult.Name,
+			Content:          newContent,
+			IsError:          msg.ToolResult.IsError,
+			ThoughtSignature: msg.ToolResult.ThoughtSignature,
+		}
+		tokensSaved += oldTokens - estimateStringTokens(newContent)
+	}
+
+	return messages, tokensSaved
 }
 
 // lineCount returns the number of lines in s without allocating a string slice.

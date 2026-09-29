@@ -24,8 +24,6 @@ This document serves as the **living product roadmap** for LocalHarness.
   - Convert screenshot artifacts from `desktop_subagent`, `desktop_screenshot`, and `browser_subagent` into base64 `image_url` data parts in `llm.Message` so vision models (GPT-4o, Claude 3.5 Sonnet, Gemini 2.0 Flash) can directly inspect screen layout and visual UI elements.
 - [ ] **ToolContext Injection**
   - Pass structured `ToolContext` into host tool executors to give tools direct access to current session ID, turn counters, and conversation state.
-- [ ] **Pre-Flight Context Budgeting & Token Overflow Protection**
-  - Implement proactive context window estimation before invoking `Generate()`. If estimated tokens exceed the model context window minus safety margin, trigger immediate emergency compaction to prevent unrecoverable `400 context_length_exceeded` API errors.
 
 ---
 

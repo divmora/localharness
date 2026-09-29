@@ -96,6 +96,8 @@ type Engine struct {
 	keepRecentMessages           int // Messages to preserve during compaction
 	lastRealTokenCount           int // Most recent real token count from LLM provider
 	tracer                       *Tracer
+	contextWindow                int                        // Active model context window in tokens (e.g. 128000, 200000, 1048576)
+	customContextWindow          int                        // Explicit user/config override if > 0
 	brainDir                     string                     // For child engine tracing
 	appDataDir                   string                     // Root data dir (for subagent inheritance)
 	enablePlanningMode           bool                       // Planning guard: block workspace writes until plan exists
@@ -177,7 +179,8 @@ type Config struct {
 	OnStep              StepCallback
 	OnTrajectory        TrajectoryCallback
 	MaxTurns            int
-	CompactionThreshold int    // 0 = disabled, >0 = token threshold
+	CompactionThreshold int    // 0 = auto-calculate for model, -1 = disabled, >0 = custom token threshold
+	ContextWindow       int    // 0 = auto-detect from model name, >0 = explicit context window
 	KeepRecentMessages  int    // 0 = default (10)
 	BrainDir            string // For tracing; empty = tracing disabled
 	AppDataDir          string // Root data directory (e.g. ~/.divmora/localharness)
@@ -398,8 +401,21 @@ func NewEngine(cfg Config) *Engine {
 	}
 
 	compactionThreshold := cfg.CompactionThreshold
-	if compactionThreshold == 0 && cfg.Provider != nil {
-		_, compactionThreshold = CalculateModelCompactionThreshold(cfg.Provider.ModelName())
+	var contextWindow int
+	if cfg.Provider != nil {
+		win, compThresh := CalculateModelCompactionThreshold(cfg.Provider.ModelName())
+		contextWindow = win
+		if compactionThreshold == 0 {
+			compactionThreshold = compThresh
+		}
+	} else {
+		contextWindow = 128000
+	}
+	if cfg.ContextWindow > 0 {
+		contextWindow = cfg.ContextWindow
+	}
+	if compactionThreshold < 0 {
+		compactionThreshold = 0 // Explicitly disabled
 	}
 
 	eng := &Engine{
@@ -417,6 +433,8 @@ func NewEngine(cfg Config) *Engine {
 		maxConcurrentToolWorkers: maxWorkers,
 		maxTurns:                 cfg.MaxTurns,
 		compactionThreshold:      compactionThreshold,
+		contextWindow:            contextWindow,
+		customContextWindow:      cfg.ContextWindow,
 		keepRecentMessages:       cfg.KeepRecentMessages,
 		tracer:                   NewTracer(cfg.BrainDir, cfg.Logger),
 		brainDir:                 cfg.BrainDir,
@@ -546,6 +564,26 @@ func (e *Engine) CompactionThreshold() int {
 	return e.compactionThreshold
 }
 
+// ContextWindow returns the active model context window in tokens.
+func (e *Engine) ContextWindow() int {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.contextWindow <= 0 {
+		return 128000
+	}
+	return e.contextWindow
+}
+
+// SetContextWindow sets an explicit context window override for the engine.
+func (e *Engine) SetContextWindow(win int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if win > 0 {
+		e.customContextWindow = win
+		e.contextWindow = win
+	}
+}
+
 // SetProvider dynamically switches the active LLM provider mid-session.
 // It recalculates the summarizer provider and context window compaction threshold
 // to match the new model's capabilities unless customCompactionThreshold > 0.
@@ -575,6 +613,11 @@ func (e *Engine) SetProvider(p llm.Provider, customCompactionThreshold int) (con
 	}
 
 	win, compThresh := CalculateModelCompactionThreshold(p.ModelName())
+	if e.customContextWindow > 0 {
+		e.contextWindow = e.customContextWindow
+	} else {
+		e.contextWindow = win
+	}
 	if customCompactionThreshold > 0 {
 		e.compactionThreshold = customCompactionThreshold
 	} else {
@@ -978,6 +1021,74 @@ drained:
 				})
 				// Reset real token count since history changed
 				e.lastRealTokenCount = 0
+			}
+		}
+
+		// Pre-flight context budgeting & token overflow protection:
+		// Proactively check if estimated prompt tokens will exceed the model's context ceiling
+		// minus safety margin. If so, execute emergency compaction and trimming to prevent
+		// unrecoverable 400 context_length_exceeded API errors.
+		contextWindow := e.ContextWindow()
+		safetyMargin := 4096
+		if margin := int(float64(contextWindow) * 0.10); margin > safetyMargin {
+			safetyMargin = margin
+		}
+		maxAllowed := contextWindow - safetyMargin
+		if maxAllowed < 2000 {
+			maxAllowed = 2000
+		}
+
+		estTokens := EstimateTokens(e.history) + estimateStringTokens(e.sysPrompt)
+		for _, td := range toolDecls {
+			estTokens += 20 + estimateStringTokens(td.Name) + estimateStringTokens(td.Description)
+		}
+
+		if estTokens > maxAllowed {
+			e.logger.Warn("pre-flight context overflow detected, executing emergency compaction",
+				"estimated_tokens", estTokens,
+				"max_allowed", maxAllowed,
+				"context_window", contextWindow,
+			)
+
+			// Step 1: Force immediate compaction with minimal preserved window (4 messages)
+			emergencyCompacted, compResult, compErr := CompactIfNeeded(
+				ctx, e.getSummarizerProvider(), e.history, CompactionConfig{
+					Threshold:          1, // Force compaction
+					KeepRecentMessages: 4,
+					SystemPromptTokens: estimateStringTokens(e.sysPrompt),
+				}, e.logger,
+			)
+			if compErr == nil && compResult != nil {
+				e.history = emergencyCompacted
+				e.reinjectMetadataAfterCompaction()
+				e.lastRealTokenCount = 0
+				e.emitStep(&pb.StepUpdate{
+					ConversationId: e.convID,
+					TrajectoryId:   e.trajectoryID,
+					StepIndex:      e.nextStepIndex(),
+					Source:         pb.StepUpdate_SOURCE_SYSTEM,
+					State:          pb.StepUpdate_STATE_DONE,
+					Target:         pb.StepUpdate_TARGET_INTERNAL,
+					Action: &pb.StepUpdate_Compaction{
+						Compaction: &pb.ActionCompaction{
+							OriginalTokens:  int32(compResult.OriginalTokens),
+							CompactedTokens: int32(compResult.CompactedTokens),
+							MessagesRemoved: int32(compResult.MessagesRemoved),
+							Summary:         compResult.Summary,
+						},
+					},
+				})
+			}
+
+			// Step 2: If still over budget, aggressively trim historical tool outputs
+			newEst := EstimateTokens(e.history) + estimateStringTokens(e.sysPrompt)
+			if newEst > maxAllowed {
+				var saved int
+				e.history, saved = EmergencyTrimHistory(e.history, 2)
+				e.logger.Warn("emergency tool output trimming applied",
+					"tokens_saved", saved,
+					"new_estimate", EstimateTokens(e.history),
+				)
 			}
 		}
 

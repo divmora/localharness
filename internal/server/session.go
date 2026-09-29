@@ -2279,15 +2279,15 @@ func protoPluginsToEngine(defs []*pb.PluginDef) []engine.PluginDef {
 // resolveCompactionThreshold converts the SDK-provided threshold into the
 // engine value using the convention:
 //
-//	0  → use DefaultCompactionThreshold (100K tokens)
-//	-1 → disable compaction (engine value 0)
+//	0  → auto-calculate from active model capabilities (CalculateModelCompactionThreshold)
+//	-1 → disable compaction
 //	>0 → use the explicit value as-is
 func resolveCompactionThreshold(adkValue int) int {
 	switch {
 	case adkValue < 0:
-		return 0 // Disabled — engine treats 0 as "no compaction"
+		return -1 // Disabled
 	case adkValue == 0:
-		return config.DefaultCompactionThreshold
+		return 0 // Auto-calculate per model
 	default:
 		return adkValue
 	}

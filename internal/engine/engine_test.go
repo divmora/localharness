@@ -963,6 +963,74 @@ func TestNewTracerEnabled(t *testing.T) {
 	}
 }
 
+func TestPreFlightContextOverflowProtection(t *testing.T) {
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				// Emergency compaction summarizer call
+				Content:      "Summary: Emergency compacted history of bulky commands.",
+				FinishReason: "stop",
+			},
+			{
+				// Main LLM call
+				Content:      "Task completed safely.",
+				FinishReason: "stop",
+				Usage:        llm.Usage{TotalTokens: 200},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(nil, logger)
+
+	var steps []*pb.StepUpdate
+	eng := NewEngine(Config{
+		Provider:            provider,
+		ToolRegistry:        reg,
+		ConversationID:      "test-overflow",
+		TrajectoryID:        "test-overflow",
+		BrainDir:            t.TempDir(),
+		Logger:              logger,
+		ContextWindow:       3000, // Small context window to force pre-flight overflow
+		CompactionThreshold: 0,
+		KeepRecentMessages:  4,
+	})
+	eng.stepCB = func(step *pb.StepUpdate) {
+		steps = append(steps, step)
+	}
+
+	// Pre-populate with massive history (exceeds maxAllowed: 3000 - 4096 => 2000 minimum)
+	for i := 0; i < 25; i++ {
+		eng.history = append(eng.history, llm.Message{
+			Role:    "user",
+			Content: fmt.Sprintf("Message %d with bulky text content that pushes tokens over the context ceiling limit of the model", i),
+		})
+		eng.history = append(eng.history, llm.Message{
+			Role: "tool",
+			ToolResult: &llm.ToolCallResult{
+				CallID:  fmt.Sprintf("call-%d", i),
+				Name:    "run_command",
+				Content: strings.Repeat("bulky command line output from test suite\n", 30),
+			},
+		})
+	}
+
+	err := eng.Run(context.Background(), "Perform final step")
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	var sawCompaction bool
+	for _, s := range steps {
+		if s.GetCompaction() != nil {
+			sawCompaction = true
+		}
+	}
+	if !sawCompaction {
+		t.Error("expected pre-flight emergency compaction step to be emitted")
+	}
+}
+
 func TestNewTracerDisabled(t *testing.T) {
 	logger := slog.Default()
 

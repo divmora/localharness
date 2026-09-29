@@ -150,16 +150,27 @@ func ModelContextWindow(modelName string) int {
 	case strings.Contains(lower, "gpt-4"), strings.Contains(lower, "chatgpt"):
 		// GPT-4o / GPT-4 Turbo support 128k tokens
 		return 128000
+	case strings.Contains(lower, "deepseek-r1"), strings.Contains(lower, "deepseek-coder"):
+		// DeepSeek R1 / Coder typically configured at 64k
+		return 64000
 	case strings.Contains(lower, "deepseek"):
-		// DeepSeek V3 / R1 support 128k context
+		// DeepSeek V3 supports 128k context
 		return 128000
 	case strings.Contains(lower, "llama-3.1"), strings.Contains(lower, "llama-3.2"), strings.Contains(lower, "llama-3.3"):
 		// Llama 3.1+ supports 128k context
-		return 128000
-	case strings.Contains(lower, "qwen"):
+		return 131072
+	case strings.Contains(lower, "llama-3"), strings.Contains(lower, "llama-2"):
+		// Standard Llama 3 / 2 base context
+		return 8192
+	case strings.Contains(lower, "qwen2.5-coder"), strings.Contains(lower, "qwen2.5"), strings.Contains(lower, "qwen"):
+		// Qwen 2.5 local context default
+		return 32768
+	case strings.Contains(lower, "phi-4"):
+		return 16384
+	case strings.Contains(lower, "mistral-nemo"):
 		return 128000
 	case strings.Contains(lower, "mistral"), strings.Contains(lower, "codestral"):
-		return 128000
+		return 32768
 	default:
 		return 128000
 	}
