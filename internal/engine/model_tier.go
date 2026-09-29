@@ -171,6 +171,9 @@ func ModelContextWindow(modelName string) int {
 		return 128000
 	case strings.Contains(lower, "mistral"), strings.Contains(lower, "codestral"):
 		return 32768
+	case strings.Contains(lower, "glm-5"), strings.Contains(lower, "glm-4"), strings.Contains(lower, "glm"):
+		// GLM-5.x / GLM-4.x on Cloudflare Workers AI supports 262k context
+		return 262144
 	default:
 		return 128000
 	}

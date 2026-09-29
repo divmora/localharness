@@ -276,7 +276,13 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			}
 			oldTokens := estimateStringTokens(content)
 			topLines, bottomLines := splitTopBottomLines(content, 15, 15)
+			if bottomLines == "" {
+				continue
+			}
 			trimmedCount := numLines - 30
+			if trimmedCount < 1 {
+				trimmedCount = 1
+			}
 
 			var sb strings.Builder
 			sb.WriteString(topLines)
@@ -284,6 +290,11 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			sb.WriteString(bottomLines)
 
 			newContent := sb.String()
+			newTokens := estimateStringTokens(newContent)
+			if newTokens >= oldTokens {
+				continue
+			}
+
 			messages[i].ToolResult = &llm.ToolCallResult{
 				CallID:           msg.ToolResult.CallID,
 				Name:             msg.ToolResult.Name,
@@ -292,7 +303,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 				ThoughtSignature: msg.ToolResult.ThoughtSignature,
 			}
 
-			tokensSaved += oldTokens - estimateStringTokens(newContent)
+			tokensSaved += oldTokens - newTokens
 			trimmed++
 			continue
 		}
@@ -309,6 +320,9 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			}
 			oldTokens := estimateStringTokens(content)
 			topLines, bottomLines := splitTopBottomLines(content, 15, 15)
+			if bottomLines == "" {
+				continue
+			}
 			trimmedCount := numLines - 30
 			if trimmedCount < 1 {
 				trimmedCount = 1
@@ -320,6 +334,11 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			sb.WriteString(bottomLines)
 
 			newContent := sb.String()
+			newTokens := estimateStringTokens(newContent)
+			if newTokens >= oldTokens {
+				continue
+			}
+
 			messages[i].ToolResult = &llm.ToolCallResult{
 				CallID:           msg.ToolResult.CallID,
 				Name:             msg.ToolResult.Name,
@@ -328,7 +347,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 				ThoughtSignature: msg.ToolResult.ThoughtSignature,
 			}
 
-			tokensSaved += oldTokens - estimateStringTokens(newContent)
+			tokensSaved += oldTokens - newTokens
 			trimmed++
 			continue
 		}
@@ -337,7 +356,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 		if msg.ToolResult.Name == "list_dir" || msg.ToolResult.Name == "grep_search" ||
 			msg.ToolResult.Name == "read_url_content" || msg.ToolResult.Name == "web_fetch" {
 			content := msg.ToolResult.Content
-			if strings.Contains(content, "lines trimmed —") {
+			if strings.Contains(content, "lines trimmed —") || strings.Contains(content, "trimmed —") {
 				continue
 			}
 			numLines := lineCount(content)
@@ -346,6 +365,9 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			}
 			oldTokens := estimateStringTokens(content)
 			topLines, bottomLines := splitTopBottomLines(content, 20, 10)
+			if bottomLines == "" {
+				continue
+			}
 			trimmedCount := numLines - 30
 			if trimmedCount < 1 {
 				trimmedCount = 1
@@ -367,6 +389,11 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			sb.WriteString(bottomLines)
 
 			newContent := sb.String()
+			newTokens := estimateStringTokens(newContent)
+			if newTokens >= oldTokens {
+				continue
+			}
+
 			messages[i].ToolResult = &llm.ToolCallResult{
 				CallID:           msg.ToolResult.CallID,
 				Name:             msg.ToolResult.Name,
@@ -375,7 +402,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 				ThoughtSignature: msg.ToolResult.ThoughtSignature,
 			}
 
-			tokensSaved += oldTokens - estimateStringTokens(newContent)
+			tokensSaved += oldTokens - newTokens
 			trimmed++
 			continue
 		}
@@ -386,19 +413,25 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 
 		content := msg.ToolResult.Content
 		// Skip if already reduced by dedup
-		if strings.HasPrefix(content, "[Re-read") || strings.HasPrefix(content, "[Command re-run") {
+		if strings.HasPrefix(content, "[Re-read") || strings.HasPrefix(content, "[Command re-run") || strings.Contains(content, "trimmed —") {
 			continue
 		}
 
 		numLines := lineCount(content)
-		if numLines <= minLinesToTrim {
+		if numLines <= minLinesToTrim && len(content) <= 3000 {
 			continue
 		}
 
 		// Keep first N + last N lines
 		oldTokens := estimateStringTokens(content)
 		topLines, bottomLines := splitTopBottomLines(content, keepTopLines, keepBottomLines)
+		if bottomLines == "" {
+			continue
+		}
 		trimmedCount := numLines - keepTopLines - keepBottomLines
+		if trimmedCount < 1 {
+			trimmedCount = 1
+		}
 
 		var sb strings.Builder
 		sb.WriteString(topLines)
@@ -406,6 +439,11 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 		sb.WriteString(bottomLines)
 
 		newContent := sb.String()
+		newTokens := estimateStringTokens(newContent)
+		if newTokens >= oldTokens {
+			continue
+		}
+
 		messages[i].ToolResult = &llm.ToolCallResult{
 			CallID:           msg.ToolResult.CallID,
 			Name:             msg.ToolResult.Name,
@@ -414,7 +452,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			ThoughtSignature: msg.ToolResult.ThoughtSignature,
 		}
 
-		tokensSaved += oldTokens - estimateStringTokens(newContent)
+		tokensSaved += oldTokens - newTokens
 		trimmed++
 	}
 
@@ -491,14 +529,13 @@ func splitTopBottomLines(s string, topN, bottomN int) (string, string) {
 		}
 		topEnd += next + 1
 	}
-	topPart := strings.TrimSuffix(s[:topEnd], "\n")
 
 	// Find bottomN-th newline from end
 	searchEnd := len(s)
 	if searchEnd > 0 && s[searchEnd-1] == '\n' {
 		searchEnd--
 	}
-	bottomStart := 0
+	bottomStart := len(s)
 	count := 0
 	for count < bottomN && searchEnd > 0 {
 		prev := strings.LastIndexByte(s[:searchEnd], '\n')
@@ -510,6 +547,18 @@ func splitTopBottomLines(s string, topN, bottomN int) (string, string) {
 		bottomStart = prev + 1
 		searchEnd = prev
 	}
+
+	// If top and bottom overlap or cross, line-based splitting cannot trim a middle section.
+	if topEnd >= bottomStart {
+		// If string is large (e.g. single-line JSON or minified content > 2000 bytes),
+		// split by byte budget: first 1000 bytes and last 1000 bytes.
+		if len(s) > 2000 {
+			return s[:1000], s[len(s)-1000:]
+		}
+		return s, ""
+	}
+
+	topPart := strings.TrimSuffix(s[:topEnd], "\n")
 	bottomPart := strings.TrimSuffix(s[bottomStart:], "\n")
 
 	return topPart, bottomPart

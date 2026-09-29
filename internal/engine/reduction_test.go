@@ -657,3 +657,29 @@ func BenchmarkTrimLargeResults(b *testing.B) {
 		_, _ = trimLargeResults(msgs, 8)
 	}
 }
+
+func TestTrimLargeResults_SingleLineJSON(t *testing.T) {
+	// A 10KB single-line JSON string (like grep_search output without literal newlines)
+	largeJSON := `{"matches":[` + strings.Repeat(`{"filename":"/path/to/file.go","match":"abc"},`, 150) + `]}`
+	messages := []llm.Message{
+		{Role: "user", Content: "search"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "grep_search"}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "grep_search", Content: largeJSON}},
+	}
+	for i := 0; i < 8; i++ {
+		messages = append(messages, llm.Message{Role: "user", Content: "recent"})
+	}
+
+	reduced, stats := ReduceHistory(messages, 8)
+	if stats.TrimmedResults != 1 {
+		t.Fatalf("expected 1 trimmed result, got %d", stats.TrimmedResults)
+	}
+	if stats.TokensSaved <= 0 {
+		t.Fatalf("expected positive tokens saved, got %d", stats.TokensSaved)
+	}
+
+	trimmedContent := reduced[2].ToolResult.Content
+	if len(trimmedContent) >= len(largeJSON) {
+		t.Fatalf("trimmed content (%d bytes) should be smaller than original (%d bytes)", len(trimmedContent), len(largeJSON))
+	}
+}
