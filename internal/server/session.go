@@ -239,7 +239,8 @@ func (s *Session) Run() {
 				return
 			case msg, ok := <-clientMsgs:
 				if !ok {
-					if s.isDaemon {
+					// Only detach if the session was used (has messages or steps); otherwise terminate and clean up
+					if s.isDaemon && s.conv != nil && s.conv.State != nil && (len(s.conv.State.Messages) > 0 || s.conv.State.StepCount > 0) {
 						s.Detach()
 						clientMsgs = nil
 						continue
@@ -269,11 +270,7 @@ func (s *Session) Run() {
 				return
 			case msg, ok := <-clientMsgs:
 				if !ok {
-					if s.isDaemon {
-						s.Detach()
-						clientMsgs = nil
-						continue
-					}
+					// Disconnect in pre-init phase: exit and clean up immediately
 					if s.cancel != nil {
 						s.cancel()
 					}
@@ -463,13 +460,18 @@ func (s *Session) cleanup() {
 	s.logger.Info("session cleanup: all turns complete, saving state")
 
 	if s.conv != nil {
-		if s.conv.State != nil && s.conv.State.Status == pb.ConversationState_STATUS_ACTIVE {
-			s.conv.State.Status = pb.ConversationState_STATUS_COMPLETED
+		if s.conv.State != nil && len(s.conv.State.Messages) == 0 && s.conv.State.StepCount == 0 {
+			s.logger.Info("session cleanup: deleting empty conversation with 0 messages/steps", "id", s.conv.ID)
+			_ = s.conv.Delete()
+		} else {
+			if s.conv.State != nil && s.conv.State.Status == pb.ConversationState_STATUS_ACTIVE {
+				s.conv.State.Status = pb.ConversationState_STATUS_COMPLETED
+			}
+			if err := s.conv.SaveAll(); err != nil {
+				s.logger.Error("failed to save conversation state during cleanup", "error", err)
+			}
+			_ = s.conv.Close()
 		}
-		if err := s.conv.SaveAll(); err != nil {
-			s.logger.Error("failed to save conversation state during cleanup", "error", err)
-		}
-		_ = s.conv.Close()
 	}
 	if s.toolRegistry != nil {
 		s.toolRegistry.Shutdown()

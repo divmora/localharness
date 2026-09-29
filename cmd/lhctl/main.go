@@ -368,6 +368,17 @@ detach and attach to headless sessions, and inspect conversation state and trace
 	listCmd.Flags().IntVar(&listRecent, "recent", 0, "Show only the N most recent conversations")
 	convCmd.AddCommand(listCmd)
 
+	// conv prune
+	pruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Delete all empty conversations (0 messages and 0 steps)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runPrune(getDataDir())
+			return nil
+		},
+	}
+	convCmd.AddCommand(pruneCmd)
+
 	rootCmd.AddCommand(convCmd)
 	rootCmd.AddCommand(newCodeGraphCommand())
 	rootCmd.AddCommand(newVersionCommand())
@@ -463,6 +474,10 @@ func getLatestConversationID(dataDir string) (string, error) {
 		}
 		state := &pb.ConversationState{}
 		if err := proto.Unmarshal(data, state); err != nil {
+			continue
+		}
+		// Skip empty conversations with no messages and no steps
+		if len(state.Messages) == 0 && state.StepCount == 0 {
 			continue
 		}
 		list = append(list, convEntry{

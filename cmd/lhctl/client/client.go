@@ -21,16 +21,18 @@ import (
 
 // Client handles WebSocket communication between lhctl CLI/TUI and LocalHarness runtime.
 type Client struct {
-	conn       *websocket.Conn
-	events     chan *pb.ServerMessage
-	errors     chan error
-	closed     chan struct{}
-	closeOnce  sync.Once
-	mu         sync.Mutex
-	sessionID  string
-	apiKey     string
-	serverAddr string
-	logger     *slog.Logger
+	conn          *websocket.Conn
+	events        chan *pb.ServerMessage
+	errors        chan error
+	closed        chan struct{}
+	closeOnce     sync.Once
+	mu            sync.Mutex
+	sessionID     string
+	apiKey        string
+	serverAddr    string
+	logger        *slog.Logger
+	pendingConfig *pb.HarnessConfig
+	isInitialized bool
 }
 
 // Config holds connection options.
@@ -269,6 +271,28 @@ func (c *Client) APIKey() string {
 	return c.apiKey
 }
 
+// SetPendingInit sets a config to be sent lazily on the first user message or action.
+func (c *Client) SetPendingInit(cfg *pb.HarnessConfig) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pendingConfig = cfg
+	c.isInitialized = false
+}
+
+// PendingInit returns the pending HarnessConfig if init has not been sent yet.
+func (c *Client) PendingInit() *pb.HarnessConfig {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pendingConfig
+}
+
+// IsInitialized returns true if the session init handshake has been sent.
+func (c *Client) IsInitialized() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.isInitialized
+}
+
 func (c *Client) send(msg *pb.ClientMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -277,6 +301,25 @@ func (c *Client) send(msg *pb.ClientMessage) error {
 	case <-c.closed:
 		return fmt.Errorf("client is closed")
 	default:
+	}
+
+	if c.pendingConfig != nil && !c.isInitialized && msg.GetInit() == nil {
+		initMsg := &pb.ClientMessage{
+			Payload: &pb.ClientMessage_Init{
+				Init: &pb.InitRequest{
+					Config: c.pendingConfig,
+				},
+			},
+		}
+		data, err := proto.Marshal(initMsg)
+		if err != nil {
+			return fmt.Errorf("marshal pending init message: %w", err)
+		}
+		if err := c.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+			return fmt.Errorf("send pending init message: %w", err)
+		}
+		c.isInitialized = true
+		c.pendingConfig = nil
 	}
 
 	data, err := proto.Marshal(msg)
@@ -289,6 +332,11 @@ func (c *Client) send(msg *pb.ClientMessage) error {
 
 // Init sends the initial configuration to the server.
 func (c *Client) Init(cfg *pb.HarnessConfig) error {
+	c.mu.Lock()
+	c.pendingConfig = nil
+	c.isInitialized = true
+	c.mu.Unlock()
+
 	return c.send(&pb.ClientMessage{
 		Payload: &pb.ClientMessage_Init{
 			Init: &pb.InitRequest{

@@ -490,8 +490,14 @@ func runInteractiveWithOptions(flags runFlags) error {
 		},
 	}
 
-	if err := cl.Init(harnessCfg); err != nil {
-		return fmt.Errorf("initializing session: %w", err)
+	if flags.prompt == "" && !flags.detach && flags.sessionID == "" {
+		// Lazy initialization: defer InitRequest until the first user message or action
+		// in interactive mode so no empty conversation files or background processes are created.
+		cl.SetPendingInit(harnessCfg)
+	} else {
+		if err := cl.Init(harnessCfg); err != nil {
+			return fmt.Errorf("initializing session: %w", err)
+		}
 	}
 
 	if flags.prompt != "" {

@@ -41,6 +41,8 @@ lhctl attach <session-id>
 > **Resume on Exit**: Whenever you exit an interactive session (`/exit`, `/quit`, `Ctrl+C`, `Ctrl+D`), `lhctl` automatically displays the exact command to resume your conversation session (e.g. `lhctl -c <id>`).
 >
 > **Automatic Workspace Restoration**: When resuming with `lhctl -c <id>`, the session automatically restores all active workspace directories persisted in the conversation state, eliminating the need to manually pass `--workspace` again.
+>
+> **Lazy Session Initialization**: Launching an interactive session (`lhctl` or `lhctl run`) without an immediate prompt or resume target does not create a session file or spin up background processes until the first message is sent. If you exit without interacting, zero artifacts or empty files remain.
 
 ### Command Flags (`lhctl` & `lhctl run`)
 
@@ -423,6 +425,15 @@ Real-time tool call timeline:
 lhctl conv trace <id>                    # Show tool call timeline
 lhctl conv trace <id> --watch            # Live tail (updates as agent runs)
 lhctl conv trace <id> --commands         # Show full command lines
+```
+
+### `conversation prune` (alias: `conv prune`)
+
+Clean up abandoned or empty conversations (sessions with 0 messages and 0 steps):
+
+```bash
+lhctl conversation prune
+lhctl conv prune
 ```
 
 ---

@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,6 +115,62 @@ func (m *Manager) Resume(id string) (*Conversation, error) {
 	conv.State = state
 
 	return conv, nil
+}
+
+// Delete removes a conversation's .pb state file and brain directory by ID.
+func (m *Manager) Delete(id string) error {
+	pbPath := filepath.Join(m.conversationsDir, id+".pb")
+	brainPath := filepath.Join(m.brainDir, id)
+	var errs []error
+	if err := os.Remove(pbPath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, err)
+	}
+	if err := os.RemoveAll(brainPath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("delete conversation %s: %v", id, errs)
+	}
+	return nil
+}
+
+// PruneEmpty scans for conversations with 0 messages and 0 steps and deletes them.
+// Returns the number of pruned conversations.
+func (m *Manager) PruneEmpty() (int, error) {
+	entries, err := os.ReadDir(m.conversationsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read conversations directory: %w", err)
+	}
+
+	pruned := 0
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".pb" {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".pb")
+		pbPath := filepath.Join(m.conversationsDir, e.Name())
+
+		data, err := os.ReadFile(pbPath)
+		if err != nil {
+			continue
+		}
+		var state pb.ConversationState
+		if err := proto.Unmarshal(data, &state); err != nil {
+			continue
+		}
+
+		// Check if conversation is empty (no messages and no steps)
+		if len(state.Messages) == 0 && state.StepCount == 0 {
+			if err := m.Delete(id); err == nil {
+				pruned++
+			}
+		}
+	}
+
+	return pruned, nil
 }
 
 // init creates the directory structure and initial state for a conversation.
@@ -585,6 +642,22 @@ func (c *Conversation) Close() error {
 
 	c.stepWg.Wait()
 	c.transcriptWg.Wait()
+	return nil
+}
+
+// Delete closes the conversation and removes its .pb state file and brain directory from disk.
+func (c *Conversation) Delete() error {
+	_ = c.Close()
+	var errs []error
+	if err := os.Remove(c.StatePath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, err)
+	}
+	if err := os.RemoveAll(c.BrainDir); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("delete conversation %s: %v", c.ID, errs)
+	}
 	return nil
 }
 

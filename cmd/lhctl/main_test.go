@@ -218,9 +218,12 @@ func TestResolveConversationID_And_GetLatest(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	createConvPB(t, convDir, id2, "2026-01-02T12:00:00Z")
 	time.Sleep(10 * time.Millisecond)
-	createConvPB(t, convDir, id3, "2026-01-03T15:00:00Z") // Latest
+	createConvPB(t, convDir, id3, "2026-01-03T15:00:00Z") // Latest active
+	time.Sleep(10 * time.Millisecond)
+	idEmpty := "0192d999-0004-7ef0-9123-000000000004"
+	createEmptyConvPB(t, convDir, idEmpty, "2026-01-04T15:00:00Z") // More recent but empty
 
-	// 2. Test getLatestConversationID
+	// 2. Test getLatestConversationID (should skip idEmpty and return id3)
 	latest, err := getLatestConversationID(tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -272,6 +275,28 @@ func TestResolveConversationID_And_GetLatest(t *testing.T) {
 }
 
 func createConvPB(t *testing.T, convDir, id, updatedAt string) {
+	t.Helper()
+	state := &pb.ConversationState{
+		ConversationId: id,
+		CreatedAt:      updatedAt,
+		UpdatedAt:      updatedAt,
+		Status:         pb.ConversationState_STATUS_ACTIVE,
+		Messages: []*pb.ConversationMessage{
+			{Role: "user", Content: "hello"},
+		},
+		StepCount: 1,
+	}
+	data, err := proto.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	filePath := filepath.Join(convDir, id+".pb")
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		t.Fatalf("write error: %v", err)
+	}
+}
+
+func createEmptyConvPB(t *testing.T, convDir, id, updatedAt string) {
 	t.Helper()
 	state := &pb.ConversationState{
 		ConversationId: id,

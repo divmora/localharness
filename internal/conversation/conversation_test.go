@@ -845,3 +845,82 @@ func TestLogStep_CloseDrainsPending(t *testing.T) {
 		t.Fatalf("expected %d lines in transcript after Close, got %d", count, len(lines))
 	}
 }
+
+func TestConversation_Delete(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+	conv, err := mgr.Create(&pb.HarnessConfig{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	_ = conv.SaveState()
+
+	if _, err := os.Stat(conv.StatePath); err != nil {
+		t.Fatalf("expected state file to exist before delete: %v", err)
+	}
+	if _, err := os.Stat(conv.BrainDir); err != nil {
+		t.Fatalf("expected brain dir to exist before delete: %v", err)
+	}
+
+	if err := conv.Delete(); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	if _, err := os.Stat(conv.StatePath); !os.IsNotExist(err) {
+		t.Errorf("expected state file to be deleted, got err: %v", err)
+	}
+	if _, err := os.Stat(conv.BrainDir); !os.IsNotExist(err) {
+		t.Errorf("expected brain dir to be deleted, got err: %v", err)
+	}
+}
+
+func TestManager_PruneEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	mgr, _ := NewManager(tmpDir)
+
+	// Conv 1: empty (0 messages, 0 steps)
+	c1, err := mgr.Create(&pb.HarnessConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c1.SaveState()
+
+	// Conv 2: has a message
+	c2, err := mgr.Create(&pb.HarnessConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2.State.Messages = append(c2.State.Messages, &pb.ConversationMessage{
+		Role:    "user",
+		Content: "hello",
+	})
+	_ = c2.SaveState()
+
+	// Conv 3: empty (0 messages, 0 steps)
+	c3, err := mgr.Create(&pb.HarnessConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c3.SaveState()
+
+	pruned, err := mgr.PruneEmpty()
+	if err != nil {
+		t.Fatalf("PruneEmpty failed: %v", err)
+	}
+	if pruned != 2 {
+		t.Errorf("expected 2 pruned conversations, got %d", pruned)
+	}
+
+	// c1 and c3 should be gone
+	if _, err := os.Stat(c1.StatePath); !os.IsNotExist(err) {
+		t.Errorf("expected c1 to be deleted")
+	}
+	if _, err := os.Stat(c3.StatePath); !os.IsNotExist(err) {
+		t.Errorf("expected c3 to be deleted")
+	}
+
+	// c2 should still exist
+	if _, err := os.Stat(c2.StatePath); err != nil {
+		t.Errorf("expected c2 to still exist: %v", err)
+	}
+}
