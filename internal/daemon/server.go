@@ -108,6 +108,16 @@ func RunDaemonServerWithTunnel(logger *slog.Logger, enableTunnel bool) error {
 
 	logger.Info("LocalHarness daemon running", "pid", info.PID, "port", port, "socket", info.Socket, "version", config.HarnessVersion)
 
+	// Auto-prune any orphaned empty conversations from previous aborted sessions/crashes
+	if home, err := os.UserHomeDir(); err == nil {
+		appDataDir := filepath.Join(home, config.DefaultAppDataDir)
+		if convMgr, err := conversation.NewManager(appDataDir); err == nil {
+			if pruned, _ := convMgr.PruneEmpty(); pruned > 0 {
+				logger.Info("pruned orphaned empty conversations on startup", "count", pruned)
+			}
+		}
+	}
+
 	// Multi-session registry for daemon connections
 	var sessionMu sync.Mutex
 	sessions := make(map[string]*server.Session)
