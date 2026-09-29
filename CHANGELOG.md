@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.5.0](https://github.com/divmora/localharness/compare/v0.4.0...v0.5.0) (2026-09-29)
+
+
+### Features
+
+* add web remote control via cloudflare quick tunnels and session descriptions ([4942476](https://github.com/divmora/localharness/commit/4942476a61960bc5cc04e1b938f86c1f7090b397))
+* **adk:** support Trusted and YoloMode in LocalAgentConfig and inject restricted workspace notice ([e3a1cf1](https://github.com/divmora/localharness/commit/e3a1cf19aa8df8be40db40294670249d73f5db89))
+* **engine:** implement pre-flight context budgeting, token overflow protection, and dynamic compaction threshold ([964d4ac](https://github.com/divmora/localharness/commit/964d4ac513723c0ed1bc2f7b000e51634617c9af))
+* **session:** lazy session initialization in lhctl and empty session cleanup ([520aacf](https://github.com/divmora/localharness/commit/520aacfa706cc108d26c988edc2f88597bccc59c))
+* **tasks:** persist background task output logs to disk and surface log URIs ([4e312f7](https://github.com/divmora/localharness/commit/4e312f777ecf2aee93010af52e56cce4196f2042))
+* **workspace:** support dynamic repository auto-promotion and context-approved path validation ([40010e7](https://github.com/divmora/localharness/commit/40010e73580a387163a0b4247e201bdf7107ab4c))
+
+
+### Bug Fixes
+
+* **engine:** exempt non-workspace and scratch writes from planning mode guard ([ef02680](https://github.com/divmora/localharness/commit/ef02680ec21a1163f0f87a55ccc45f2e09b43c59))
+* **engine:** fix reduction split overlap on single-line tool outputs and add GLM context window ([878cd00](https://github.com/divmora/localharness/commit/878cd00932a309fc60fa7730736635ce66490dd9))
+* **lhctl:** default to interactive mode and add --plan flag for opt-in planning mode ([c900f43](https://github.com/divmora/localharness/commit/c900f43b197eb0c2b92fa7f73107705dfa519ad4))
+* prevent infinite permission retry loops, detached session stalls, and MCP process leaks ([611f664](https://github.com/divmora/localharness/commit/611f66436fd268824aef6315db216b60acba4a92))
+* resolve subagent lifecycle, knowledge_read tool, scratch policy, and branch isolation ([961561e](https://github.com/divmora/localharness/commit/961561eebfaa0e871225eb70ebfa60b9f18f2018))
+
+
+### Performance Improvements
+
+* **engine,cli:** multi-turn context bloat optimization and adaptive browser activation ([#72](https://github.com/divmora/localharness/issues/72)) ([36c60c5](https://github.com/divmora/localharness/commit/36c60c50577b9d132373ed6c66c3ab1768e92d21))
+
 ## [0.4.0](https://github.com/divmora/localharness/compare/v0.3.0...v0.4.0) (2026-09-23)
 
 
