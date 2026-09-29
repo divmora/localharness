@@ -131,7 +131,7 @@ func TestRegisterBuiltinToolsDefault(t *testing.T) {
 	reg, _ := testRegistry(t)
 
 	// Default config enables all except run_command
-	expectedTools := []string{"view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "grep_search", "find_file", "finish", "schedule", "ask_question"}
+	expectedTools := []string{"view_file", "write_to_file", "replace_file_content", "grep_search", "find_file", "finish", "schedule", "ask_question"}
 	for _, name := range expectedTools {
 		if !reg.HasTool(name) {
 			t.Errorf("expected tool %q to be registered", name)
@@ -156,7 +156,7 @@ func TestRegisterBuiltinToolsAllEnabled(t *testing.T) {
 
 	reg, _ := testRegistryWithConfig(t, cfg)
 
-	allTools := []string{"view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "grep_search", "find_file", "run_command", "finish"}
+	allTools := []string{"view_file", "write_to_file", "replace_file_content", "grep_search", "find_file", "run_command", "finish"}
 	for _, name := range allTools {
 		if !reg.HasTool(name) {
 			t.Errorf("expected tool %q to be registered", name)
@@ -978,75 +978,6 @@ func TestEditFileNoChunks(t *testing.T) {
 	err := reg.Execute(ctx, "replace_file_content", step)
 	if err == nil {
 		t.Error("edit_file should error with no chunks")
-	}
-}
-
-// ─── Multi Edit File Tests ───────────────────────────────────────────────
-
-func TestMultiEditFile(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	testFile := filepath.Join(wsDir, "multi_edit_tool.txt")
-	_ = os.WriteFile(testFile, []byte("line1\nline2\nline3\nline4\n"), 0644)
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_ReplaceFileContent{
-			ReplaceFileContent: &pb.ActionReplaceFileContent{
-				Path: testFile,
-				Chunks: []*pb.EditChunk{
-					{
-						StartLine:     1,
-						EndLine:       1,
-						TargetContent: "line1",
-						Replacement:   "LINE_ONE",
-					},
-					{
-						StartLine:     3,
-						EndLine:       3,
-						TargetContent: "line3",
-						Replacement:   "LINE_THREE",
-					},
-				},
-			},
-		},
-	}
-
-	err := reg.Execute(ctx, "multi_replace_file_content", step)
-	if err != nil {
-		t.Fatalf("multi_replace_file_content failed: %v", err)
-	}
-
-	data, _ := os.ReadFile(testFile)
-	if string(data) != "LINE_ONE\nline2\nLINE_THREE\nline4\n" {
-		t.Errorf("unexpected content: %q", string(data))
-	}
-}
-
-func TestMultiEditFileRequiresMinTwoChunks(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	testFile := filepath.Join(wsDir, "single_chunk.txt")
-	_ = os.WriteFile(testFile, []byte("content\n"), 0644)
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_ReplaceFileContent{
-			ReplaceFileContent: &pb.ActionReplaceFileContent{
-				Path: testFile,
-				Chunks: []*pb.EditChunk{
-					{
-						TargetContent: "content",
-						Replacement:   "new content",
-					},
-				},
-			},
-		},
-	}
-
-	err := reg.Execute(ctx, "multi_replace_file_content", step)
-	if err == nil {
-		t.Error("multi_replace_file_content should error with fewer than 2 chunks")
 	}
 }
 

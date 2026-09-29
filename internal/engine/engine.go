@@ -1949,8 +1949,7 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 	}
 
 	// Execute built-in tool — dispatch by the original tool name from the LLM,
-	// not the proto action type, since multiple tools can share the same proto
-	// (e.g., replace_file_content and multi_replace_file_content both use ActionReplaceFileContent).
+	// not the proto action type.
 	//
 	// Panic recovery: catch runtime panics (e.g. invalid slice bounds) so a
 	// single misbehaving tool doesn't crash the entire engine. The panic is
@@ -1990,7 +1989,7 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 	// Trigger live incremental code graph indexing on file mutations
 	if e.codeGraphManager != nil {
 		switch tc.Name {
-		case "write_to_file", "replace_file_content", "multi_replace_file_content":
+		case "write_to_file", "replace_file_content":
 			if p, ok := tc.Args["path"].(string); ok && p != "" {
 				ws := "."
 				if len(e.workspaces) > 0 {
@@ -2616,7 +2615,7 @@ func generateDiffPreview(tc llm.ToolCall) string {
 		}
 		return diff
 
-	case "replace_file_content", "multi_replace_file_content":
+	case "replace_file_content":
 		path, _ := tc.Args["path"].(string)
 		if path == "" {
 			return ""
@@ -2690,7 +2689,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 
 	// Only guard write tools
 	switch tc.Name {
-	case "write_to_file", "replace_file_content", "multi_replace_file_content":
+	case "write_to_file", "replace_file_content":
 		// continue to check
 	default:
 		return false, ""
@@ -2765,7 +2764,7 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 		_ = json.Unmarshal(argsJSON, action)
 		step.Action = &pb.StepUpdate_WriteToFile{WriteToFile: action}
 
-	case "replace_file_content", "multi_replace_file_content":
+	case "replace_file_content":
 		action := &pb.ActionReplaceFileContent{}
 		_ = json.Unmarshal(argsJSON, action)
 		step.Action = &pb.StepUpdate_ReplaceFileContent{ReplaceFileContent: action}

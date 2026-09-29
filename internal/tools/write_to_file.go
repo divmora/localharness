@@ -19,7 +19,7 @@ func registerCreateFile(r *Registry) {
 		Description: "Use this tool to create new files. The file and any parent directories will be created automatically. " +
 			"By default this tool will error if the file already exists. To overwrite an existing file, set overwrite to true. " +
 			"WARNING: overwrite replaces the entire file contents. Only use overwrite when you explicitly intend to replace the file. " +
-			"For modifying existing files, use replace_file_content or multi_replace_file_content instead.",
+			"For modifying existing files, use replace_file_content instead.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

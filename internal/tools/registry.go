@@ -59,7 +59,7 @@ const (
 	ToolGroupRead ToolGroup = "read"
 
 	// ToolGroupWrite is for tools that modify the filesystem or run commands
-	// (write_to_file, replace_file_content, multi_replace_file_content, run_command, manage_task).
+	// (write_to_file, replace_file_content, run_command, manage_task).
 	ToolGroupWrite ToolGroup = "write"
 )
 
@@ -460,7 +460,6 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 	}
 	if cfg.EditFile {
 		registerEditFile(r)
-		registerMultiEditFile(r) // Same capability gate as edit_file
 	}
 	if cfg.SearchDir {
 		registerSearchDir(r)

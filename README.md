@@ -211,7 +211,7 @@ The harness provides a rich set of built-in tools organized into categories:
 
 | Category | Tools | Description |
 |:---|:---|:---|
-| **File I/O** | `view_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content` | Read, create, and edit files |
+| **File I/O** | `view_file`, `write_to_file`, `replace_file_content` | Read, create, and edit files |
 | **Search** | `grep_search`, `find_file` | Ripgrep-powered content search and filename pattern matching |
 | **Execution** | `run_command`, `manage_task`, `schedule` | Shell commands (sync/background/persistent), task management, timers and cron |
 | **Web** | `search_web`, `read_url_content` | Web search and URL content fetching |

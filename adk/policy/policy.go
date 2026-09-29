@@ -137,12 +137,11 @@ var ReadOnlyTools = map[string]bool{
 
 // FileTools is the set of tools that operate on file paths.
 var FileTools = map[string]bool{
-	"view_file":                  true,
-	"write_to_file":              true,
-	"replace_file_content":       true,
-	"multi_replace_file_content": true,
-	"grep_search":                true,
-	"find_file":                  true,
+	"view_file":            true,
+	"write_to_file":        true,
+	"replace_file_content": true,
+	"grep_search":          true,
+	"find_file":            true,
 }
 
 // ConfirmRunCommand is the default policy: deny run_command and manage_task,

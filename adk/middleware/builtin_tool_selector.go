@@ -206,7 +206,7 @@ var (
 
 	// WriteTools is the set of tools that modify the filesystem or run commands.
 	WriteTools = []string{
-		"write_to_file", "replace_file_content", "multi_replace_file_content",
+		"write_to_file", "replace_file_content",
 		"run_command", "manage_task",
 	}
 

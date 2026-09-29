@@ -20,7 +20,7 @@ func registerEditFile(r *Registry) {
 		Description: "Use this tool to edit an existing file by replacing target content with new content. " +
 			"ALWAYS read a file with view_file before modifying it. " +
 			"Use this tool ONLY when making a SINGLE CONTIGUOUS block of edits. " +
-			"For multiple non-contiguous edits, use multi_replace_file_content instead. " +
+			"To edit multiple, non-adjacent lines of code in the same file, make multiple calls to this tool. " +
 			"Do NOT make multiple parallel calls to this tool for the same file. " +
 			"Each chunk specifies a line range to narrow the search, the exact target text to find, and replacement text.",
 		Parameters: map[string]interface{}{
