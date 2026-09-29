@@ -236,3 +236,21 @@ func TestIsDestructiveCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestPathToURI(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"/path/to/task.log", "file:///path/to/task.log"},
+		{"Users/user/task.log", "file:///Users/user/task.log"},
+	}
+
+	for _, tt := range tests {
+		got := PathToURI(tt.input)
+		if got != tt.want {
+			t.Errorf("PathToURI(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

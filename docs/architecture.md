@@ -106,6 +106,8 @@ Each iteration:
         └── .system_generated/
             ├── logs/
             │   └── transcript.jsonl   # Human-readable step log
+            ├── tasks/
+            │   └── <task-id>.log      # Background task logs
             ├── steps/
             │   └── <N>/content.md     # Per-step content
             └── traces/
@@ -232,7 +234,9 @@ Engine calls GenerateStream()
 The `run_command` tool supports `background=true` to start long-running processes
 that the agent can check back on later. Background tasks:
 
-- Capture output in a 100KB ring buffer (no unbounded memory growth)
+- Stream raw stdout/stderr directly to `.system_generated/tasks/<task-id>.log` on disk in real time
+- Capture recent output in a 100KB ring buffer (no unbounded memory growth)
+- Surface `log_path` and clickable `log_uri` (`file:///...`) in tool results and completion notifications
 - Can be listed, inspected, killed, or have stdin sent via `manage_task`
 - Auto-prune after 30 minutes of completion
 - Limited to 20 concurrent tasks (configurable)

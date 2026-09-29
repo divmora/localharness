@@ -151,6 +151,7 @@ func (r *Registry) Clone() *Registry {
 	}
 	if r.taskMgr != nil {
 		cloned.taskMgr = NewTaskManager(r.logger, r.taskMgr.maxTasks)
+		cloned.taskMgr.SetTasksDir(r.taskMgr.TasksDir())
 	}
 	return cloned
 }
@@ -278,11 +279,14 @@ func (r *Registry) TaskManager() *TaskManager {
 	return r.taskMgr
 }
 
-// SetConversation sets the active conversation for artifact metadata persistence.
+// SetConversation sets the active conversation for artifact metadata persistence and task logging.
 func (r *Registry) SetConversation(conv *conversation.Conversation) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.conversation = conv
+	if r.taskMgr != nil && conv != nil {
+		r.taskMgr.SetTasksDir(conv.TasksDir)
+	}
 }
 
 // Conversation returns the active conversation.

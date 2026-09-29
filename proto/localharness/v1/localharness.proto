@@ -420,6 +420,8 @@ message ActionRunCommand {
   bool timed_out = 13;
   string task_id = 14;              // ID of the background task (when background=true)
   string assigned_terminal_id = 15; // Terminal ID assigned (when persistent=true)
+  string log_path = 16;             // Path to task log file on disk (when background=true)
+  string log_uri = 17;              // file:/// URI to task log file (when background=true)
 }
 
 // ActionFinish signals task completion with optional structured output.
@@ -512,6 +514,8 @@ message TaskInfo {
   string completed_at = 7;    // RFC3339
   string recent_output = 8;   // Last N bytes of combined stdout+stderr
   string terminal_id = 9;     // If using a persistent terminal
+  string log_path = 10;       // Path to task log file on disk
+  string log_uri = 11;        // file:/// URI to task log file
 }
 
 // ═══════════════════════════════════════════════════════════════════════

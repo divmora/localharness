@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -56,12 +58,15 @@ type BackgroundTask struct {
 	StartedAt   time.Time
 	CompletedAt time.Time
 	TerminalID  string
+	LogPath     string
+	LogURI      string
 
-	cmd    *exec.Cmd
-	output *RingBuffer
-	stdin  io.WriteCloser
-	cancel context.CancelFunc
-	done   chan struct{}
+	cmd     *exec.Cmd
+	output  *RingBuffer
+	logFile *os.File
+	stdin   io.WriteCloser
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // PersistentTerminal is a long-lived bash session that preserves environment
@@ -85,6 +90,7 @@ type TaskManager struct {
 	terminals   map[string]*PersistentTerminal
 	logger      *slog.Logger
 	maxTasks    int
+	tasksDir    string
 	schedMgr    *ScheduleManager
 	notifyCh    chan<- SystemMessage // Optional: push task completion notifications
 	stepEmitter func(*pb.StepUpdate) // For live output streaming
@@ -118,6 +124,20 @@ func (tm *TaskManager) SetNotifyChannel(ch chan<- SystemMessage) {
 	tm.notifyCh = ch
 }
 
+// SetTasksDir sets the directory where background task output logs are saved.
+func (tm *TaskManager) SetTasksDir(dir string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.tasksDir = dir
+}
+
+// TasksDir returns the directory where background task logs are saved.
+func (tm *TaskManager) TasksDir() string {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.tasksDir
+}
+
 // ScheduleManager returns the task manager's schedule manager.
 func (tm *TaskManager) ScheduleManager() *ScheduleManager {
 	return tm.schedMgr
@@ -136,7 +156,7 @@ func shortID() string {
 // StartBackground starts a command as a background task.
 // It returns immediately after spawning, populating task_id in the result fields.
 // If waitMs > 0, it waits that many milliseconds for initial output before returning.
-func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string, env map[string]string, waitMs int, step *pb.StepUpdate) (taskID, stdout string, err error) {
+func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string, env map[string]string, waitMs int, step *pb.StepUpdate) (taskID, stdout, logPath, logURI string, err error) {
 	tm.mu.Lock()
 
 	// Check task limit
@@ -148,7 +168,7 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 	}
 	if running >= tm.maxTasks {
 		tm.mu.Unlock()
-		return "", "", fmt.Errorf("maximum concurrent background tasks reached (%d)", tm.maxTasks)
+		return "", "", "", "", fmt.Errorf("maximum concurrent background tasks reached (%d)", tm.maxTasks)
 	}
 
 	taskID = "task-" + shortID()
@@ -172,10 +192,35 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 	// Set up output capture
 	output := NewRingBuffer(outputBufferSize)
 
+	var logFile *os.File
+	if tm.tasksDir != "" {
+		if err := os.MkdirAll(tm.tasksDir, 0755); err == nil {
+			logPath = filepath.Join(tm.tasksDir, fmt.Sprintf("%s.log", taskID))
+			logURI = util.PathToURI(logPath)
+			f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+			if err == nil {
+				logFile = f
+			} else {
+				tm.logger.Warn("failed to create task log file", "task_id", taskID, "path", logPath, "error", err)
+			}
+		} else {
+			tm.logger.Warn("failed to create tasks directory", "dir", tm.tasksDir, "error", err)
+		}
+	}
+
+	if step != nil {
+		if rc, ok := step.Action.(*pb.StepUpdate_RunCommand); ok && rc.RunCommand != nil {
+			rc.RunCommand.TaskId = taskID
+			rc.RunCommand.LogPath = logPath
+			rc.RunCommand.LogUri = logURI
+		}
+	}
+
 	streamWriter := &taskStreamWriter{
-		buf:  output,
-		step: step,
-		tm:   tm,
+		buf:     output,
+		logFile: logFile,
+		step:    step,
+		tm:      tm,
 	}
 	cmd.Stdout = streamWriter
 	cmd.Stderr = streamWriter
@@ -184,8 +229,11 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 	stdinPipe, pipeErr := cmd.StdinPipe()
 	if pipeErr != nil {
 		cancel()
+		if logFile != nil {
+			_ = logFile.Close()
+		}
 		tm.mu.Unlock()
-		return "", "", fmt.Errorf("task_manager: stdin pipe: %w", pipeErr)
+		return "", "", "", "", fmt.Errorf("task_manager: stdin pipe: %w", pipeErr)
 	}
 
 	// Use process group so we can kill the entire tree (on supported platforms)
@@ -193,8 +241,11 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		if logFile != nil {
+			_ = logFile.Close()
+		}
 		tm.mu.Unlock()
-		return "", "", fmt.Errorf("task_manager: start: %w", err)
+		return "", "", "", "", fmt.Errorf("task_manager: start: %w", err)
 	}
 
 	task := &BackgroundTask{
@@ -203,8 +254,11 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 		Cwd:       cwd,
 		Status:    TaskRunning,
 		StartedAt: time.Now(),
+		LogPath:   logPath,
+		LogURI:    logURI,
 		cmd:       cmd,
 		output:    output,
+		logFile:   logFile,
 		stdin:     stdinPipe,
 		cancel:    cancel,
 		done:      make(chan struct{}),
@@ -213,7 +267,7 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 	tm.tasks[taskID] = task
 	tm.mu.Unlock()
 
-	tm.logger.Info("started background task", "task_id", taskID, "command", command)
+	tm.logger.Info("started background task", "task_id", taskID, "command", command, "log_path", logPath)
 
 	// Monitor completion in a goroutine
 	go tm.monitorTask(task)
@@ -225,7 +279,7 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 
 		select {
 		case <-ctx.Done():
-			return taskID, output.Last(recentOutputSize), ctx.Err()
+			return taskID, output.Last(recentOutputSize), logPath, logURI, ctx.Err()
 		case <-task.done:
 			// Task completed within wait window
 		case <-timer.C:
@@ -234,7 +288,7 @@ func (tm *TaskManager) StartBackground(ctx context.Context, command, cwd string,
 		stdout = output.Last(recentOutputSize)
 	}
 
-	return taskID, stdout, nil
+	return taskID, stdout, logPath, logURI, nil
 }
 
 // monitorTask waits for a background task to complete and updates its status.
@@ -243,6 +297,10 @@ func (tm *TaskManager) monitorTask(task *BackgroundTask) {
 
 	if task.stdin != nil {
 		_ = task.stdin.Close()
+	}
+	if task.logFile != nil {
+		_ = task.logFile.Sync()
+		_ = task.logFile.Close()
 	}
 
 	tm.mu.Lock()
@@ -281,6 +339,9 @@ func (tm *TaskManager) monitorTask(task *BackgroundTask) {
 		content := fmt.Sprintf("Command: %s\nStatus: %s\nExit code: %d", task.Command, task.Status, task.ExitCode)
 		if output != "" {
 			content += fmt.Sprintf("\nOutput (last 1KB):\n%s", output)
+		}
+		if task.LogURI != "" {
+			content += fmt.Sprintf("\nLog: %s", task.LogURI)
 		}
 
 		select {
@@ -438,6 +499,8 @@ type TaskSnapshot struct {
 	CompletedAt  time.Time
 	RecentOutput string
 	TerminalID   string
+	LogPath      string
+	LogURI       string
 }
 
 func (tm *TaskManager) snapshotTask(task *BackgroundTask) TaskSnapshot {
@@ -451,6 +514,8 @@ func (tm *TaskManager) snapshotTask(task *BackgroundTask) TaskSnapshot {
 		CompletedAt:  task.CompletedAt,
 		RecentOutput: task.output.Last(recentOutputSize),
 		TerminalID:   task.TerminalID,
+		LogPath:      task.LogPath,
+		LogURI:       task.LogURI,
 	}
 }
 
@@ -952,7 +1017,7 @@ func (tm *TaskManager) RunWithWait(ctx context.Context, command, cwd string, env
 	}
 
 	// Start as background, then check if it completes within waitMs
-	taskID, initialOutput, err := tm.StartBackground(ctx, command, cwd, env, waitMs, nil)
+	taskID, initialOutput, _, _, err := tm.StartBackground(ctx, command, cwd, env, waitMs, nil)
 	if err != nil {
 		return "", "", "", -1, false, err
 	}
@@ -1025,9 +1090,11 @@ func (tm *TaskManager) runSync(ctx context.Context, command, cwd string, env map
 	return "", stdoutStr, stderrStr, 0, false, nil
 }
 
-// taskStreamWriter wraps a RingBuffer to emit streaming step updates for background tasks.
+// taskStreamWriter wraps a RingBuffer to emit streaming step updates for background tasks
+// and simultaneously writes raw output to the task log file on disk.
 type taskStreamWriter struct {
 	buf      *RingBuffer
+	logFile  *os.File
 	mu       sync.Mutex
 	lastEmit time.Time
 	step     *pb.StepUpdate
@@ -1037,6 +1104,10 @@ type taskStreamWriter struct {
 func (w *taskStreamWriter) Write(p []byte) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	if w.logFile != nil {
+		_, _ = w.logFile.Write(p)
+	}
 
 	n, err = w.buf.Write(p)
 

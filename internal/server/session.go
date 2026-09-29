@@ -777,6 +777,7 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 	var notifyCh <-chan tools.SystemMessage
 	var notifySendCh chan<- tools.SystemMessage
 	if toolRegistry.TaskManager() != nil {
+		toolRegistry.TaskManager().SetTasksDir(s.conv.TasksDir)
 		schedMgr := toolRegistry.TaskManager().ScheduleManager()
 		notifyCh = schedMgr.Notifications()
 		notifySendCh = schedMgr.NotifyChannel()

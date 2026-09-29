@@ -3,13 +3,17 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
+	"github.com/divmora/localharness/internal/util"
 	"github.com/divmora/localharness/internal/workspace"
 )
 
@@ -24,7 +28,7 @@ func TestTaskManagerStartBackground(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, err := tm.StartBackground(ctx, "echo hello && sleep 0.1", "", nil, 0, nil)
+	taskID, _, _, _, err := tm.StartBackground(ctx, "echo hello && sleep 0.1", "", nil, 0, nil)
 	if err != nil {
 		t.Fatalf("StartBackground failed: %v", err)
 	}
@@ -59,7 +63,7 @@ func TestTaskManagerStartBackgroundWithWait(t *testing.T) {
 
 	ctx := context.Background()
 	// Start a command that outputs quickly then sleeps
-	taskID, output, err := tm.StartBackground(ctx, "echo immediate-output && sleep 5", "", nil, 500, nil)
+	taskID, output, _, _, err := tm.StartBackground(ctx, "echo immediate-output && sleep 5", "", nil, 500, nil)
 	if err != nil {
 		t.Fatalf("StartBackground failed: %v", err)
 	}
@@ -90,7 +94,7 @@ func TestTaskManagerStartBackground_ContextCancelDuringWait(t *testing.T) {
 	}()
 
 	start := time.Now()
-	_, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 10000, nil)
+	_, _, _, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 10000, nil)
 	duration := time.Since(start)
 
 	if err == nil {
@@ -111,8 +115,8 @@ func TestTaskManagerListTasks(t *testing.T) {
 	ctx := context.Background()
 
 	// Start multiple tasks
-	id1, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0, nil)
-	id2, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0, nil)
+	id1, _, _, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0, nil)
+	id2, _, _, _, _ := tm.StartBackground(ctx, "sleep 10", "", nil, 0, nil)
 
 	tasks := tm.ListTasks()
 	if len(tasks) != 2 {
@@ -133,7 +137,7 @@ func TestTaskManagerKillTask(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, _ := tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	taskID, _, _, _, _ := tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 
 	// Give it a moment to start
 	time.Sleep(100 * time.Millisecond)
@@ -165,7 +169,7 @@ func TestTaskManagerSendInput(t *testing.T) {
 
 	ctx := context.Background()
 	// Start cat which reads from stdin
-	taskID, _, _ := tm.StartBackground(ctx, "cat", "", nil, 0, nil)
+	taskID, _, _, _, _ := tm.StartBackground(ctx, "cat", "", nil, 0, nil)
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -198,10 +202,10 @@ func TestTaskManagerMaxTasks(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	_, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
-	_, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	_, _, _, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	_, _, _, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 
-	_, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	_, _, _, _, err := tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 	if err == nil {
 		t.Error("expected error when max tasks exceeded")
 	}
@@ -211,8 +215,8 @@ func TestTaskManagerShutdown(t *testing.T) {
 	tm := NewTaskManager(testLogger(), 5)
 
 	ctx := context.Background()
-	_, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
-	_, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	_, _, _, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
+	_, _, _, _, _ = tm.StartBackground(ctx, "sleep 30", "", nil, 0, nil)
 
 	if tm.RunningTaskCount() != 2 {
 		t.Errorf("expected 2 running tasks, got %d", tm.RunningTaskCount())
@@ -230,7 +234,7 @@ func TestTaskManagerNonZeroExit(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, _ := tm.StartBackground(ctx, "exit 42", "", nil, 0, nil)
+	taskID, _, _, _, _ := tm.StartBackground(ctx, "exit 42", "", nil, 0, nil)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -964,4 +968,157 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestTaskManager_TaskLogFileCreated(t *testing.T) {
+	tempDir := t.TempDir()
+	tasksDir := filepath.Join(tempDir, "tasks")
+
+	tm := NewTaskManager(testLogger(), 5)
+	tm.SetTasksDir(tasksDir)
+	defer tm.Shutdown()
+
+	ctx := context.Background()
+	taskID, _, logPath, logURI, err := tm.StartBackground(ctx, "echo 'hello from log file' && echo 'second line'", "", nil, 0, nil)
+	if err != nil {
+		t.Fatalf("StartBackground failed: %v", err)
+	}
+
+	expectedLogPath := filepath.Join(tasksDir, taskID+".log")
+	if logPath != expectedLogPath {
+		t.Errorf("expected logPath %q, got %q", expectedLogPath, logPath)
+	}
+	expectedURI := util.PathToURI(expectedLogPath)
+	if logURI != expectedURI {
+		t.Errorf("expected logURI %q, got %q", expectedURI, logURI)
+	}
+
+	// Verify status snapshot has log fields
+	snap, err := tm.GetTaskStatus(taskID)
+	if err != nil {
+		t.Fatalf("GetTaskStatus failed: %v", err)
+	}
+	if snap.LogPath != expectedLogPath {
+		t.Errorf("expected snap.LogPath %q, got %q", expectedLogPath, snap.LogPath)
+	}
+	if snap.LogURI != expectedURI {
+		t.Errorf("expected snap.LogURI %q, got %q", expectedURI, snap.LogURI)
+	}
+
+	// Wait for task to complete
+	time.Sleep(500 * time.Millisecond)
+
+	// Check file on disk
+	content, err := os.ReadFile(expectedLogPath)
+	if err != nil {
+		t.Fatalf("failed to read log file from disk: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "hello from log file") {
+		t.Errorf("expected log file to contain 'hello from log file', got %q", contentStr)
+	}
+	if !strings.Contains(contentStr, "second line") {
+		t.Errorf("expected log file to contain 'second line', got %q", contentStr)
+	}
+}
+
+func TestTaskManager_TaskCompletionNotificationContainsLogURI(t *testing.T) {
+	tempDir := t.TempDir()
+	tasksDir := filepath.Join(tempDir, "tasks")
+
+	tm := NewTaskManager(testLogger(), 5)
+	tm.SetTasksDir(tasksDir)
+	notifyCh := make(chan SystemMessage, 10)
+	tm.SetNotifyChannel(notifyCh)
+	defer tm.Shutdown()
+
+	ctx := context.Background()
+	taskID, _, _, logURI, err := tm.StartBackground(ctx, "echo 'completed task'", "", nil, 0, nil)
+	if err != nil {
+		t.Fatalf("StartBackground failed: %v", err)
+	}
+
+	select {
+	case msg := <-notifyCh:
+		if msg.TaskID != taskID {
+			t.Errorf("expected notification for %s, got %s", taskID, msg.TaskID)
+		}
+		expectedLogLine := fmt.Sprintf("Log: %s", logURI)
+		if !strings.Contains(msg.Content, expectedLogLine) {
+			t.Errorf("expected notification content to contain %q, got:\n%s", expectedLogLine, msg.Content)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for task completion notification")
+	}
+}
+
+func TestRunCommand_BackgroundPopulatesLogFields(t *testing.T) {
+	tempDir := t.TempDir()
+	tasksDir := filepath.Join(tempDir, "tasks")
+
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatalf("workspace.NewManager failed: %v", err)
+	}
+	reg := NewRegistry(wsMgr, testLogger())
+	reg.TaskManager().SetTasksDir(tasksDir)
+	registerRunCommand(reg)
+	registerManageTask(reg)
+
+	ctx := context.Background()
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_RunCommand{
+			RunCommand: &pb.ActionRunCommand{
+				Command:    "echo 'background-output' && sleep 0.1",
+				Background: true,
+			},
+		},
+	}
+
+	err = reg.Execute(ctx, "run_command", step)
+	if err != nil {
+		t.Fatalf("run_command background failed: %v", err)
+	}
+
+	rc := step.GetRunCommand()
+	if rc.TaskId == "" {
+		t.Fatal("expected non-empty task_id")
+	}
+	if rc.LogPath == "" {
+		t.Error("expected non-empty log_path")
+	}
+	if rc.LogUri == "" {
+		t.Error("expected non-empty log_uri")
+	}
+	if !strings.HasPrefix(rc.LogUri, "file://") {
+		t.Errorf("log_uri should start with file://, got %q", rc.LogUri)
+	}
+
+	// Now check manage_task status
+	statusStep := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ManageTask{
+			ManageTask: &pb.ActionManageTask{
+				Action: "status",
+				TaskId: rc.TaskId,
+			},
+		},
+	}
+
+	err = reg.Execute(ctx, "manage_task", statusStep)
+	if err != nil {
+		t.Fatalf("manage_task status failed: %v", err)
+	}
+
+	mt := statusStep.GetManageTask()
+	if len(mt.Tasks) != 1 {
+		t.Fatalf("expected 1 task in status, got %d", len(mt.Tasks))
+	}
+	if mt.Tasks[0].LogPath != rc.LogPath {
+		t.Errorf("expected manage_task LogPath %q, got %q", rc.LogPath, mt.Tasks[0].LogPath)
+	}
+	if mt.Tasks[0].LogUri != rc.LogUri {
+		t.Errorf("expected manage_task LogUri %q, got %q", rc.LogUri, mt.Tasks[0].LogUri)
+	}
 }

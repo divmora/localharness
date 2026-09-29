@@ -44,7 +44,7 @@ func main() {
 
 	// --- Step 2: Start a short background task ---
 	fmt.Println("2. Starting background task: echo 'hello from background'...")
-	taskID, initialOutput, err := tm.StartBackground(
+	taskID, initialOutput, _, _, err := tm.StartBackground(
 		context.Background(),
 		"echo 'hello from background' && sleep 1 && echo 'task done!'",
 		".",

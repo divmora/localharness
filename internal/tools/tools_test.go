@@ -2113,7 +2113,7 @@ func TestTaskManager_StdinPipesClosed(t *testing.T) {
 	defer tm.Shutdown()
 
 	ctx := context.Background()
-	taskID, _, err := tm.StartBackground(ctx, "sleep 0.1", "", nil, 0, nil)
+	taskID, _, _, _, err := tm.StartBackground(ctx, "sleep 0.1", "", nil, 0, nil)
 	if err != nil {
 		t.Fatalf("StartBackground failed: %v", err)
 	}

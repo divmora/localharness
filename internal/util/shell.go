@@ -300,3 +300,15 @@ func IsDestructiveCommand(cmd string) bool {
 
 	return false
 }
+
+// PathToURI converts a filesystem path to a file:// URI.
+func PathToURI(path string) string {
+	if path == "" {
+		return ""
+	}
+	slashPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	return "file://" + slashPath
+}

@@ -126,6 +126,8 @@ func snapshotToProto(s TaskSnapshot) *pb.TaskInfo {
 		ExitCode:     int32(s.ExitCode),
 		RecentOutput: s.RecentOutput,
 		TerminalId:   s.TerminalID,
+		LogPath:      s.LogPath,
+		LogUri:       s.LogURI,
 	}
 	if !s.StartedAt.IsZero() {
 		info.StartedAt = s.StartedAt.Format(time.RFC3339)

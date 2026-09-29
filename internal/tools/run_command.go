@@ -117,7 +117,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 				WithContext("component", "run_command")
 		}
 
-		taskID, stdout, err := r.taskMgr.StartBackground(
+		taskID, stdout, logPath, logURI, err := r.taskMgr.StartBackground(
 			ctx, rc.Command, cwd, mergedEnv, int(rc.WaitMsBeforeAsync), step,
 		)
 		if err != nil {
@@ -131,6 +131,8 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 
 		rc.TaskId = taskID
 		rc.Stdout = truncateOutput(stdout, 100000)
+		rc.LogPath = logPath
+		rc.LogUri = logURI
 		return nil
 	}
 

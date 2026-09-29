@@ -2918,22 +2918,36 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 		result = map[string]interface{}{"matches": a.FindFile.Matches}
 	case *pb.StepUpdate_RunCommand:
 		rc := a.RunCommand
-		result = map[string]interface{}{
+		m := map[string]interface{}{
 			"stdout": rc.Stdout, "stderr": rc.Stderr,
 			"exit_code": rc.ExitCode, "timed_out": rc.TimedOut,
 			"task_id": rc.TaskId, "assigned_terminal_id": rc.AssignedTerminalId,
 		}
+		if rc.LogPath != "" {
+			m["log_path"] = rc.LogPath
+		}
+		if rc.LogUri != "" {
+			m["log_uri"] = rc.LogUri
+		}
+		result = m
 	case *pb.StepUpdate_ManageTask:
 		mt := a.ManageTask
 		var tasks []map[string]interface{}
 		for _, t := range mt.Tasks {
-			tasks = append(tasks, map[string]interface{}{
+			tm := map[string]interface{}{
 				"task_id": t.TaskId, "command": t.Command,
 				"cwd": t.Cwd, "status": t.Status,
 				"exit_code": t.ExitCode, "started_at": t.StartedAt,
 				"completed_at": t.CompletedAt, "recent_output": t.RecentOutput,
 				"terminal_id": t.TerminalId,
-			})
+			}
+			if t.LogPath != "" {
+				tm["log_path"] = t.LogPath
+			}
+			if t.LogUri != "" {
+				tm["log_uri"] = t.LogUri
+			}
+			tasks = append(tasks, tm)
 		}
 		result = map[string]interface{}{"tasks": tasks, "success": mt.Success}
 	case *pb.StepUpdate_Finish:

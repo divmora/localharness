@@ -3117,6 +3117,8 @@ type ActionRunCommand struct {
 	TimedOut           bool   `protobuf:"varint,13,opt,name=timed_out,json=timedOut,proto3" json:"timed_out,omitempty"`
 	TaskId             string `protobuf:"bytes,14,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`                                       // ID of the background task (when background=true)
 	AssignedTerminalId string `protobuf:"bytes,15,opt,name=assigned_terminal_id,json=assignedTerminalId,proto3" json:"assigned_terminal_id,omitempty"` // Terminal ID assigned (when persistent=true)
+	LogPath            string `protobuf:"bytes,16,opt,name=log_path,json=logPath,proto3" json:"log_path,omitempty"`                                    // Path to task log file on disk (when background=true)
+	LogUri             string `protobuf:"bytes,17,opt,name=log_uri,json=logUri,proto3" json:"log_uri,omitempty"`                                       // file:/// URI to task log file (when background=true)
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -3245,6 +3247,20 @@ func (x *ActionRunCommand) GetTaskId() string {
 func (x *ActionRunCommand) GetAssignedTerminalId() string {
 	if x != nil {
 		return x.AssignedTerminalId
+	}
+	return ""
+}
+
+func (x *ActionRunCommand) GetLogPath() string {
+	if x != nil {
+		return x.LogPath
+	}
+	return ""
+}
+
+func (x *ActionRunCommand) GetLogUri() string {
+	if x != nil {
+		return x.LogUri
 	}
 	return ""
 }
@@ -3785,6 +3801,8 @@ type TaskInfo struct {
 	CompletedAt   string                 `protobuf:"bytes,7,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`    // RFC3339
 	RecentOutput  string                 `protobuf:"bytes,8,opt,name=recent_output,json=recentOutput,proto3" json:"recent_output,omitempty"` // Last N bytes of combined stdout+stderr
 	TerminalId    string                 `protobuf:"bytes,9,opt,name=terminal_id,json=terminalId,proto3" json:"terminal_id,omitempty"`       // If using a persistent terminal
+	LogPath       string                 `protobuf:"bytes,10,opt,name=log_path,json=logPath,proto3" json:"log_path,omitempty"`               // Path to task log file on disk
+	LogUri        string                 `protobuf:"bytes,11,opt,name=log_uri,json=logUri,proto3" json:"log_uri,omitempty"`                  // file:/// URI to task log file
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3878,6 +3896,20 @@ func (x *TaskInfo) GetRecentOutput() string {
 func (x *TaskInfo) GetTerminalId() string {
 	if x != nil {
 		return x.TerminalId
+	}
+	return ""
+}
+
+func (x *TaskInfo) GetLogPath() string {
+	if x != nil {
+		return x.LogPath
+	}
+	return ""
+}
+
+func (x *TaskInfo) GetLogUri() string {
+	if x != nil {
+		return x.LogUri
 	}
 	return ""
 }
@@ -9151,7 +9183,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\apattern\x18\x01 \x01(\tR\apattern\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
 	"\amatches\x18\n" +
-	" \x03(\tR\amatches\"\x9a\x04\n" +
+	" \x03(\tR\amatches\"\xce\x04\n" +
 	"\x10ActionRunCommand\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\tR\acommand\x12\x10\n" +
 	"\x03cwd\x18\x02 \x01(\tR\x03cwd\x12\x1d\n" +
@@ -9173,7 +9205,9 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\texit_code\x18\f \x01(\x05R\bexitCode\x12\x1b\n" +
 	"\ttimed_out\x18\r \x01(\bR\btimedOut\x12\x17\n" +
 	"\atask_id\x18\x0e \x01(\tR\x06taskId\x120\n" +
-	"\x14assigned_terminal_id\x18\x0f \x01(\tR\x12assignedTerminalId\x1a6\n" +
+	"\x14assigned_terminal_id\x18\x0f \x01(\tR\x12assignedTerminalId\x12\x19\n" +
+	"\blog_path\x18\x10 \x01(\tR\alogPath\x12\x17\n" +
+	"\alog_uri\x18\x11 \x01(\tR\x06logUri\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"/\n" +
@@ -9217,7 +9251,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x05input\x18\x03 \x01(\tR\x05input\x12/\n" +
 	"\x05tasks\x18\n" +
 	" \x03(\v2\x19.localharness.v1.TaskInfoR\x05tasks\x12\x18\n" +
-	"\asuccess\x18\v \x01(\bR\asuccess\"\x8c\x02\n" +
+	"\asuccess\x18\v \x01(\bR\asuccess\"\xc0\x02\n" +
 	"\bTaskInfo\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12\x10\n" +
@@ -9229,7 +9263,10 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\fcompleted_at\x18\a \x01(\tR\vcompletedAt\x12#\n" +
 	"\rrecent_output\x18\b \x01(\tR\frecentOutput\x12\x1f\n" +
 	"\vterminal_id\x18\t \x01(\tR\n" +
-	"terminalId\"\xa8\x04\n" +
+	"terminalId\x12\x19\n" +
+	"\blog_path\x18\n" +
+	" \x01(\tR\alogPath\x12\x17\n" +
+	"\alog_uri\x18\v \x01(\tR\x06logUri\"\xa8\x04\n" +
 	"\x14ActionInvokeSubagent\x12A\n" +
 	"\tsubagents\x18\x14 \x03(\v2#.localharness.v1.SubagentInvocationR\tsubagents\x12L\n" +
 	"\x0elaunch_results\x18\x15 \x03(\v2%.localharness.v1.SubagentLaunchResultR\rlaunchResults\x12\x1a\n" +
