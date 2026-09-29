@@ -153,7 +153,16 @@ func parseToolCallJSON(jsonStr string, knownTools map[string]bool) (llm.ToolCall
 	// Extract tool name — try standard "name" key first
 	name, _ := raw["name"].(string)
 
-	// Fallback: some models produce {"name: tool_name": ..., "parameters": {...}}
+	// Fallback 1: check if "function" is a string tool name or an object with "name"
+	if name == "" {
+		if fnStr, ok := raw["function"].(string); ok {
+			name = fnStr
+		} else if fnObj, ok := raw["function"].(map[string]interface{}); ok {
+			name, _ = fnObj["name"].(string)
+		}
+	}
+
+	// Fallback 2: some models produce {"name: tool_name": ..., "parameters": {...}}
 	// where the name and value are merged into a single key.
 	if name == "" {
 		for key := range raw {
@@ -179,21 +188,31 @@ func parseToolCallJSON(jsonStr string, knownTools map[string]bool) (llm.ToolCall
 		return llm.ToolCall{}, false
 	}
 
-	// Extract arguments — try "parameters" first (OpenAI-style), then "args"
+	// Extract arguments — check "arguments" (Ollama / OpenAI standard), "parameters", and "args"
 	var args map[string]interface{}
-	if params, ok := raw["parameters"]; ok {
-		switch v := params.(type) {
-		case map[string]interface{}:
-			args = v
-		case string:
-			// Some models output parameters as a JSON string
-			if err := json.Unmarshal([]byte(v), &args); err != nil {
-				args = map[string]interface{}{"raw": v}
+	extractArgs := func(obj map[string]interface{}) {
+		for _, key := range []string{"arguments", "parameters", "args"} {
+			if val, ok := obj[key]; ok {
+				switch v := val.(type) {
+				case map[string]interface{}:
+					args = v
+					return
+				case string:
+					// Arguments may be passed as a JSON string
+					if err := json.Unmarshal([]byte(v), &args); err == nil {
+						return
+					}
+					args = map[string]interface{}{"raw": v}
+					return
+				}
 			}
 		}
-	} else if argsVal, ok := raw["args"]; ok {
-		if v, ok := argsVal.(map[string]interface{}); ok {
-			args = v
+	}
+
+	extractArgs(raw)
+	if args == nil {
+		if fnObj, ok := raw["function"].(map[string]interface{}); ok {
+			extractArgs(fnObj)
 		}
 	}
 

@@ -2278,7 +2278,7 @@ func TestCheckPlanningGuard_BlocksAfterResearch(t *testing.T) {
 
 	// Simulate 2 research calls
 	eng.checkPlanningGuard(llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"path": "/workspace/main.go"}})
-	eng.checkPlanningGuard(llm.ToolCall{Name: "grep_search", Args: map[string]interface{}{"path": "/workspace"}})
+	eng.checkPlanningGuard(llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"path": "/workspace/other.go"}})
 
 	if eng.researchToolCount.Load() != 2 {
 		t.Errorf("expected researchToolCount=2, got %d", eng.researchToolCount.Load())
@@ -2415,7 +2415,7 @@ func TestCheckPlanningGuard_ResearchCountIncrement(t *testing.T) {
 	}
 
 	// Research tools should increment the counter
-	researchTools := []string{"view_file", "grep_search"}
+	researchTools := []string{"view_file"}
 	for i, tool := range researchTools {
 		eng.checkPlanningGuard(llm.ToolCall{
 			Name: tool,

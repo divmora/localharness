@@ -158,7 +158,7 @@ func TestValidate_HostTools_DuplicateName(t *testing.T) {
 }
 
 func TestValidate_HostTools_BuiltinCollision(t *testing.T) {
-	builtins := []string{"view_file", "run_command", "grep_search", "finish", "ask_question", "schedule"}
+	builtins := []string{"view_file", "run_command", "finish", "ask_question", "schedule"}
 	for _, name := range builtins {
 		t.Run(name, func(t *testing.T) {
 			cfg := &LocalAgentConfig{

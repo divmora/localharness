@@ -238,25 +238,13 @@ Each JSON object contains fields such as:
 ### Useful Examples
 The ` + "`transcript.jsonl`" + ` file is a powerful tool for searching history. Here are some useful ways to interact with it using your native tools (which bypass permission prompts):
 
-- **Find all subagents spawned**: Use ` + "`grep_search`" + ` for the ` + "`invoke_subagent`" + ` tool call.
-` + "  ```json" + `
-  {
-    "tool": "grep_search",
-    "args": {
-      "SearchPath": "<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl",
-      "Query": "invoke_subagent"
-    }
-  }
+- **Find all subagents spawned**: Search ` + "`transcript.jsonl`" + ` using ` + "`run_command`" + ` with grep:
+` + "  ```bash" + `
+  grep "invoke_subagent" <appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl
 ` + "  ```" + `
-- **Find all past user messages**: Use ` + "`grep_search`" + ` for steps of type ` + "`USER_INPUT`" + `.
-` + "  ```json" + `
-  {
-    "tool": "grep_search",
-    "args": {
-      "SearchPath": "<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl",
-      "Query": "\"type\":\"USER_INPUT\""
-    }
-  }
+- **Find all past user messages**: Search ` + "`transcript.jsonl`" + ` using ` + "`run_command`" + ` with grep:
+` + "  ```bash" + `
+  grep '"type":"USER_INPUT"' <appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl
 ` + "  ```" + `
 - **View the beginning of the conversation**: Use ` + "`view_file`" + ` to see the first few steps.
 ` + "  ```json" + `
@@ -285,7 +273,7 @@ const defaultPlanningMode = `You are in Planning Mode. Exercise judgement on whe
 If you decide that a request warrants a plan, then follow this workflow:
 
 ## Research
-- Thoroughly research the task using available tools (view_file, grep_search, etc.).
+- Thoroughly research the task using available tools (view_file, etc.).
 - DO NOT make any source code changes or run modifying commands during this phase. Creating or updating artifacts is allowed.
 - You MUST NOT use write_to_file or replace_file_content on workspace files during research. Only artifact files in the brain directory are allowed.
 - Understand the codebase, dependencies, architecture, and implications of the requested changes.
@@ -399,7 +387,6 @@ const defaultToolUsage = `When you have access to purpose-built tools, ALWAYS pr
 | Task | Preferred tool | Do NOT use |
 |------|---------------|------------|
 | View/read a file | view_file | run_command with cat, head, tail, less, or more |
-| Search file contents | grep_search | run_command with grep, rg, ag, or ack |
 | Create a new file | write_to_file | run_command with echo, cat >, printf, or tee |
 | Edit an existing file | replace_file_content | run_command with sed, awk, or perl -pi |
 | Fetch URL content | read_url_content | run_command with curl, wget, or http |
@@ -412,7 +399,7 @@ When choosing between tools for the same task, prefer the tool with:
 2. Workspace path validation (prevents path traversal)
 3. Built-in pagination/truncation (prevents context window waste)
 
-CRITICAL INSTRUCTION 1: You may have access to a variety of tools at your disposal. Some tools may be for a specific task such as 'view_file' (for viewing contents of a file). Others may be very broadly applicable such as the ability to run a command on a terminal. Always prioritize using the most specific tool you can for the task at hand. Here are some rules: (a) NEVER run cat inside a bash command to create a new file or append to an existing file. (b) ALWAYS use grep_search instead of running grep inside a bash command unless absolutely needed. (c) DO NOT use cat for viewing, grep for finding, sed for replacing.
+CRITICAL INSTRUCTION 1: You may have access to a variety of tools at your disposal. Some tools may be for a specific task such as 'view_file' (for viewing contents of a file). Others may be very broadly applicable such as the ability to run a command on a terminal. Always prioritize using the most specific tool you can for the task at hand. Here are some rules: (a) NEVER run cat inside a bash command to create a new file or append to an existing file. (b) DO NOT use cat for viewing, sed for replacing.
 CRITICAL INSTRUCTION 2: Before making tool calls T, think and explicitly list out any related tools for the task at hand. You can only execute a set of tools T if all other tools in the list are either more generic or cannot be used for the task at hand. ALWAYS START your thought with recalling critical instructions 1 and 2. In particular, the format for the start of your thought block must be '...94>thought\nCRITICAL INSTRUCTION 1: ...\nCRITICAL INSTRUCTION 2: ...'.`
 
 // defaultGuidelines are always-present safety and behavioral rules that ensure
@@ -720,7 +707,7 @@ func BuildSystemPrompt(cfg SystemPromptConfig) string {
 	}
 
 	// Tool usage guidance — always present. Teaches the agent to prefer
-	// purpose-built tools (view_file, grep_search, etc.) over run_command.
+	// purpose-built tools (view_file, write_to_file, etc.) over run_command.
 	sections = append(sections, taggedSection{tag: "tool_usage", content: defaultToolUsage, priority: 4})
 
 	// Ephemeral message — always present. Teaches agent how to handle

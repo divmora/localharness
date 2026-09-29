@@ -6047,8 +6047,9 @@ type BuiltinToolsConfig struct {
 	CreateFile bool                   `protobuf:"varint,2,opt,name=create_file,json=createFile,proto3" json:"create_file,omitempty"` // default: true
 	EditFile   bool                   `protobuf:"varint,3,opt,name=edit_file,json=editFile,proto3" json:"edit_file,omitempty"`       // default: true
 	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
-	ListDir   bool `protobuf:"varint,4,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"`       // deprecated: use run_command with ls/find
-	SearchDir bool `protobuf:"varint,5,opt,name=search_dir,json=searchDir,proto3" json:"search_dir,omitempty"` // default: true
+	ListDir bool `protobuf:"varint,4,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"` // deprecated: use run_command with ls/find
+	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
+	SearchDir bool `protobuf:"varint,5,opt,name=search_dir,json=searchDir,proto3" json:"search_dir,omitempty"` // deprecated: use run_command with grep/rg
 	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
 	FindFile        bool `protobuf:"varint,6,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"`                       // deprecated: use run_command with find
 	RunCommand      bool `protobuf:"varint,7,opt,name=run_command,json=runCommand,proto3" json:"run_command,omitempty"`                 // default: false (safety)
@@ -6127,6 +6128,7 @@ func (x *BuiltinToolsConfig) GetListDir() bool {
 	return false
 }
 
+// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
 func (x *BuiltinToolsConfig) GetSearchDir() bool {
 	if x != nil {
 		return x.SearchDir
@@ -6240,8 +6242,9 @@ type ToolConfigs struct {
 	RunCommand *RunCommandToolConfig  `protobuf:"bytes,2,opt,name=run_command,json=runCommand,proto3" json:"run_command,omitempty"`
 	EditFile   *FileEditToolConfig    `protobuf:"bytes,3,opt,name=edit_file,json=editFile,proto3" json:"edit_file,omitempty"`
 	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
-	FindFile   *FindToolConfig       `protobuf:"bytes,4,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"` // deprecated: find_file removed
-	GrepSearch *GrepSearchToolConfig `protobuf:"bytes,5,opt,name=grep_search,json=grepSearch,proto3" json:"grep_search,omitempty"`
+	FindFile *FindToolConfig `protobuf:"bytes,4,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"` // deprecated: find_file removed
+	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
+	GrepSearch *GrepSearchToolConfig `protobuf:"bytes,5,opt,name=grep_search,json=grepSearch,proto3" json:"grep_search,omitempty"` // deprecated: grep_search removed
 	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
 	ListDir       *ListDirToolConfig     `protobuf:"bytes,6,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"` // deprecated: list_dir removed
 	WriteFile     *WriteToFileToolConfig `protobuf:"bytes,7,opt,name=write_file,json=writeFile,proto3" json:"write_file,omitempty"`
@@ -6311,6 +6314,7 @@ func (x *ToolConfigs) GetFindFile() *FindToolConfig {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
 func (x *ToolConfigs) GetGrepSearch() *GrepSearchToolConfig {
 	if x != nil {
 		return x.GrepSearch
@@ -9471,15 +9475,15 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x124\n" +
 	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\x120\n" +
-	"\x14response_json_schema\x18\x04 \x01(\tR\x12responseJsonSchema\"\xf3\x04\n" +
+	"\x14response_json_schema\x18\x04 \x01(\tR\x12responseJsonSchema\"\xf7\x04\n" +
 	"\x12BuiltinToolsConfig\x12\x1b\n" +
 	"\tview_file\x18\x01 \x01(\bR\bviewFile\x12\x1f\n" +
 	"\vcreate_file\x18\x02 \x01(\bR\n" +
 	"createFile\x12\x1b\n" +
 	"\tedit_file\x18\x03 \x01(\bR\beditFile\x12\x1d\n" +
-	"\blist_dir\x18\x04 \x01(\bB\x02\x18\x01R\alistDir\x12\x1d\n" +
+	"\blist_dir\x18\x04 \x01(\bB\x02\x18\x01R\alistDir\x12!\n" +
 	"\n" +
-	"search_dir\x18\x05 \x01(\bR\tsearchDir\x12\x1f\n" +
+	"search_dir\x18\x05 \x01(\bB\x02\x18\x01R\tsearchDir\x12\x1f\n" +
 	"\tfind_file\x18\x06 \x01(\bB\x02\x18\x01R\bfindFile\x12\x1f\n" +
 	"\vrun_command\x18\a \x01(\bR\n" +
 	"runCommand\x12\x16\n" +
@@ -9498,14 +9502,14 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\fsend_message\x18\x11 \x01(\bR\vsendMessage\x12\x1d\n" +
 	"\n" +
 	"code_graph\x18\x12 \x01(\bR\tcodeGraph\x12\x18\n" +
-	"\adesktop\x18\x13 \x01(\bR\adesktop\"\xb9\x05\n" +
+	"\adesktop\x18\x13 \x01(\bR\adesktop\"\xbd\x05\n" +
 	"\vToolConfigs\x12@\n" +
 	"\tview_file\x18\x01 \x01(\v2#.localharness.v1.ViewFileToolConfigR\bviewFile\x12F\n" +
 	"\vrun_command\x18\x02 \x01(\v2%.localharness.v1.RunCommandToolConfigR\n" +
 	"runCommand\x12@\n" +
 	"\tedit_file\x18\x03 \x01(\v2#.localharness.v1.FileEditToolConfigR\beditFile\x12@\n" +
-	"\tfind_file\x18\x04 \x01(\v2\x1f.localharness.v1.FindToolConfigB\x02\x18\x01R\bfindFile\x12F\n" +
-	"\vgrep_search\x18\x05 \x01(\v2%.localharness.v1.GrepSearchToolConfigR\n" +
+	"\tfind_file\x18\x04 \x01(\v2\x1f.localharness.v1.FindToolConfigB\x02\x18\x01R\bfindFile\x12J\n" +
+	"\vgrep_search\x18\x05 \x01(\v2%.localharness.v1.GrepSearchToolConfigB\x02\x18\x01R\n" +
 	"grepSearch\x12A\n" +
 	"\blist_dir\x18\x06 \x01(\v2\".localharness.v1.ListDirToolConfigB\x02\x18\x01R\alistDir\x12E\n" +
 	"\n" +

@@ -653,14 +653,14 @@ func TestAgent_TokenUsageMultipleSteps(t *testing.T) {
 			},
 			{
 				Index:    3,
-				ToolName: "grep_search",
+				ToolName: "run_command",
 				State:    connection.StateActive,
 				Source:   connection.SourceModel,
 				Usage:    &connection.UsageMetadata{TotalTokens: 80},
 			},
 			{
 				Index:    3,
-				ToolName: "grep_search",
+				ToolName: "run_command",
 				State:    connection.StateDone,
 				Source:   connection.SourceModel,
 				Usage:    &connection.UsageMetadata{TotalTokens: 80}, // Duplicate — should be ignored

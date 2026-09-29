@@ -26,7 +26,7 @@ type ToolSelectorConfig struct {
 	Mode ToolSelectorMode
 
 	// Tools is the list of tool names to allow or deny.
-	// Examples: "view_file", "run_command", "write_to_file", "grep_search".
+	// Examples: "view_file", "run_command", "write_to_file".
 	Tools []string
 
 	// Reason is an optional explanation injected into the prompt.
@@ -59,7 +59,7 @@ type ToolSelectorConfig struct {
 //	// Static: only allow read tools for research tasks
 //	selector := middleware.NewToolSelector(middleware.ToolSelectorConfig{
 //	    Mode:  middleware.ToolSelectorAllow,
-//	    Tools: []string{"view_file", "grep_search"},
+//	    Tools: []string{"view_file"},
 //	    Reason: "This is a read-only research task.",
 //	})
 //
@@ -68,7 +68,7 @@ type ToolSelectorConfig struct {
 //	    Dynamic: func(prompt string) (middleware.ToolSelectorMode, []string, string) {
 //	        if strings.Contains(prompt, "read only") {
 //	            return middleware.ToolSelectorAllow,
-//	                []string{"view_file", "grep_search"},
+//	                []string{"view_file"},
 //	                "User requested read-only mode"
 //	        }
 //	        return 0, nil, "" // No guidance
@@ -200,7 +200,7 @@ func (t *ToolSelector) resolveConfig(prompt string) (ToolSelectorMode, []string,
 var (
 	// ReadOnlyTools is the set of tools that only read data.
 	ReadOnlyTools = []string{
-		"view_file", "grep_search",
+		"view_file",
 		"search_web", "read_url_content",
 	}
 

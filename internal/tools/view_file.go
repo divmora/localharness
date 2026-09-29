@@ -23,7 +23,7 @@ func registerViewFile(r *Registry) {
 			"Use this instead of run_command with cat, head, tail, or less. " +
 			"Lines are 1-indexed. You can view at most 800 lines per call. " +
 			"IMPORTANT: To minimize context usage, prefer targeted reads by specifying start_line and end_line " +
-			"instead of reading the entire file. Use grep_search to locate relevant sections first, " +
+			"instead of reading the entire file. Locate relevant sections first with grep or rg via run_command, " +
 			"then read only the lines you need. Only omit start_line/end_line when you genuinely need the full file. " +
 			"Supports text files and detects binary files (returns metadata only for binaries).",
 		Parameters: map[string]interface{}{
@@ -274,4 +274,20 @@ func isBinaryFile(path string, header []byte) bool {
 	}
 
 	return false
+}
+
+var binaryExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true,
+	".ico": true, ".webp": true,
+	".mp3": true, ".mp4": true, ".wav": true, ".avi": true, ".mov": true,
+	".zip": true, ".tar": true, ".gz": true, ".bz2": true, ".7z": true, ".rar": true,
+	".exe": true, ".dll": true, ".so": true, ".dylib": true,
+	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
+	".wasm": true, ".pyc": true, ".class": true,
+	".ttf": true, ".woff": true, ".woff2": true, ".eot": true,
+	".o": true, ".a": true, ".lib": true,
+}
+
+func isBinaryExtension(ext string) bool {
+	return binaryExts[strings.ToLower(ext)]
 }

@@ -466,7 +466,6 @@ func runInteractiveWithOptions(flags runFlags) error {
 			ViewFile:        true,
 			CreateFile:      true,
 			EditFile:        true,
-			SearchDir:       true,
 			RunCommand:      true,
 			Finish:          true,
 			ManageTask:      true,

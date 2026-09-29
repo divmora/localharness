@@ -52,7 +52,7 @@ func TestExtractFinalResponse(t *testing.T) {
 			name: "skip model messages with tool calls",
 			history: []llm.Message{
 				{Role: "user", Content: "do stuff"},
-				{Role: "model", Content: "thinking...", ToolCalls: []llm.ToolCall{{ID: "1", Name: "grep_search"}}},
+				{Role: "model", Content: "thinking...", ToolCalls: []llm.ToolCall{{ID: "1", Name: "view_file"}}},
 				{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Content: "result"}},
 			},
 			want: "", // Only the model message with tool calls, no final text
@@ -517,8 +517,8 @@ func TestToolGroupFiltering(t *testing.T) {
 		Name:  "view_file",
 		Group: tools.ToolGroupRead,
 	})
-	reg.Register("grep_search", nil, tools.ToolSchema{
-		Name:  "grep_search",
+	reg.Register("read_url_content", nil, tools.ToolSchema{
+		Name:  "read_url_content",
 		Group: tools.ToolGroupRead,
 	})
 	reg.Register("write_to_file", nil, tools.ToolSchema{
@@ -545,7 +545,7 @@ func TestToolGroupFiltering(t *testing.T) {
 		for _, d := range decls {
 			names[d.Name] = true
 		}
-		for _, want := range []string{"view_file", "grep_search", "write_to_file", "run_command", "finish"} {
+		for _, want := range []string{"view_file", "read_url_content", "write_to_file", "run_command", "finish"} {
 			if !names[want] {
 				t.Errorf("expected %q in declarations", want)
 			}
@@ -570,8 +570,8 @@ func TestToolGroupFiltering(t *testing.T) {
 		if !names["view_file"] {
 			t.Error("view_file (read) should survive write exclusion")
 		}
-		if !names["grep_search"] {
-			t.Error("grep_search (read) should survive write exclusion")
+		if !names["read_url_content"] {
+			t.Error("read_url_content (read) should survive write exclusion")
 		}
 		if !names["finish"] {
 			t.Error("finish (ungrouped) should survive write exclusion")

@@ -30,7 +30,7 @@ type SubtaskConfig struct {
 	SystemPrompt string
 
 	// ReadOnly restricts the subtask to read-only tools (view_file,
-	// grep_search, search_web, read_url_content).
+	// search_web, read_url_content).
 	// Write tools (create/edit/run_command) are disabled.
 	// Default: true (safe by default).
 	ReadOnly *bool

@@ -101,7 +101,7 @@ type Engine struct {
 	brainDir                     string                     // For child engine tracing
 	appDataDir                   string                     // Root data dir (for subagent inheritance)
 	enablePlanningMode           bool                       // Planning guard: block workspace writes until plan exists
-	researchToolCount            atomic.Int32               // Tracks research tool calls (view_file, grep_search)
+	researchToolCount            atomic.Int32               // Tracks research tool calls (view_file)
 	hostToolHandler              HostToolHandler            // Called for SDK-registered tools
 	hostToolNames                map[string]bool            // Fast lookup of host tool names
 	hostToolDecls                []llm.FunctionDeclaration  // Host tool schemas for LLM
@@ -2383,7 +2383,7 @@ func (e *Engine) executeMCPTool(ctx context.Context, tc llm.ToolCall, step *pb.S
 // isReadOnlyFileTool returns true if the tool reads or lists files/directories.
 func isReadOnlyFileTool(toolName string) bool {
 	switch toolName {
-	case "view_file", "grep_search", "find_by_name":
+	case "view_file", "find_by_name":
 		return true
 	default:
 		return false
@@ -2569,13 +2569,6 @@ func summarizeToolCall(tc llm.ToolCall) string {
 		if path, ok := tc.Args["path"].(string); ok {
 			return fmt.Sprintf("Find files in: %s%s", path, repoSuffix)
 		}
-	case "grep_search":
-		if query, ok := tc.Args["query"].(string); ok {
-			if path, ok := tc.Args["path"].(string); ok && path != "" {
-				return fmt.Sprintf("Search %q in %s%s", query, path, repoSuffix)
-			}
-			return fmt.Sprintf("Search: %s", query)
-		}
 	case "search_web":
 		if q, ok := tc.Args["query"].(string); ok {
 			return fmt.Sprintf("Web search: %s", q)
@@ -2669,7 +2662,7 @@ func generateDiffPreview(tc llm.ToolCall) string {
 // Returns (true, reason) if the tool call should be blocked.
 //
 // Uses a research heuristic to avoid blocking simple fixes:
-//   - Tracks research tool calls (view_file, grep_search)
+//   - Tracks research tool calls (view_file)
 //   - Only blocks workspace writes after 2+ research calls without a plan
 //   - If the agent goes straight to replace_file_content without researching, it's a
 //     simple fix and the guard stays out of the way
@@ -2682,7 +2675,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 
 	// Track research tool calls
 	switch tc.Name {
-	case "view_file", "grep_search":
+	case "view_file":
 		e.researchToolCount.Add(1)
 		return false, ""
 	}
@@ -2768,11 +2761,6 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 		action := &pb.ActionReplaceFileContent{}
 		_ = json.Unmarshal(argsJSON, action)
 		step.Action = &pb.StepUpdate_ReplaceFileContent{ReplaceFileContent: action}
-
-	case "grep_search":
-		action := &pb.ActionGrepSearch{}
-		_ = json.Unmarshal(argsJSON, action)
-		step.Action = &pb.StepUpdate_GrepSearch{GrepSearch: action}
 
 	case "run_command":
 		action := &pb.ActionRunCommand{}

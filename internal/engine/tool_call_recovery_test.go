@@ -9,7 +9,7 @@ import (
 var testLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 func TestToolCallRecovery_OpenAIStyle(t *testing.T) {
-	knownTools := map[string]bool{"view_file": true, "grep_search": true}
+	knownTools := map[string]bool{"view_file": true, "run_command": true}
 	content := `{"type": "function", "name": "view_file", "parameters": {"path": "/foo/bar.go"}}`
 
 	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
@@ -31,20 +31,81 @@ func TestToolCallRecovery_OpenAIStyle(t *testing.T) {
 	}
 }
 
-func TestToolCallRecovery_SimplifiedStyle(t *testing.T) {
-	knownTools := map[string]bool{"grep_search": true}
-	content := `{"name": "grep_search", "args": {"query": "TODO", "path": "/src"}}`
+func TestToolCallRecovery_OllamaStyle(t *testing.T) {
+	knownTools := map[string]bool{"run_command": true}
+	// Exactly the pattern produced by Ollama qwen2.5-coder
+	content := `{"name": "run_command", "arguments": {"command": "echo $((100*9))"}}`
 
 	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
 
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(calls))
 	}
-	if calls[0].Name != "grep_search" {
-		t.Errorf("expected name 'grep_search', got %q", calls[0].Name)
+	if calls[0].Name != "run_command" {
+		t.Errorf("expected name 'run_command', got %q", calls[0].Name)
 	}
-	if calls[0].Args["query"] != "TODO" {
-		t.Errorf("expected query 'TODO', got %v", calls[0].Args["query"])
+	if calls[0].Args["command"] != "echo $((100*9))" {
+		t.Errorf("expected command 'echo $((100*9))', got %v", calls[0].Args["command"])
+	}
+	if remaining != "" {
+		t.Errorf("expected empty remaining, got %q", remaining)
+	}
+}
+
+func TestToolCallRecovery_FunctionStyle(t *testing.T) {
+	knownTools := map[string]bool{"view_file": true}
+	content := `{"function": "view_file", "arguments": {"path": "/main.go"}}`
+
+	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "view_file" {
+		t.Errorf("expected name 'view_file', got %q", calls[0].Name)
+	}
+	if calls[0].Args["path"] != "/main.go" {
+		t.Errorf("expected path '/main.go', got %v", calls[0].Args["path"])
+	}
+	if remaining != "" {
+		t.Errorf("expected empty remaining, got %q", remaining)
+	}
+}
+
+func TestToolCallRecovery_NestedFunctionObject(t *testing.T) {
+	knownTools := map[string]bool{"view_file": true}
+	content := `{"function": {"name": "view_file", "arguments": "{\"path\": \"/foo.go\"}"}}`
+
+	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "view_file" {
+		t.Errorf("expected name 'view_file', got %q", calls[0].Name)
+	}
+	if calls[0].Args["path"] != "/foo.go" {
+		t.Errorf("expected path '/foo.go', got %v", calls[0].Args["path"])
+	}
+	if remaining != "" {
+		t.Errorf("expected empty remaining, got %q", remaining)
+	}
+}
+
+func TestToolCallRecovery_SimplifiedStyle(t *testing.T) {
+	knownTools := map[string]bool{"run_command": true}
+	content := `{"name": "run_command", "args": {"command": "go test ./..."}}`
+
+	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(calls))
+	}
+	if calls[0].Name != "run_command" {
+		t.Errorf("expected name 'run_command', got %q", calls[0].Name)
+	}
+	if calls[0].Args["command"] != "go test ./..." {
+		t.Errorf("expected command 'go test ./...', got %v", calls[0].Args["command"])
 	}
 	if remaining != "" {
 		t.Errorf("expected empty remaining, got %q", remaining)
@@ -52,10 +113,10 @@ func TestToolCallRecovery_SimplifiedStyle(t *testing.T) {
 }
 
 func TestToolCallRecovery_MultipleCalls(t *testing.T) {
-	knownTools := map[string]bool{"view_file": true, "grep_search": true}
+	knownTools := map[string]bool{"view_file": true, "run_command": true}
 	content := `I'll look at these files:
 {"name": "view_file", "parameters": {"path": "/a.go"}}
-{"name": "grep_search", "parameters": {"path": "/src"}}
+{"name": "run_command", "parameters": {"command": "git status"}}
 Let me check.`
 
 	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
@@ -66,8 +127,8 @@ Let me check.`
 	if calls[0].Name != "view_file" {
 		t.Errorf("expected first call 'view_file', got %q", calls[0].Name)
 	}
-	if calls[1].Name != "grep_search" {
-		t.Errorf("expected second call 'grep_search', got %q", calls[1].Name)
+	if calls[1].Name != "run_command" {
+		t.Errorf("expected second call 'run_command', got %q", calls[1].Name)
 	}
 	if calls[0].ID != "recovered_call_0" || calls[1].ID != "recovered_call_1" {
 		t.Errorf("unexpected IDs: %q, %q", calls[0].ID, calls[1].ID)

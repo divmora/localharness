@@ -45,7 +45,7 @@ func promptUser(toolName string, args map[string]any) (bool, error) {
 func main() {
 
 	// SafeDefaults:
-	// - Read-only tools (view_file, grep_search) → always allowed
+	// - Read-only tools (view_file) → always allowed
 	// - Everything else → calls promptUser() for approval
 	cfg := adk.NewLocalAgentConfig()
 	cfg.Policies = policy.SafeDefaults(promptUser)

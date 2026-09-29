@@ -23,7 +23,7 @@ func main() {
 		{
 			Name:         "code_researcher",
 			Description:  "A subagent that researches code.",
-			SystemPrompt: "You are a subagent that researches code. You have access to view_file and grep_search.",
+			SystemPrompt: "You are a subagent that researches code. You have access to view_file.",
 		},
 	}
 

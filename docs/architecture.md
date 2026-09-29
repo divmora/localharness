@@ -22,7 +22,6 @@ lhctl (Interactive TUI / CLI) / SDK ◄── WebSocket + Protobuf ──► Loc
                                                                  │   └── Dynamic Repository Auto-Promotion & Context-Approved Paths
                                                                  ├── Built-in Tools
                                                                  │   ├── view_file, write_to_file, replace_file_content
-                                                                 │   ├── grep_search
                                                                  │   ├── run_command, manage_task, finish
                                                                  │   ├── invoke_subagent, define_subagent, manage_subagents
                                                                  │   ├── search_web, read_url_content, schedule
@@ -137,7 +136,7 @@ Server → Client:
 | 21 | `write_to_file` | `ActionWriteToFile` | Create/overwrite file |
 | 22 | `replace_file_content` | `ActionReplaceFileContent` | Search-and-replace edit (single or multi-site) |
 | 23 | `list_dir` | `ActionListDir` | *[deprecated]* Directory listing (use `run_command` with `ls`/`find`) |
-| 24 | `grep_search` | `ActionGrepSearch` | Grep/ripgrep search |
+| 24 | `grep_search` | `ActionGrepSearch` | *[deprecated]* Grep/ripgrep search (use `run_command` with `grep`/`rg`) |
 | 25 | `find_file` | `ActionFindFile` | *[deprecated]* Find by name pattern (use `run_command` with `find`/`fd`) |
 | 26 | `run_command` | `ActionRunCommand` | Shell execution (sync, background, persistent) |
 | 27 | `finish` | `ActionFinish` | Task completion |

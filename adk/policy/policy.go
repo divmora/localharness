@@ -129,9 +129,8 @@ func DenyAll() Policy {
 // ReadOnlyTools is the set of tools that are considered read-only / safe.
 
 var ReadOnlyTools = map[string]bool{
-	"view_file":   true,
-	"grep_search": true,
-	"finish":      true,
+	"view_file": true,
+	"finish":    true,
 }
 
 // FileTools is the set of tools that operate on file paths.
@@ -139,7 +138,6 @@ var FileTools = map[string]bool{
 	"view_file":            true,
 	"write_to_file":        true,
 	"replace_file_content": true,
-	"grep_search":          true,
 }
 
 // ConfirmRunCommand is the default policy: deny run_command and manage_task,
