@@ -125,7 +125,6 @@ func DefaultBuiltinTools() *pb.BuiltinToolsConfig {
 		ViewFile:   true,
 		CreateFile: true,
 		EditFile:   true,
-		ListDir:    true,
 		SearchDir:  true,
 		FindFile:   true,
 		RunCommand: false, // Denied by default for safety

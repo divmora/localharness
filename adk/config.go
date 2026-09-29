@@ -286,7 +286,6 @@ var reservedToolNames = map[string]bool{
 	"write_to_file":              true,
 	"replace_file_content":       true,
 	"multi_replace_file_content": true,
-	"list_dir":                   true,
 	"grep_search":                true,
 	"find_file":                  true,
 	"run_command":                true,

@@ -55,7 +55,7 @@ func EnvironmentFromContext(ctx context.Context) map[string]string {
 type ToolGroup string
 
 const (
-	// ToolGroupRead is for read-only tools (view_file, list_dir, search_dir, find_file).
+	// ToolGroupRead is for read-only tools (view_file, search_dir, find_file).
 	ToolGroupRead ToolGroup = "read"
 
 	// ToolGroupWrite is for tools that modify the filesystem or run commands
@@ -443,7 +443,6 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 			ViewFile:   true,
 			CreateFile: true,
 			EditFile:   true,
-			ListDir:    true,
 			SearchDir:  true,
 			FindFile:   true,
 			RunCommand: false,
@@ -462,9 +461,6 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 	if cfg.EditFile {
 		registerEditFile(r)
 		registerMultiEditFile(r) // Same capability gate as edit_file
-	}
-	if cfg.ListDir {
-		registerListDir(r)
 	}
 	if cfg.SearchDir {
 		registerSearchDir(r)

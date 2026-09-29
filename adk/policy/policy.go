@@ -130,7 +130,6 @@ func DenyAll() Policy {
 
 var ReadOnlyTools = map[string]bool{
 	"view_file":   true,
-	"list_dir":    true,
 	"grep_search": true,
 	"find_file":   true,
 	"finish":      true,
@@ -142,7 +141,6 @@ var FileTools = map[string]bool{
 	"write_to_file":              true,
 	"replace_file_content":       true,
 	"multi_replace_file_content": true,
-	"list_dir":                   true,
 	"grep_search":                true,
 	"find_file":                  true,
 }

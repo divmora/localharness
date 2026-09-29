@@ -23,7 +23,7 @@ func main() {
 		{
 			Name:         "file_lister",
 			Description:  "A subagent that can list files and directories.",
-			SystemPrompt: "You are a subagent that lists files. You have access to list_dir.",
+			SystemPrompt: "You are a subagent that lists files. You have access to find_file.",
 		},
 	}
 

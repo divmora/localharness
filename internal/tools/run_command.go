@@ -22,7 +22,7 @@ func registerRunCommand(r *Registry) {
 			"(e.g., running builds, tests, git commands, package managers, linters, or custom scripts). " +
 			"Do NOT use run_command for operations that have dedicated tools: " +
 			"use view_file instead of cat/head/tail, grep_search instead of grep/rg, " +
-			"list_dir instead of ls, find_file instead of find, " +
+			"find_file instead of find, " +
 			"read_url_content instead of curl/wget, write_to_file instead of echo/cat >. " +
 			"The command runs in bash with PAGER=cat set by default. Returns stdout, stderr, and exit code. " +
 			"Commands are subject to a timeout (default 30s). Set background=true to run as a background task (returns task_id). " +

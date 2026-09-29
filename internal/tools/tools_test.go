@@ -131,7 +131,7 @@ func TestRegisterBuiltinToolsDefault(t *testing.T) {
 	reg, _ := testRegistry(t)
 
 	// Default config enables all except run_command
-	expectedTools := []string{"view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "list_dir", "grep_search", "find_file", "finish", "schedule", "ask_question"}
+	expectedTools := []string{"view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "grep_search", "find_file", "finish", "schedule", "ask_question"}
 	for _, name := range expectedTools {
 		if !reg.HasTool(name) {
 			t.Errorf("expected tool %q to be registered", name)
@@ -148,7 +148,6 @@ func TestRegisterBuiltinToolsAllEnabled(t *testing.T) {
 		ViewFile:   true,
 		CreateFile: true,
 		EditFile:   true,
-		ListDir:    true,
 		SearchDir:  true,
 		FindFile:   true,
 		RunCommand: true,
@@ -157,7 +156,7 @@ func TestRegisterBuiltinToolsAllEnabled(t *testing.T) {
 
 	reg, _ := testRegistryWithConfig(t, cfg)
 
-	allTools := []string{"view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "list_dir", "grep_search", "find_file", "run_command", "finish"}
+	allTools := []string{"view_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "grep_search", "find_file", "run_command", "finish"}
 	for _, name := range allTools {
 		if !reg.HasTool(name) {
 			t.Errorf("expected tool %q to be registered", name)
@@ -230,11 +229,6 @@ func TestGetToolName(t *testing.T) {
 			name:     "edit_file action",
 			step:     &pb.StepUpdate{Action: &pb.StepUpdate_ReplaceFileContent{ReplaceFileContent: &pb.ActionReplaceFileContent{}}},
 			expected: "replace_file_content",
-		},
-		{
-			name:     "list_dir action",
-			step:     &pb.StepUpdate{Action: &pb.StepUpdate_ListDir{ListDir: &pb.ActionListDir{}}},
-			expected: "list_dir",
 		},
 		{
 			name:     "search_dir action",
@@ -1058,115 +1052,6 @@ func TestMultiEditFileRequiresMinTwoChunks(t *testing.T) {
 
 // ─── List Dir Tests ──────────────────────────────────────────────────────
 
-func TestListDir(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	// Create some files and directories
-	_ = os.WriteFile(filepath.Join(wsDir, "file1.txt"), []byte("a"), 0644)
-	_ = os.WriteFile(filepath.Join(wsDir, "file2.go"), []byte("b"), 0644)
-	_ = os.MkdirAll(filepath.Join(wsDir, "subdir"), 0755)
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_ListDir{
-			ListDir: &pb.ActionListDir{Path: wsDir},
-		},
-	}
-
-	err := reg.Execute(ctx, "list_dir", step)
-	if err != nil {
-		t.Fatalf("list_dir failed: %v", err)
-	}
-
-	ld := step.GetListDir()
-	if len(ld.Entries) != 3 {
-		t.Errorf("expected 3 entries, got %d", len(ld.Entries))
-	}
-
-	// Directories should come first (due to sorting)
-	if len(ld.Entries) > 0 && !ld.Entries[0].IsDir {
-		t.Error("directories should be listed first")
-	}
-}
-
-func TestListDirNotDirectory(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	file := filepath.Join(wsDir, "notadir.txt")
-	_ = os.WriteFile(file, []byte("content"), 0644)
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_ListDir{
-			ListDir: &pb.ActionListDir{Path: file},
-		},
-	}
-
-	err := reg.Execute(ctx, "list_dir", step)
-	if err == nil {
-		t.Error("list_dir should error when given a file instead of directory")
-	}
-}
-
-func TestListDirEmpty(t *testing.T) {
-	reg, _ := testRegistry(t)
-	ctx := context.Background()
-
-	emptyDir := t.TempDir()
-	// Need a new registry that includes this dir
-	wsMgr, _ := workspace.NewManager([]string{emptyDir})
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	emptyReg := NewRegistry(wsMgr, logger)
-	RegisterBuiltinTools(emptyReg, nil)
-	_ = reg
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_ListDir{
-			ListDir: &pb.ActionListDir{Path: emptyDir},
-		},
-	}
-
-	err := emptyReg.Execute(ctx, "list_dir", step)
-	if err != nil {
-		t.Fatalf("list_dir on empty dir should succeed: %v", err)
-	}
-
-	ld := step.GetListDir()
-	if len(ld.Entries) != 0 {
-		t.Errorf("expected 0 entries for empty dir, got %d", len(ld.Entries))
-	}
-}
-
-func BenchmarkListDir(b *testing.B) {
-	wsDir := b.TempDir()
-	wsMgr, _ := workspace.NewManager([]string{wsDir})
-	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	reg := NewRegistry(wsMgr, logger)
-	RegisterBuiltinTools(reg, nil)
-
-	// Create 30 subdirectories with 30 files each
-	for i := 0; i < 30; i++ {
-		sub := filepath.Join(wsDir, fmt.Sprintf("sub_%d", i))
-		_ = os.MkdirAll(sub, 0755)
-		for j := 0; j < 30; j++ {
-			_ = os.WriteFile(filepath.Join(sub, fmt.Sprintf("file_%d.txt", j)), []byte("data"), 0644)
-		}
-	}
-
-	ctx := context.Background()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		step := &pb.StepUpdate{
-			Action: &pb.StepUpdate_ListDir{
-				ListDir: &pb.ActionListDir{Path: wsDir},
-			},
-		}
-		if err := reg.Execute(ctx, "list_dir", step); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // ─── Find File Tests ─────────────────────────────────────────────────────
 
 func TestFindFile(t *testing.T) {
@@ -1660,73 +1545,6 @@ func TestMustMarshalSchema(t *testing.T) {
 	}
 	if result["type"] != "object" {
 		t.Error("schema should preserve 'type' field")
-	}
-}
-
-func TestListDir_ShallowAndSkipLargeDirs(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	// Create a subdirectory with nested structure
-	subDir := filepath.Join(wsDir, "my_package")
-	_ = os.MkdirAll(filepath.Join(subDir, "nested", "deeper"), 0755)
-	_ = os.WriteFile(filepath.Join(subDir, "file1.txt"), []byte("1"), 0644)
-	_ = os.WriteFile(filepath.Join(subDir, "file2.txt"), []byte("2"), 0644)
-	_ = os.WriteFile(filepath.Join(subDir, "nested", "file3.txt"), []byte("3"), 0644)
-	_ = os.WriteFile(filepath.Join(subDir, "nested", "deeper", "file4.txt"), []byte("4"), 0644)
-
-	// Create directories that should be skipped from child counting
-	_ = os.MkdirAll(filepath.Join(wsDir, "node_modules", "pkg1"), 0755)
-	_ = os.WriteFile(filepath.Join(wsDir, "node_modules", "pkg1", "index.js"), []byte("export default {}"), 0644)
-
-	_ = os.MkdirAll(filepath.Join(wsDir, ".git", "objects"), 0755)
-	_ = os.WriteFile(filepath.Join(wsDir, ".git", "HEAD"), []byte("ref: refs/heads/main"), 0644)
-
-	_ = os.MkdirAll(filepath.Join(wsDir, "vendor", "mod1"), 0755)
-	_ = os.WriteFile(filepath.Join(wsDir, "vendor", "mod1", "lib.go"), []byte("package mod1"), 0644)
-
-	// Expanded skip dirs
-	skipDirs := []string{
-		".gemini", ".divmora", "dist", "build", "target", "bin",
-		"__pycache__", ".venv", ".agents", ".next", ".turbo", ".cache",
-	}
-	for _, sd := range skipDirs {
-		_ = os.MkdirAll(filepath.Join(wsDir, sd, "sub"), 0755)
-		_ = os.WriteFile(filepath.Join(wsDir, sd, "item.txt"), []byte("data"), 0644)
-	}
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_ListDir{
-			ListDir: &pb.ActionListDir{Path: wsDir},
-		},
-	}
-
-	err := reg.Execute(ctx, "list_dir", step)
-	if err != nil {
-		t.Fatalf("list_dir failed: %v", err)
-	}
-
-	ld := step.GetListDir()
-	entryMap := make(map[string]*pb.DirEntry)
-	for _, e := range ld.Entries {
-		entryMap[e.Name] = e
-	}
-
-	// my_package has 3 immediate items: nested (dir), file1.txt, file2.txt
-	// It should NOT count deeper descendants (nested/file3.txt, nested/deeper, etc.)
-	if pkgEntry, ok := entryMap["my_package"]; !ok {
-		t.Fatal("expected my_package directory entry")
-	} else if pkgEntry.ChildCount != 3 {
-		t.Errorf("expected shallow child count 3 for my_package, got %d", pkgEntry.ChildCount)
-	}
-
-	// node_modules, .git, and vendor must have ChildCount == 0 (strictly skipped)
-	for _, skipped := range append([]string{"node_modules", ".git", "vendor"}, skipDirs...) {
-		if entry, ok := entryMap[skipped]; !ok {
-			t.Fatalf("expected %s entry", skipped)
-		} else if entry.ChildCount != 0 {
-			t.Errorf("expected childCount 0 for %s, got %d", skipped, entry.ChildCount)
-		}
 	}
 }
 

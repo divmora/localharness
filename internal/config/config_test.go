@@ -21,9 +21,6 @@ func TestDefaultBuiltinTools(t *testing.T) {
 	if !cfg.EditFile {
 		t.Error("EditFile should be enabled by default")
 	}
-	if !cfg.ListDir {
-		t.Error("ListDir should be enabled by default")
-	}
 	if !cfg.SearchDir {
 		t.Error("SearchDir should be enabled by default")
 	}

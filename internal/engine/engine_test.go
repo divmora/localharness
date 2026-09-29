@@ -395,8 +395,8 @@ func TestRunMaxTurnsExceeded(t *testing.T) {
 					ToolCalls: []llm.ToolCall{
 						{
 							ID:   fmt.Sprintf("call_%d", i),
-							Name: "list_dir",
-							Args: map[string]interface{}{"path": "/tmp"},
+							Name: "view_file",
+							Args: map[string]interface{}{"path": "/tmp/test.txt"},
 						},
 					},
 				}
@@ -2278,7 +2278,7 @@ func TestCheckPlanningGuard_BlocksAfterResearch(t *testing.T) {
 
 	// Simulate 2 research calls
 	eng.checkPlanningGuard(llm.ToolCall{Name: "view_file", Args: map[string]interface{}{"path": "/workspace/main.go"}})
-	eng.checkPlanningGuard(llm.ToolCall{Name: "list_dir", Args: map[string]interface{}{"path": "/workspace"}})
+	eng.checkPlanningGuard(llm.ToolCall{Name: "find_file", Args: map[string]interface{}{"path": "/workspace"}})
 
 	if eng.researchToolCount.Load() != 2 {
 		t.Errorf("expected researchToolCount=2, got %d", eng.researchToolCount.Load())
@@ -2415,7 +2415,7 @@ func TestCheckPlanningGuard_ResearchCountIncrement(t *testing.T) {
 	}
 
 	// Research tools should increment the counter
-	researchTools := []string{"view_file", "list_dir", "grep_search", "find_file"}
+	researchTools := []string{"view_file", "grep_search", "find_file"}
 	for i, tool := range researchTools {
 		eng.checkPlanningGuard(llm.ToolCall{
 			Name: tool,
@@ -3644,8 +3644,8 @@ func TestEngine_TurnCheckpointHook(t *testing.T) {
 				ToolCalls: []llm.ToolCall{
 					{
 						ID:   "call-1",
-						Name: "list_dir",
-						Args: map[string]interface{}{"DirectoryPath": wsDir},
+						Name: "view_file",
+						Args: map[string]interface{}{"path": filepath.Join(wsDir, "test.txt")},
 					},
 				},
 			},
@@ -3710,8 +3710,8 @@ func TestEngine_AutoPromoteExternalRepo(t *testing.T) {
 				ToolCalls: []llm.ToolCall{
 					{
 						ID:   "call-1",
-						Name: "list_dir",
-						Args: map[string]interface{}{"path": repoB},
+						Name: "view_file",
+						Args: map[string]interface{}{"path": filepath.Join(repoB, "test.txt")},
 					},
 				},
 			},

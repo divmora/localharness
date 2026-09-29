@@ -925,7 +925,7 @@ message BuiltinToolsConfig {
   bool view_file = 1;        // default: true
   bool create_file = 2;      // default: true
   bool edit_file = 3;        // default: true
-  bool list_dir = 4;         // default: true
+  bool list_dir = 4 [deprecated = true];         // deprecated: use run_command with ls/find
   bool search_dir = 5;       // default: true
   bool find_file = 6;        // default: true
   bool run_command = 7;      // default: false (safety)
@@ -950,7 +950,7 @@ message ToolConfigs {
   FileEditToolConfig edit_file = 3;
   FindToolConfig find_file = 4;
   GrepSearchToolConfig grep_search = 5;
-  ListDirToolConfig list_dir = 6;
+  ListDirToolConfig list_dir = 6 [deprecated = true]; // deprecated: list_dir removed
   WriteToFileToolConfig write_file = 7;
   WebSearchToolConfig web_search = 8;
   WebFetchToolConfig web_fetch = 9;

@@ -285,7 +285,7 @@ const defaultPlanningMode = `You are in Planning Mode. Exercise judgement on whe
 If you decide that a request warrants a plan, then follow this workflow:
 
 ## Research
-- Thoroughly research the task using available tools (view_file, list_dir, search, etc.).
+- Thoroughly research the task using available tools (view_file, search, find_file, etc.).
 - DO NOT make any source code changes or run modifying commands during this phase. Creating or updating artifacts is allowed.
 - You MUST NOT use write_to_file or replace_file_content on workspace files during research. Only artifact files in the brain directory are allowed.
 - Understand the codebase, dependencies, architecture, and implications of the requested changes.
@@ -400,7 +400,6 @@ const defaultToolUsage = `When you have access to purpose-built tools, ALWAYS pr
 |------|---------------|------------|
 | View/read a file | view_file | run_command with cat, head, tail, less, or more |
 | Search file contents | grep_search | run_command with grep, rg, ag, or ack |
-| List directory contents | list_dir | run_command with ls, dir, or find (for listing) |
 | Find files by name | find_file | run_command with find or fd |
 | Create a new file | write_to_file | run_command with echo, cat >, printf, or tee |
 | Edit an existing file | replace_file_content | run_command with sed, awk, or perl -pi |
@@ -414,7 +413,7 @@ When choosing between tools for the same task, prefer the tool with:
 2. Workspace path validation (prevents path traversal)
 3. Built-in pagination/truncation (prevents context window waste)
 
-CRITICAL INSTRUCTION 1: You may have access to a variety of tools at your disposal. Some tools may be for a specific task such as 'view_file' (for viewing contents of a file). Others may be very broadly applicable such as the ability to run a command on a terminal. Always prioritize using the most specific tool you can for the task at hand. Here are some rules: (a) NEVER run cat inside a bash command to create a new file or append to an existing file. (b) ALWAYS use grep_search instead of running grep inside a bash command unless absolutely needed. (c) DO NOT use ls for listing, cat for viewing, grep for finding, sed for replacing.
+CRITICAL INSTRUCTION 1: You may have access to a variety of tools at your disposal. Some tools may be for a specific task such as 'view_file' (for viewing contents of a file). Others may be very broadly applicable such as the ability to run a command on a terminal. Always prioritize using the most specific tool you can for the task at hand. Here are some rules: (a) NEVER run cat inside a bash command to create a new file or append to an existing file. (b) ALWAYS use grep_search instead of running grep inside a bash command unless absolutely needed. (c) DO NOT use cat for viewing, grep for finding, sed for replacing.
 CRITICAL INSTRUCTION 2: Before making tool calls T, think and explicitly list out any related tools for the task at hand. You can only execute a set of tools T if all other tools in the list are either more generic or cannot be used for the task at hand. ALWAYS START your thought with recalling critical instructions 1 and 2. In particular, the format for the start of your thought block must be '...94>thought\nCRITICAL INSTRUCTION 1: ...\nCRITICAL INSTRUCTION 2: ...'.`
 
 // defaultGuidelines are always-present safety and behavioral rules that ensure

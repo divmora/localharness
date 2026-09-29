@@ -48,7 +48,7 @@ lhctl (Interactive TUI) / SDK ◄── WebSocket + Protobuf ──► LocalHarn
                                                                  │
                                                                  └── Built-in Tools
                                                                      ├── view_file, write_to_file, replace_file_content
-                                                                     ├── list_dir, grep_search, find_file
+                                                                     ├── grep_search, find_file
                                                                      ├── run_command, manage_task, finish
                                                                      ├── invoke_subagent, define_subagent, manage_subagents
                                                                      ├── search_web, read_url_content, schedule
@@ -211,7 +211,7 @@ The harness provides a rich set of built-in tools organized into categories:
 
 | Category | Tools | Description |
 |:---|:---|:---|
-| **File I/O** | `view_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content`, `list_dir` | Read, create, edit files and list directories |
+| **File I/O** | `view_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content` | Read, create, and edit files |
 | **Search** | `grep_search`, `find_file` | Ripgrep-powered content search and filename pattern matching |
 | **Execution** | `run_command`, `manage_task`, `schedule` | Shell commands (sync/background/persistent), task management, timers and cron |
 | **Web** | `search_web`, `read_url_content` | Web search and URL content fetching |

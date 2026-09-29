@@ -9,7 +9,7 @@ import (
 func TestToolSelector_AllowMode_InjectsDirective(t *testing.T) {
 	selector := NewToolSelector(ToolSelectorConfig{
 		Mode:   ToolSelectorAllow,
-		Tools:  []string{"view_file", "list_dir"},
+		Tools:  []string{"view_file", "find_file"},
 		Reason: "Read-only task",
 	}, nil)
 
@@ -123,7 +123,7 @@ func TestToolSelector_Dynamic(t *testing.T) {
 func TestToolSelector_ViolationDetection_Allow(t *testing.T) {
 	selector := NewToolSelector(ToolSelectorConfig{
 		Mode:            ToolSelectorAllow,
-		Tools:           []string{"view_file", "list_dir"},
+		Tools:           []string{"view_file", "find_file"},
 		WarnOnViolation: true,
 	}, nil)
 

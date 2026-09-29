@@ -6042,26 +6042,27 @@ func (x *ToolDef) GetResponseJsonSchema() string {
 // BuiltinToolsConfig toggles which built-in tools are enabled.
 // All default to true except run_command.
 type BuiltinToolsConfig struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	ViewFile        bool                   `protobuf:"varint,1,opt,name=view_file,json=viewFile,proto3" json:"view_file,omitempty"`                       // default: true
-	CreateFile      bool                   `protobuf:"varint,2,opt,name=create_file,json=createFile,proto3" json:"create_file,omitempty"`                 // default: true
-	EditFile        bool                   `protobuf:"varint,3,opt,name=edit_file,json=editFile,proto3" json:"edit_file,omitempty"`                       // default: true
-	ListDir         bool                   `protobuf:"varint,4,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"`                          // default: true
-	SearchDir       bool                   `protobuf:"varint,5,opt,name=search_dir,json=searchDir,proto3" json:"search_dir,omitempty"`                    // default: true
-	FindFile        bool                   `protobuf:"varint,6,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"`                       // default: true
-	RunCommand      bool                   `protobuf:"varint,7,opt,name=run_command,json=runCommand,proto3" json:"run_command,omitempty"`                 // default: false (safety)
-	Finish          bool                   `protobuf:"varint,8,opt,name=finish,proto3" json:"finish,omitempty"`                                           // default: true
-	ManageTask      bool                   `protobuf:"varint,9,opt,name=manage_task,json=manageTask,proto3" json:"manage_task,omitempty"`                 // default: false (requires run_command)
-	InvokeSubagent  bool                   `protobuf:"varint,10,opt,name=invoke_subagent,json=invokeSubagent,proto3" json:"invoke_subagent,omitempty"`    // default: false (must opt-in)
-	WebSearch       bool                   `protobuf:"varint,11,opt,name=web_search,json=webSearch,proto3" json:"web_search,omitempty"`                   // default: false
-	WebFetch        bool                   `protobuf:"varint,12,opt,name=web_fetch,json=webFetch,proto3" json:"web_fetch,omitempty"`                      // default: false
-	Schedule        bool                   `protobuf:"varint,13,opt,name=schedule,proto3" json:"schedule,omitempty"`                                      // default: true (timers and cron)
-	Browser         bool                   `protobuf:"varint,14,opt,name=browser,proto3" json:"browser,omitempty"`                                        // default: false (requires Node.js + npx, auto-injects @playwright/mcp)
-	DefineSubagent  bool                   `protobuf:"varint,15,opt,name=define_subagent,json=defineSubagent,proto3" json:"define_subagent,omitempty"`    // default: false (follows invoke_subagent)
-	ManageSubagents bool                   `protobuf:"varint,16,opt,name=manage_subagents,json=manageSubagents,proto3" json:"manage_subagents,omitempty"` // default: false (follows invoke_subagent)
-	SendMessage     bool                   `protobuf:"varint,17,opt,name=send_message,json=sendMessage,proto3" json:"send_message,omitempty"`             // default: false (follows invoke_subagent)
-	CodeGraph       bool                   `protobuf:"varint,18,opt,name=code_graph,json=codeGraph,proto3" json:"code_graph,omitempty"`                   // default: true (AST repository code graph & symbol intelligence)
-	Desktop         bool                   `protobuf:"varint,19,opt,name=desktop,proto3" json:"desktop,omitempty"`                                        // default: false (cross-platform desktop automation & computer use)
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ViewFile   bool                   `protobuf:"varint,1,opt,name=view_file,json=viewFile,proto3" json:"view_file,omitempty"`       // default: true
+	CreateFile bool                   `protobuf:"varint,2,opt,name=create_file,json=createFile,proto3" json:"create_file,omitempty"` // default: true
+	EditFile   bool                   `protobuf:"varint,3,opt,name=edit_file,json=editFile,proto3" json:"edit_file,omitempty"`       // default: true
+	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
+	ListDir         bool `protobuf:"varint,4,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"`                          // deprecated: use run_command with ls/find
+	SearchDir       bool `protobuf:"varint,5,opt,name=search_dir,json=searchDir,proto3" json:"search_dir,omitempty"`                    // default: true
+	FindFile        bool `protobuf:"varint,6,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"`                       // default: true
+	RunCommand      bool `protobuf:"varint,7,opt,name=run_command,json=runCommand,proto3" json:"run_command,omitempty"`                 // default: false (safety)
+	Finish          bool `protobuf:"varint,8,opt,name=finish,proto3" json:"finish,omitempty"`                                           // default: true
+	ManageTask      bool `protobuf:"varint,9,opt,name=manage_task,json=manageTask,proto3" json:"manage_task,omitempty"`                 // default: false (requires run_command)
+	InvokeSubagent  bool `protobuf:"varint,10,opt,name=invoke_subagent,json=invokeSubagent,proto3" json:"invoke_subagent,omitempty"`    // default: false (must opt-in)
+	WebSearch       bool `protobuf:"varint,11,opt,name=web_search,json=webSearch,proto3" json:"web_search,omitempty"`                   // default: false
+	WebFetch        bool `protobuf:"varint,12,opt,name=web_fetch,json=webFetch,proto3" json:"web_fetch,omitempty"`                      // default: false
+	Schedule        bool `protobuf:"varint,13,opt,name=schedule,proto3" json:"schedule,omitempty"`                                      // default: true (timers and cron)
+	Browser         bool `protobuf:"varint,14,opt,name=browser,proto3" json:"browser,omitempty"`                                        // default: false (requires Node.js + npx, auto-injects @playwright/mcp)
+	DefineSubagent  bool `protobuf:"varint,15,opt,name=define_subagent,json=defineSubagent,proto3" json:"define_subagent,omitempty"`    // default: false (follows invoke_subagent)
+	ManageSubagents bool `protobuf:"varint,16,opt,name=manage_subagents,json=manageSubagents,proto3" json:"manage_subagents,omitempty"` // default: false (follows invoke_subagent)
+	SendMessage     bool `protobuf:"varint,17,opt,name=send_message,json=sendMessage,proto3" json:"send_message,omitempty"`             // default: false (follows invoke_subagent)
+	CodeGraph       bool `protobuf:"varint,18,opt,name=code_graph,json=codeGraph,proto3" json:"code_graph,omitempty"`                   // default: true (AST repository code graph & symbol intelligence)
+	Desktop         bool `protobuf:"varint,19,opt,name=desktop,proto3" json:"desktop,omitempty"`                                        // default: false (cross-platform desktop automation & computer use)
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -6117,6 +6118,7 @@ func (x *BuiltinToolsConfig) GetEditFile() bool {
 	return false
 }
 
+// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
 func (x *BuiltinToolsConfig) GetListDir() bool {
 	if x != nil {
 		return x.ListDir
@@ -6231,13 +6233,14 @@ func (x *BuiltinToolsConfig) GetDesktop() bool {
 
 // ToolConfigs provides per-tool configuration (Phase 2).
 type ToolConfigs struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ViewFile      *ViewFileToolConfig    `protobuf:"bytes,1,opt,name=view_file,json=viewFile,proto3" json:"view_file,omitempty"`
-	RunCommand    *RunCommandToolConfig  `protobuf:"bytes,2,opt,name=run_command,json=runCommand,proto3" json:"run_command,omitempty"`
-	EditFile      *FileEditToolConfig    `protobuf:"bytes,3,opt,name=edit_file,json=editFile,proto3" json:"edit_file,omitempty"`
-	FindFile      *FindToolConfig        `protobuf:"bytes,4,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"`
-	GrepSearch    *GrepSearchToolConfig  `protobuf:"bytes,5,opt,name=grep_search,json=grepSearch,proto3" json:"grep_search,omitempty"`
-	ListDir       *ListDirToolConfig     `protobuf:"bytes,6,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ViewFile   *ViewFileToolConfig    `protobuf:"bytes,1,opt,name=view_file,json=viewFile,proto3" json:"view_file,omitempty"`
+	RunCommand *RunCommandToolConfig  `protobuf:"bytes,2,opt,name=run_command,json=runCommand,proto3" json:"run_command,omitempty"`
+	EditFile   *FileEditToolConfig    `protobuf:"bytes,3,opt,name=edit_file,json=editFile,proto3" json:"edit_file,omitempty"`
+	FindFile   *FindToolConfig        `protobuf:"bytes,4,opt,name=find_file,json=findFile,proto3" json:"find_file,omitempty"`
+	GrepSearch *GrepSearchToolConfig  `protobuf:"bytes,5,opt,name=grep_search,json=grepSearch,proto3" json:"grep_search,omitempty"`
+	// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
+	ListDir       *ListDirToolConfig     `protobuf:"bytes,6,opt,name=list_dir,json=listDir,proto3" json:"list_dir,omitempty"` // deprecated: list_dir removed
 	WriteFile     *WriteToFileToolConfig `protobuf:"bytes,7,opt,name=write_file,json=writeFile,proto3" json:"write_file,omitempty"`
 	WebSearch     *WebSearchToolConfig   `protobuf:"bytes,8,opt,name=web_search,json=webSearch,proto3" json:"web_search,omitempty"`
 	WebFetch      *WebFetchToolConfig    `protobuf:"bytes,9,opt,name=web_fetch,json=webFetch,proto3" json:"web_fetch,omitempty"`
@@ -6311,6 +6314,7 @@ func (x *ToolConfigs) GetGrepSearch() *GrepSearchToolConfig {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in localharness/v1/localharness.proto.
 func (x *ToolConfigs) GetListDir() *ListDirToolConfig {
 	if x != nil {
 		return x.ListDir
@@ -9463,13 +9467,13 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x124\n" +
 	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\x120\n" +
-	"\x14response_json_schema\x18\x04 \x01(\tR\x12responseJsonSchema\"\xeb\x04\n" +
+	"\x14response_json_schema\x18\x04 \x01(\tR\x12responseJsonSchema\"\xef\x04\n" +
 	"\x12BuiltinToolsConfig\x12\x1b\n" +
 	"\tview_file\x18\x01 \x01(\bR\bviewFile\x12\x1f\n" +
 	"\vcreate_file\x18\x02 \x01(\bR\n" +
 	"createFile\x12\x1b\n" +
-	"\tedit_file\x18\x03 \x01(\bR\beditFile\x12\x19\n" +
-	"\blist_dir\x18\x04 \x01(\bR\alistDir\x12\x1d\n" +
+	"\tedit_file\x18\x03 \x01(\bR\beditFile\x12\x1d\n" +
+	"\blist_dir\x18\x04 \x01(\bB\x02\x18\x01R\alistDir\x12\x1d\n" +
 	"\n" +
 	"search_dir\x18\x05 \x01(\bR\tsearchDir\x12\x1b\n" +
 	"\tfind_file\x18\x06 \x01(\bR\bfindFile\x12\x1f\n" +
@@ -9490,7 +9494,7 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\fsend_message\x18\x11 \x01(\bR\vsendMessage\x12\x1d\n" +
 	"\n" +
 	"code_graph\x18\x12 \x01(\bR\tcodeGraph\x12\x18\n" +
-	"\adesktop\x18\x13 \x01(\bR\adesktop\"\xb1\x05\n" +
+	"\adesktop\x18\x13 \x01(\bR\adesktop\"\xb5\x05\n" +
 	"\vToolConfigs\x12@\n" +
 	"\tview_file\x18\x01 \x01(\v2#.localharness.v1.ViewFileToolConfigR\bviewFile\x12F\n" +
 	"\vrun_command\x18\x02 \x01(\v2%.localharness.v1.RunCommandToolConfigR\n" +
@@ -9498,8 +9502,8 @@ const file_localharness_v1_localharness_proto_rawDesc = "" +
 	"\tedit_file\x18\x03 \x01(\v2#.localharness.v1.FileEditToolConfigR\beditFile\x12<\n" +
 	"\tfind_file\x18\x04 \x01(\v2\x1f.localharness.v1.FindToolConfigR\bfindFile\x12F\n" +
 	"\vgrep_search\x18\x05 \x01(\v2%.localharness.v1.GrepSearchToolConfigR\n" +
-	"grepSearch\x12=\n" +
-	"\blist_dir\x18\x06 \x01(\v2\".localharness.v1.ListDirToolConfigR\alistDir\x12E\n" +
+	"grepSearch\x12A\n" +
+	"\blist_dir\x18\x06 \x01(\v2\".localharness.v1.ListDirToolConfigB\x02\x18\x01R\alistDir\x12E\n" +
 	"\n" +
 	"write_file\x18\a \x01(\v2&.localharness.v1.WriteToFileToolConfigR\twriteFile\x12C\n" +
 	"\n" +
