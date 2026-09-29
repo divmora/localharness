@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -421,5 +422,37 @@ func TestCreateProvider_LiteLLM_EndpointRouting(t *testing.T) {
 	}
 	if op2.APIKey() != "key-default" {
 		t.Errorf("expected key-default, got %s", op2.APIKey())
+	}
+}
+
+func TestSession_PrepareInstructions_Restricted(t *testing.T) {
+	// 1. Restricted session with both system instructions and structured instructions
+	sRestricted := &Session{
+		isRestricted: true,
+	}
+	cfg := &pb.HarnessConfig{
+		SystemInstructions: "Base instructions.",
+		StructuredInstructions: &pb.StructuredSystemInstructions{
+			Guidelines: "Rule 1: test.",
+		},
+	}
+	sysPrompt, structInstructions := sRestricted.prepareInstructions(cfg)
+	if !strings.Contains(sysPrompt, "<security_notice>") {
+		t.Errorf("expected security notice in sysPrompt, got: %s", sysPrompt)
+	}
+	if structInstructions == nil || !strings.Contains(structInstructions.Guidelines, "<security_notice>") {
+		t.Errorf("expected security notice in structured guidelines, got: %v", structInstructions)
+	}
+
+	// 2. Unrestricted / trusted session should NOT inject notice
+	sTrusted := &Session{
+		isRestricted: false,
+	}
+	sysPromptTrusted, structInstructionsTrusted := sTrusted.prepareInstructions(cfg)
+	if strings.Contains(sysPromptTrusted, "<security_notice>") {
+		t.Errorf("unexpected security notice in trusted sysPrompt: %s", sysPromptTrusted)
+	}
+	if structInstructionsTrusted != nil && strings.Contains(structInstructionsTrusted.Guidelines, "<security_notice>") {
+		t.Errorf("unexpected security notice in trusted structured guidelines: %v", structInstructionsTrusted)
 	}
 }

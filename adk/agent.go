@@ -835,6 +835,8 @@ func buildHarnessConfig(cfg *LocalAgentConfig) *pb.HarnessConfig {
 		AllowedPaths:                cfg.AllowedPaths,
 		ScratchDir:                  cfg.ScratchDir,
 		InheritSubagentCapabilities: cfg.InheritSubagentCapabilities,
+		Trusted:                     cfg.Trusted,
+		YoloMode:                    cfg.YoloMode,
 	}
 
 	// Prompt modules — only set if any module is enabled

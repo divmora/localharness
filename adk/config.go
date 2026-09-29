@@ -115,6 +115,14 @@ type LocalAgentConfig struct {
 	// The counter resets when a real user message arrives.
 	MaxAutoWakeTurns int
 
+	// Trusted declares that the configured workspaces are trusted by the caller.
+	// When true, enables write tools, commands, MCP, and plugins without requiring
+	// workspaces to be pre-registered in ~/.divmora/config/settings.json.
+	Trusted bool
+
+	// YoloMode enables fully autonomous execution without human permission prompts.
+	YoloMode bool
+
 	// --- Prompt Modules ---
 
 	// EnablePlanningMode enables the plan-before-act workflow.

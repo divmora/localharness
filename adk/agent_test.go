@@ -689,3 +689,28 @@ func TestAgent_TokenUsageMultipleSteps(t *testing.T) {
 		t.Errorf("expected totalTokens %d, got %d", expected, agent.totalTokens)
 	}
 }
+
+func TestBuildHarnessConfig_TrustedAndYoloMode(t *testing.T) {
+	cfg := &LocalAgentConfig{
+		Trusted:  true,
+		YoloMode: true,
+	}
+
+	harnessCfg := buildHarnessConfig(cfg)
+	if !harnessCfg.Trusted {
+		t.Errorf("expected harnessCfg.Trusted to be true")
+	}
+	if !harnessCfg.YoloMode {
+		t.Errorf("expected harnessCfg.YoloMode to be true")
+	}
+
+	// Default should be false
+	defaultCfg := &LocalAgentConfig{}
+	defaultHarnessCfg := buildHarnessConfig(defaultCfg)
+	if defaultHarnessCfg.Trusted {
+		t.Errorf("expected default harnessCfg.Trusted to be false")
+	}
+	if defaultHarnessCfg.YoloMode {
+		t.Errorf("expected default harnessCfg.YoloMode to be false")
+	}
+}

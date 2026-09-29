@@ -800,12 +800,14 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 		s.logger.Warn("failed to load project registry", "error", err)
 	}
 
+	sysPrompt, structInstructions := s.prepareInstructions(cfg)
+
 	s.engine = engine.NewEngine(engine.Config{
 		Conversation:                s.conv,
 		Provider:                    provider,
 		ToolRegistry:                toolRegistry,
-		SystemPrompt:                cfg.SystemInstructions,
-		StructuredInstructions:      cfg.StructuredInstructions,
+		SystemPrompt:                sysPrompt,
+		StructuredInstructions:      structInstructions,
 		ConversationID:              s.conv.ID,
 		TrajectoryID:                trajID,
 		OnStep:                      s.onStep,
@@ -925,6 +927,27 @@ func (s *Session) handleInit(ctx context.Context, req *pb.InitRequest) {
 			go s.handleUserMessage(ctx, msg)
 		}
 	}
+}
+
+// prepareInstructions prepares the system prompt and structured instructions,
+// appending a security notice if operating in restricted read-only mode.
+func (s *Session) prepareInstructions(cfg *pb.HarnessConfig) (string, *pb.StructuredSystemInstructions) {
+	sysPrompt := cfg.SystemInstructions
+	structInstructions := cfg.StructuredInstructions
+	if s.isRestricted {
+		untrustedNotice := "\n\n<security_notice>\nOperating in restricted read-only mode because workspace directory is untrusted. File modifications (create_file, edit_file) and shell execution (run_command) are disabled. Subagents also cannot perform mutating actions.\n</security_notice>\n"
+		sysPrompt += untrustedNotice
+		if structInstructions != nil {
+			cloned := proto.Clone(structInstructions).(*pb.StructuredSystemInstructions)
+			if cloned.Guidelines != "" {
+				cloned.Guidelines = untrustedNotice + "\n" + cloned.Guidelines
+			} else {
+				cloned.Guidelines = untrustedNotice
+			}
+			structInstructions = cloned
+		}
+	}
+	return sysPrompt, structInstructions
 }
 
 // handleUserMessage processes a user prompt and runs the agentic loop.
