@@ -69,7 +69,7 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 
 	// Workspace validation
-	validPath, err := r.ValidatePath(path)
+	validPath, err := r.ValidatePathContext(ctx, path)
 	if err != nil {
 		return fmt.Errorf("replace_file_content: %w", err)
 	}

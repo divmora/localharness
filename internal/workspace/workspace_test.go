@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -567,5 +568,81 @@ func TestValidatePathWithPolicy(t *testing.T) {
 	}
 	if !policy.IsSensitive {
 		t.Error("expected IsSensitive=true for /etc/passwd")
+	}
+}
+
+func TestFindProjectRoot(t *testing.T) {
+	// Create simulated repo with .git
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "my-repo")
+	gitDir := filepath.Join(repoDir, ".git")
+	subDir := filepath.Join(repoDir, "cmd", "sub")
+	if err := os.MkdirAll(gitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	root, ok := FindProjectRoot(subDir)
+	if !ok || root != repoDir {
+		t.Errorf("FindProjectRoot(%q) = (%q, %v), want (%q, true)", subDir, root, ok, repoDir)
+	}
+
+	// Standalone path without .git
+	nonRepoDir := filepath.Join(tmpDir, "plain-dir")
+	if err := os.MkdirAll(nonRepoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	root, ok = FindProjectRoot(nonRepoDir)
+	if ok {
+		t.Errorf("FindProjectRoot(%q) = (%q, %v), want (_, false)", nonRepoDir, root, ok)
+	}
+}
+
+func TestContextApprovedPath(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "external.txt")
+	if err := os.WriteFile(outsideFile, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr, err := NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Without approval context -> should fail with PATH_TRAVERSAL
+	_, err = mgr.ValidatePath(outsideFile)
+	if err == nil {
+		t.Error("expected error for outside file without approval")
+	}
+
+	// 2. With approval context -> should succeed
+	ctx := WithApprovedPath(context.Background(), outsideDir)
+	clean, err := mgr.ValidatePathContext(ctx, outsideFile)
+	if err != nil {
+		t.Errorf("unexpected error with approval context: %v", err)
+	}
+	if clean != outsideFile {
+		t.Errorf("got clean=%q, want %q", clean, outsideFile)
+	}
+
+	// 3. With AllowDynamicPath -> subsequent calls without context should succeed
+	_, err = mgr.ValidatePath(outsideFile)
+	if err == nil {
+		t.Error("expected outsideFile without context to still fail before AllowDynamicPath")
+	}
+
+	if err := mgr.AllowDynamicPath(outsideDir); err != nil {
+		t.Fatalf("AllowDynamicPath failed: %v", err)
+	}
+	clean, err = mgr.ValidatePath(outsideFile)
+	if err != nil {
+		t.Errorf("unexpected error after AllowDynamicPath: %v", err)
+	}
+	if clean != outsideFile {
+		t.Errorf("got clean=%q, want %q", clean, outsideFile)
 	}
 }

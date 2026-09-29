@@ -771,6 +771,25 @@ func (e *Engine) AddWorkspace(ws string, info WorkspaceInfo) {
 	e.userRules = append(sdkRules, discoveredRules...)
 	e.msgCtx.Workspaces = e.workspaceInfos
 	e.msgCtx.UserRules = e.userRules
+
+	// Persist to conversation state config if active
+	if e.conv != nil && e.conv.State != nil && e.conv.State.Config != nil {
+		e.conv.State.Config.Workspaces = append(e.conv.State.Config.Workspaces, &pb.Workspace{
+			Directory:  ws,
+			Name:       filepath.Base(ws),
+			CorpusName: info.CorpusName,
+		})
+		_ = e.conv.SaveAll()
+	}
+}
+
+// UserRules returns the active user rules loaded in the engine.
+func (e *Engine) UserRules() []config.UserRule {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	out := make([]config.UserRule, len(e.userRules))
+	copy(out, e.userRules)
+	return out
 }
 
 // Workspaces returns the list of current workspace directories.
@@ -1781,6 +1800,52 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 
 		// Reset counter on successful approval
 		e.consecutivePermissionDenials = 0
+
+		// Dynamic workspace promotion & allowed path authorization
+		targetPath := extractToolPath(tc)
+		if targetPath == "" && tc.Name == "run_command" {
+			if cwd, ok := tc.Args["cwd"].(string); ok && cwd != "" {
+				targetPath = cwd
+			}
+		}
+
+		if targetPath != "" && !e.isPathInsideWorkspaceOrAppData(targetPath) {
+			var wsMgr *workspace.Manager
+			if e.toolRegistry != nil {
+				wsMgr = e.toolRegistry.WorkspaceManager()
+			}
+			if repoRoot, isRepo := workspace.FindProjectRoot(targetPath); isRepo {
+				e.logger.Info("auto-promoting external repository to workspace",
+					"repo", repoRoot,
+					"target", targetPath,
+					"tool", tc.Name,
+				)
+				e.AddWorkspace(repoRoot, WorkspaceInfo{
+					Directory: repoRoot,
+				})
+				if wsMgr != nil {
+					_ = wsMgr.AddWorkspace(repoRoot)
+				}
+				_ = config.AddTrustedWorkspace(repoRoot, e.logger)
+				e.mu.Lock()
+				e.permissionGrants = append(e.permissionGrants, PermissionGrant{
+					Action: "*",
+					Target: repoRoot,
+				})
+				e.mu.Unlock()
+			} else {
+				if wsMgr != nil {
+					_ = wsMgr.AllowDynamicPath(targetPath)
+				}
+				e.mu.Lock()
+				e.permissionGrants = append(e.permissionGrants, PermissionGrant{
+					Action: tc.Name,
+					Target: targetPath,
+				})
+				e.mu.Unlock()
+			}
+			ctx = workspace.WithApprovedPath(ctx, targetPath)
+		}
 	}
 
 	// ── Planning guard ──
@@ -2465,33 +2530,51 @@ func (e *Engine) requestPermission(ctx context.Context, tc llm.ToolCall, step *p
 // summarizeToolCall creates a human-readable description of a tool call
 // for permission request UIs.
 func summarizeToolCall(tc llm.ToolCall) string {
+	targetPath := extractToolPath(tc)
+	repoSuffix := ""
+	if targetPath != "" {
+		if repoRoot, isRepo := workspace.FindProjectRoot(targetPath); isRepo {
+			repoSuffix = fmt.Sprintf(" (external repository '%s')", filepath.Base(repoRoot))
+		}
+	}
+
 	switch tc.Name {
 	case "run_command":
 		if cmd, ok := tc.Args["command"].(string); ok {
 			cwd, _ := tc.Args["cwd"].(string)
 			if cwd != "" {
+				if repoRoot, isRepo := workspace.FindProjectRoot(cwd); isRepo {
+					return fmt.Sprintf("Run command: %s (in %s [external repository '%s'])", cmd, cwd, filepath.Base(repoRoot))
+				}
 				return fmt.Sprintf("Run command: %s (in %s)", cmd, cwd)
 			}
 			return fmt.Sprintf("Run command: %s", cmd)
 		}
 	case "write_to_file":
 		if path, ok := tc.Args["path"].(string); ok {
-			return fmt.Sprintf("Create file: %s", path)
+			return fmt.Sprintf("Create file: %s%s", path, repoSuffix)
 		}
 	case "replace_file_content", "multi_replace_file_content":
 		if path, ok := tc.Args["path"].(string); ok {
-			return fmt.Sprintf("Edit file: %s", path)
+			return fmt.Sprintf("Edit file: %s%s", path, repoSuffix)
 		}
 	case "view_file":
 		if path, ok := tc.Args["path"].(string); ok {
-			return fmt.Sprintf("View file: %s", path)
+			return fmt.Sprintf("View file: %s%s", path, repoSuffix)
 		}
 	case "list_dir":
 		if path, ok := tc.Args["path"].(string); ok {
-			return fmt.Sprintf("List directory: %s", path)
+			return fmt.Sprintf("List directory: %s%s", path, repoSuffix)
+		}
+	case "find_file":
+		if path, ok := tc.Args["path"].(string); ok {
+			return fmt.Sprintf("Find files in: %s%s", path, repoSuffix)
 		}
 	case "grep_search":
 		if query, ok := tc.Args["query"].(string); ok {
+			if path, ok := tc.Args["path"].(string); ok && path != "" {
+				return fmt.Sprintf("Search %q in %s%s", query, path, repoSuffix)
+			}
 			return fmt.Sprintf("Search: %s", query)
 		}
 	case "search_web":

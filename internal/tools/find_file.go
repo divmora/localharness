@@ -47,7 +47,7 @@ func executeFindFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	}
 
 	// Workspace validation
-	validPath, err := r.ValidatePath(searchPath)
+	validPath, err := r.ValidatePathContext(ctx, searchPath)
 	if err != nil {
 		return fmt.Errorf("find_file: %w", err)
 	}

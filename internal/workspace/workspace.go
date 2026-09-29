@@ -3,6 +3,7 @@
 package workspace
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,34 @@ import (
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/errors"
 )
+
+type approvedPathContextKey struct{}
+
+// WithApprovedPath returns a context carrying an approved target path for dynamic out-of-workspace access.
+func WithApprovedPath(ctx context.Context, path string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if path == "" {
+		return ctx
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = filepath.Clean(path)
+	}
+	return context.WithValue(ctx, approvedPathContextKey{}, abs)
+}
+
+// ApprovedPathFromContext retrieves any dynamically approved path from the context.
+func ApprovedPathFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if p, ok := ctx.Value(approvedPathContextKey{}).(string); ok {
+		return p
+	}
+	return ""
+}
 
 // AccessMode aliases the proto AccessMode enum for internal workspace usage.
 type AccessMode = pb.AccessMode
@@ -141,6 +170,47 @@ func (m *Manager) AddAllowedPath(path string) error {
 	return nil
 }
 
+// AllowDynamicPath dynamically adds an approved directory or file parent to allowed paths.
+// Thread-safe for runtime additions during active sessions.
+func (m *Manager) AllowDynamicPath(path string) error {
+	clean := filepath.Clean(path)
+	info, err := os.Stat(clean)
+	if err == nil && !info.IsDir() {
+		clean = filepath.Dir(clean)
+	}
+	return m.AddAllowedPath(clean)
+}
+
+// FindProjectRoot scans parent directories of path looking for .git or repository root markers.
+// Stops at the user's home directory or filesystem root. Returns the root directory and true if found.
+func FindProjectRoot(path string) (string, bool) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	dir := abs
+	info, err := os.Stat(dir)
+	if err == nil && !info.IsDir() {
+		dir = filepath.Dir(abs)
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		home = filepath.Clean(home)
+	}
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		if _, err := os.Stat(gitPath); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir || dir == "/" || (home != "" && dir == home) {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
 // IsSensitivePath checks if a path targets sensitive host files, credentials,
 // authentication keys, or system directories that warrant supervision.
 func IsSensitivePath(path string) bool {
@@ -240,6 +310,11 @@ func (m *Manager) IsSensitivePath(path string) bool {
 // ValidatePathWithPolicy evaluates a path against the current access mode, returning
 // detailed policy metadata including cleanliness, sensitivity, and workspace membership.
 func (m *Manager) ValidatePathWithPolicy(path string) (PathPolicy, error) {
+	return m.ValidatePathWithPolicyContext(context.Background(), path)
+}
+
+// ValidatePathWithPolicyContext evaluates a path with context-attached approved paths.
+func (m *Manager) ValidatePathWithPolicyContext(ctx context.Context, path string) (PathPolicy, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -295,6 +370,19 @@ func (m *Manager) ValidatePathWithPolicy(path string) (PathPolicy, error) {
 		}
 	}
 
+	// Check dynamically approved path from context (e.g. human-approved turn)
+	if !inWorkspace && ctx != nil {
+		if approved := ApprovedPathFromContext(ctx); approved != "" {
+			resolvedApproved, err := filepath.EvalSymlinks(approved)
+			if err != nil {
+				resolvedApproved = approved
+			}
+			if isSubPath(approved, abs) || isSubPath(approved, resolved) || isSubPath(resolvedApproved, resolved) || isSubPath(resolvedApproved, abs) {
+				inWorkspace = true
+			}
+		}
+	}
+
 	isSensitive := IsSensitivePath(abs) || IsSensitivePath(resolved)
 
 	switch m.accessMode {
@@ -335,7 +423,12 @@ func (m *Manager) ValidatePathWithPolicy(path string) (PathPolicy, error) {
 // Under ACCESS_MODE_SYSTEM and ACCESS_MODE_UNRESTRICTED, valid host paths are permitted.
 // Returns the cleaned absolute path if valid, or an error if not.
 func (m *Manager) ValidatePath(path string) (string, error) {
-	policy, err := m.ValidatePathWithPolicy(path)
+	return m.ValidatePathContext(context.Background(), path)
+}
+
+// ValidatePathContext checks if a path is within any configured workspace, allowed path, or context-approved path.
+func (m *Manager) ValidatePathContext(ctx context.Context, path string) (string, error) {
+	policy, err := m.ValidatePathWithPolicyContext(ctx, path)
 	if err != nil {
 		return "", err
 	}

@@ -198,10 +198,26 @@ func (r *Registry) Execute(ctx context.Context, name string, step *pb.StepUpdate
 // ValidatePath checks if a path is within the configured workspaces.
 // Returns the cleaned absolute path or an error.
 func (r *Registry) ValidatePath(path string) (string, error) {
+	return r.ValidatePathContext(context.Background(), path)
+}
+
+// ValidatePathContext checks if a path is within the configured workspaces or approved via context.
+// Returns the cleaned absolute path or an error.
+func (r *Registry) ValidatePathContext(ctx context.Context, path string) (string, error) {
 	if r.wsMgr == nil {
 		return path, nil // No workspace restriction
 	}
-	return r.wsMgr.ValidatePath(path)
+	return r.wsMgr.ValidatePathContext(ctx, path)
+}
+
+// WorkspaceManager returns the workspace manager associated with this registry.
+func (r *Registry) WorkspaceManager() *workspace.Manager {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.wsMgr
 }
 
 // Workspaces returns the list of configured workspace directories.

@@ -42,7 +42,7 @@ func executeListDir(ctx context.Context, step *pb.StepUpdate, r *Registry) error
 	}
 
 	// Workspace validation
-	validPath, err := r.ValidatePath(dirPath)
+	validPath, err := r.ValidatePathContext(ctx, dirPath)
 	if err != nil {
 		return fmt.Errorf("list_dir: %w", err)
 	}

@@ -3679,3 +3679,186 @@ func TestEngine_TurnCheckpointHook(t *testing.T) {
 		t.Errorf("expected at least 1 turn checkpoint, got %d", checkpoints)
 	}
 }
+
+func TestEngine_AutoPromoteExternalRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoA := filepath.Join(tmpDir, "repo-a")
+	repoB := filepath.Join(tmpDir, "repo-b")
+	_ = os.MkdirAll(repoA, 0755)
+	_ = os.MkdirAll(filepath.Join(repoB, ".git"), 0755)
+	_ = os.WriteFile(filepath.Join(repoB, "AGENTS.md"), []byte("# Repo B Rules\nFollow Repo B rules."), 0644)
+	_ = os.WriteFile(filepath.Join(repoB, "test.txt"), []byte("repo b content"), 0644)
+
+	wsMgr, err := workspace.NewManager([]string{repoA})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tools.NewRegistry(wsMgr, slog.Default())
+	tools.RegisterBuiltinTools(reg, nil)
+
+	permRequests := 0
+	permHandler := func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+		permRequests++
+		return true, "", nil
+	}
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "list_dir",
+						Args: map[string]interface{}{"path": repoB},
+					},
+				},
+			},
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-2",
+						Name: "view_file",
+						Args: map[string]interface{}{"path": filepath.Join(repoB, "test.txt")},
+					},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Finished reading repo B.",
+			},
+		},
+	}
+
+	eng := NewEngine(Config{
+		Provider:          provider,
+		ToolRegistry:      reg,
+		Logger:            slog.Default(),
+		MaxTurns:          5,
+		Workspaces:        []string{repoA},
+		AccessMode:        pb.AccessMode_ACCESS_MODE_WORKSPACE,
+		PermissionHandler: permHandler,
+		ConversationID:    "test-autopromote-conv",
+		TrajectoryID:      "test-autopromote-traj",
+	})
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "inspect repo B"); err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	// Permission should have been requested on first access to repo B
+	if permRequests < 1 {
+		t.Errorf("expected permission to be requested for repo B, got %d", permRequests)
+	}
+
+	// Verify repoB was auto-promoted to engine workspaces
+	workspaces := eng.Workspaces()
+	hasRepoB := false
+	for _, ws := range workspaces {
+		if ws == repoB {
+			hasRepoB = true
+			break
+		}
+	}
+	if !hasRepoB {
+		t.Errorf("expected repoB %q to be in eng.Workspaces(), got %v", repoB, workspaces)
+	}
+
+	// Verify repoB/AGENTS.md was loaded into UserRules
+	rules := eng.UserRules()
+	hasRepoBRules := false
+	for _, r := range rules {
+		if strings.Contains(r.Content, "Repo B Rules") {
+			hasRepoBRules = true
+			break
+		}
+	}
+	if !hasRepoBRules {
+		t.Errorf("expected Repo B rules to be loaded into eng.UserRules(), got %v", rules)
+	}
+
+	// Verify repoB is also in wsMgr so ValidatePath passes
+	if _, err := wsMgr.ValidatePath(filepath.Join(repoB, "test.txt")); err != nil {
+		t.Errorf("expected ValidatePath on repoB file to succeed after promotion, got err: %v", err)
+	}
+}
+
+func TestEngine_StandaloneExternalFileApproval(t *testing.T) {
+	tmpDir := t.TempDir()
+	wsDir := filepath.Join(tmpDir, "my-ws")
+	_ = os.MkdirAll(wsDir, 0755)
+
+	extDir := filepath.Join(tmpDir, "standalone-external")
+	_ = os.MkdirAll(extDir, 0755)
+	extFile := filepath.Join(extDir, "output.log")
+	_ = os.WriteFile(extFile, []byte("standalone log data"), 0644)
+
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tools.NewRegistry(wsMgr, slog.Default())
+	tools.RegisterBuiltinTools(reg, nil)
+
+	permRequests := 0
+	permHandler := func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+		permRequests++
+		return true, "", nil
+	}
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-1",
+						Name: "view_file",
+						Args: map[string]interface{}{"path": extFile},
+					},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Finished reading external log.",
+			},
+		},
+	}
+
+	eng := NewEngine(Config{
+		Provider:          provider,
+		ToolRegistry:      reg,
+		Logger:            slog.Default(),
+		MaxTurns:          5,
+		Workspaces:        []string{wsDir},
+		AccessMode:        pb.AccessMode_ACCESS_MODE_WORKSPACE,
+		PermissionHandler: permHandler,
+		ConversationID:    "test-standalone-conv",
+		TrajectoryID:      "test-standalone-traj",
+	})
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "view external log"); err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	if permRequests != 1 {
+		t.Errorf("expected 1 permission request, got %d", permRequests)
+	}
+
+	// Verify extDir is NOT in Workspaces (standalone file, not a git repo)
+	for _, ws := range eng.Workspaces() {
+		if ws == extDir {
+			t.Errorf("did not expect non-repo dir %q to be in eng.Workspaces()", extDir)
+		}
+	}
+
+	// But it should be allowed in wsMgr so ValidatePath succeeds
+	if _, err := wsMgr.ValidatePath(extFile); err != nil {
+		t.Errorf("expected ValidatePath on approved external file to succeed, got err: %v", err)
+	}
+}

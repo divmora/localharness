@@ -18,7 +18,8 @@ lhctl (Interactive TUI / CLI) / SDK ◄── WebSocket + Protobuf ──► Loc
                                                                  │   └── ApprovalQueue (pending approvals buffer)
                                                                  ├── Workspace Trust & Dynamic Workspaces
                                                                  │   ├── First-time trust prompts (~/.divmora/config/settings.json)
-                                                                 │   └── /workspace add, remove, list with rule reloading
+                                                                 │   ├── /workspace add, list with rule reloading
+                                                                 │   └── Dynamic Repository Auto-Promotion & Context-Approved Paths
                                                                  ├── Built-in Tools
                                                                  │   ├── view_file, write_to_file, replace_file_content
                                                                  │   ├── list_dir, grep_search, find_file

@@ -62,7 +62,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	// Validate working directory
 	cwd := rc.Cwd
 	if cwd != "" {
-		validCwd, err := r.ValidatePath(cwd)
+		validCwd, err := r.ValidatePathContext(ctx, cwd)
 		if err != nil {
 			return errors.Wrap(err, errors.ErrCodeWorkspaceValidation,
 				"invalid working directory").
