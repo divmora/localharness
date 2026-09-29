@@ -131,7 +131,6 @@ func DenyAll() Policy {
 var ReadOnlyTools = map[string]bool{
 	"view_file":   true,
 	"grep_search": true,
-	"find_file":   true,
 	"finish":      true,
 }
 
@@ -141,7 +140,6 @@ var FileTools = map[string]bool{
 	"write_to_file":        true,
 	"replace_file_content": true,
 	"grep_search":          true,
-	"find_file":            true,
 }
 
 // ConfirmRunCommand is the default policy: deny run_command and manage_task,

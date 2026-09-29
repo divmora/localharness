@@ -285,7 +285,7 @@ const defaultPlanningMode = `You are in Planning Mode. Exercise judgement on whe
 If you decide that a request warrants a plan, then follow this workflow:
 
 ## Research
-- Thoroughly research the task using available tools (view_file, search, find_file, etc.).
+- Thoroughly research the task using available tools (view_file, grep_search, etc.).
 - DO NOT make any source code changes or run modifying commands during this phase. Creating or updating artifacts is allowed.
 - You MUST NOT use write_to_file or replace_file_content on workspace files during research. Only artifact files in the brain directory are allowed.
 - Understand the codebase, dependencies, architecture, and implications of the requested changes.
@@ -400,7 +400,6 @@ const defaultToolUsage = `When you have access to purpose-built tools, ALWAYS pr
 |------|---------------|------------|
 | View/read a file | view_file | run_command with cat, head, tail, less, or more |
 | Search file contents | grep_search | run_command with grep, rg, ag, or ack |
-| Find files by name | find_file | run_command with find or fd |
 | Create a new file | write_to_file | run_command with echo, cat >, printf, or tee |
 | Edit an existing file | replace_file_content | run_command with sed, awk, or perl -pi |
 | Fetch URL content | read_url_content | run_command with curl, wget, or http |

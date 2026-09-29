@@ -101,7 +101,7 @@ type Engine struct {
 	brainDir                     string                     // For child engine tracing
 	appDataDir                   string                     // Root data dir (for subagent inheritance)
 	enablePlanningMode           bool                       // Planning guard: block workspace writes until plan exists
-	researchToolCount            atomic.Int32               // Tracks research tool calls (view_file, search_dir, find_file)
+	researchToolCount            atomic.Int32               // Tracks research tool calls (view_file, grep_search)
 	hostToolHandler              HostToolHandler            // Called for SDK-registered tools
 	hostToolNames                map[string]bool            // Fast lookup of host tool names
 	hostToolDecls                []llm.FunctionDeclaration  // Host tool schemas for LLM
@@ -2383,7 +2383,7 @@ func (e *Engine) executeMCPTool(ctx context.Context, tc llm.ToolCall, step *pb.S
 // isReadOnlyFileTool returns true if the tool reads or lists files/directories.
 func isReadOnlyFileTool(toolName string) bool {
 	switch toolName {
-	case "view_file", "grep_search", "find_file", "find_by_name":
+	case "view_file", "grep_search", "find_by_name":
 		return true
 	default:
 		return false
@@ -2669,7 +2669,7 @@ func generateDiffPreview(tc llm.ToolCall) string {
 // Returns (true, reason) if the tool call should be blocked.
 //
 // Uses a research heuristic to avoid blocking simple fixes:
-//   - Tracks research tool calls (view_file, grep_search, find_file)
+//   - Tracks research tool calls (view_file, grep_search)
 //   - Only blocks workspace writes after 2+ research calls without a plan
 //   - If the agent goes straight to replace_file_content without researching, it's a
 //     simple fix and the guard stays out of the way
@@ -2682,7 +2682,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 
 	// Track research tool calls
 	switch tc.Name {
-	case "view_file", "grep_search", "find_file":
+	case "view_file", "grep_search":
 		e.researchToolCount.Add(1)
 		return false, ""
 	}
@@ -2773,11 +2773,6 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 		action := &pb.ActionGrepSearch{}
 		_ = json.Unmarshal(argsJSON, action)
 		step.Action = &pb.StepUpdate_GrepSearch{GrepSearch: action}
-
-	case "find_file":
-		action := &pb.ActionFindFile{}
-		_ = json.Unmarshal(argsJSON, action)
-		step.Action = &pb.StepUpdate_FindFile{FindFile: action}
 
 	case "run_command":
 		action := &pb.ActionRunCommand{}

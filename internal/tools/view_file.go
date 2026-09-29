@@ -23,7 +23,7 @@ func registerViewFile(r *Registry) {
 			"Use this instead of run_command with cat, head, tail, or less. " +
 			"Lines are 1-indexed. You can view at most 800 lines per call. " +
 			"IMPORTANT: To minimize context usage, prefer targeted reads by specifying start_line and end_line " +
-			"instead of reading the entire file. Use grep_search or find_file to locate relevant sections first, " +
+			"instead of reading the entire file. Use grep_search to locate relevant sections first, " +
 			"then read only the lines you need. Only omit start_line/end_line when you genuinely need the full file. " +
 			"Supports text files and detects binary files (returns metadata only for binaries).",
 		Parameters: map[string]interface{}{

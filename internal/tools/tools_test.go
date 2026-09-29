@@ -131,7 +131,7 @@ func TestRegisterBuiltinToolsDefault(t *testing.T) {
 	reg, _ := testRegistry(t)
 
 	// Default config enables all except run_command
-	expectedTools := []string{"view_file", "write_to_file", "replace_file_content", "grep_search", "find_file", "finish", "schedule", "ask_question"}
+	expectedTools := []string{"view_file", "write_to_file", "replace_file_content", "grep_search", "finish", "schedule", "ask_question"}
 	for _, name := range expectedTools {
 		if !reg.HasTool(name) {
 			t.Errorf("expected tool %q to be registered", name)
@@ -149,14 +149,13 @@ func TestRegisterBuiltinToolsAllEnabled(t *testing.T) {
 		CreateFile: true,
 		EditFile:   true,
 		SearchDir:  true,
-		FindFile:   true,
 		RunCommand: true,
 		Finish:     true,
 	}
 
 	reg, _ := testRegistryWithConfig(t, cfg)
 
-	allTools := []string{"view_file", "write_to_file", "replace_file_content", "grep_search", "find_file", "run_command", "finish"}
+	allTools := []string{"view_file", "write_to_file", "replace_file_content", "grep_search", "run_command", "finish"}
 	for _, name := range allTools {
 		if !reg.HasTool(name) {
 			t.Errorf("expected tool %q to be registered", name)
@@ -981,111 +980,6 @@ func TestEditFileNoChunks(t *testing.T) {
 	}
 }
 
-// ─── List Dir Tests ──────────────────────────────────────────────────────
-
-// ─── Find File Tests ─────────────────────────────────────────────────────
-
-func TestFindFile(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	// Create test file structure
-	_ = os.WriteFile(filepath.Join(wsDir, "main.go"), []byte("package main"), 0644)
-	_ = os.MkdirAll(filepath.Join(wsDir, "pkg"), 0755)
-	_ = os.WriteFile(filepath.Join(wsDir, "pkg", "util.go"), []byte("package pkg"), 0644)
-	_ = os.WriteFile(filepath.Join(wsDir, "readme.md"), []byte("# Readme"), 0644)
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_FindFile{
-			FindFile: &pb.ActionFindFile{
-				Pattern: "*.go",
-				Path:    wsDir,
-			},
-		},
-	}
-
-	err := reg.Execute(ctx, "find_file", step)
-	if err != nil {
-		t.Fatalf("find_file failed: %v", err)
-	}
-
-	ff := step.GetFindFile()
-	if len(ff.Matches) < 2 {
-		t.Errorf("expected at least 2 .go files, got %d", len(ff.Matches))
-	}
-}
-
-func TestFindFileMissingPattern(t *testing.T) {
-	reg, wsDir := testRegistry(t)
-	ctx := context.Background()
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_FindFile{
-			FindFile: &pb.ActionFindFile{
-				Pattern: "",
-				Path:    wsDir,
-			},
-		},
-	}
-
-	err := reg.Execute(ctx, "find_file", step)
-	if err == nil {
-		t.Error("find_file should error with empty pattern")
-	}
-}
-
-func TestFindFileMissingPath(t *testing.T) {
-	reg, _ := testRegistry(t)
-	ctx := context.Background()
-
-	step := &pb.StepUpdate{
-		Action: &pb.StepUpdate_FindFile{
-			FindFile: &pb.ActionFindFile{
-				Pattern: "*.go",
-				Path:    "",
-			},
-		},
-	}
-
-	err := reg.Execute(ctx, "find_file", step)
-	if err == nil {
-		t.Error("find_file should error with empty path")
-	}
-}
-
-func BenchmarkFindFile(b *testing.B) {
-	wsDir := b.TempDir()
-	wsMgr, _ := workspace.NewManager([]string{wsDir})
-	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	reg := NewRegistry(wsMgr, logger)
-	RegisterBuiltinTools(reg, nil)
-
-	// Create 20 dirs with 20 files each
-	for i := 0; i < 20; i++ {
-		sub := filepath.Join(wsDir, fmt.Sprintf("dir_%d", i))
-		_ = os.MkdirAll(sub, 0755)
-		for j := 0; j < 20; j++ {
-			_ = os.WriteFile(filepath.Join(sub, fmt.Sprintf("file_%d.go", j)), []byte("package main"), 0644)
-		}
-	}
-
-	ctx := context.Background()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		step := &pb.StepUpdate{
-			Action: &pb.StepUpdate_FindFile{
-				FindFile: &pb.ActionFindFile{
-					Pattern: "*.go",
-					Path:    wsDir,
-				},
-			},
-		}
-		if err := reg.Execute(ctx, "find_file", step); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // ─── Search Dir Tests ────────────────────────────────────────────────────
 
 func TestSearchDir(t *testing.T) {
@@ -1816,43 +1710,6 @@ func TestParseRipgrepLine(t *testing.T) {
 	winFileMatch := parseRipgrepLine(`C:\project\main.go`, false)
 	if winFileMatch == nil || winFileMatch.Filename != `C:\project\main.go` {
 		t.Errorf("expected C:\\project\\main.go, got %v", winFileMatch)
-	}
-}
-
-func TestNativeFindFile_HonorsGitIgnoreAndMaxResults(t *testing.T) {
-	wsDir := t.TempDir()
-	ctx := context.Background()
-
-	_ = os.WriteFile(filepath.Join(wsDir, "file1.go"), []byte("package main"), 0644)
-	_ = os.WriteFile(filepath.Join(wsDir, "file2.go"), []byte("package main"), 0644)
-	_ = os.WriteFile(filepath.Join(wsDir, "file3.go"), []byte("package main"), 0644)
-	_ = os.WriteFile(filepath.Join(wsDir, "secret.go"), []byte("package main"), 0644)
-	_ = os.MkdirAll(filepath.Join(wsDir, "ignored_dir"), 0755)
-	_ = os.WriteFile(filepath.Join(wsDir, "ignored_dir", "file4.go"), []byte("package main"), 0644)
-
-	_ = os.WriteFile(filepath.Join(wsDir, ".gitignore"), []byte("secret.go\nignored_dir/\n"), 0644)
-
-	// Test maxResults early termination
-	matches, err := nativeFindFile(ctx, "*.go", wsDir, 2)
-	if err != nil {
-		t.Fatalf("nativeFindFile failed: %v", err)
-	}
-	if len(matches) != 2 {
-		t.Errorf("expected early exit with exactly 2 matches, got %d", len(matches))
-	}
-
-	// Test gitignore honoring without hitting maxResults
-	matchesAll, err := nativeFindFile(ctx, "*.go", wsDir, 100)
-	if err != nil {
-		t.Fatalf("nativeFindFile failed: %v", err)
-	}
-	if len(matchesAll) != 3 {
-		t.Fatalf("expected 3 matches (file1, file2, file3), got %d: %v", len(matchesAll), matchesAll)
-	}
-	for _, m := range matchesAll {
-		if strings.Contains(m, "secret.go") || strings.Contains(m, "ignored_dir") {
-			t.Errorf("unexpected ignored file found: %s", m)
-		}
 	}
 }
 

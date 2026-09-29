@@ -52,10 +52,10 @@ func TestToolCallRecovery_SimplifiedStyle(t *testing.T) {
 }
 
 func TestToolCallRecovery_MultipleCalls(t *testing.T) {
-	knownTools := map[string]bool{"view_file": true, "find_file": true}
+	knownTools := map[string]bool{"view_file": true, "grep_search": true}
 	content := `I'll look at these files:
 {"name": "view_file", "parameters": {"path": "/a.go"}}
-{"name": "find_file", "parameters": {"path": "/src"}}
+{"name": "grep_search", "parameters": {"path": "/src"}}
 Let me check.`
 
 	calls, remaining := tryExtractToolCallsFromText(content, knownTools, testLogger)
@@ -66,8 +66,8 @@ Let me check.`
 	if calls[0].Name != "view_file" {
 		t.Errorf("expected first call 'view_file', got %q", calls[0].Name)
 	}
-	if calls[1].Name != "find_file" {
-		t.Errorf("expected second call 'find_file', got %q", calls[1].Name)
+	if calls[1].Name != "grep_search" {
+		t.Errorf("expected second call 'grep_search', got %q", calls[1].Name)
 	}
 	if calls[0].ID != "recovered_call_0" || calls[1].ID != "recovered_call_1" {
 		t.Errorf("unexpected IDs: %q, %q", calls[0].ID, calls[1].ID)

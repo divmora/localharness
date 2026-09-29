@@ -59,7 +59,7 @@ type ToolSelectorConfig struct {
 //	// Static: only allow read tools for research tasks
 //	selector := middleware.NewToolSelector(middleware.ToolSelectorConfig{
 //	    Mode:  middleware.ToolSelectorAllow,
-//	    Tools: []string{"view_file", "grep_search", "find_file"},
+//	    Tools: []string{"view_file", "grep_search"},
 //	    Reason: "This is a read-only research task.",
 //	})
 //
@@ -68,7 +68,7 @@ type ToolSelectorConfig struct {
 //	    Dynamic: func(prompt string) (middleware.ToolSelectorMode, []string, string) {
 //	        if strings.Contains(prompt, "read only") {
 //	            return middleware.ToolSelectorAllow,
-//	                []string{"view_file", "grep_search", "find_file"},
+//	                []string{"view_file", "grep_search"},
 //	                "User requested read-only mode"
 //	        }
 //	        return 0, nil, "" // No guidance
@@ -200,7 +200,7 @@ func (t *ToolSelector) resolveConfig(prompt string) (ToolSelectorMode, []string,
 var (
 	// ReadOnlyTools is the set of tools that only read data.
 	ReadOnlyTools = []string{
-		"view_file", "grep_search", "find_file",
+		"view_file", "grep_search",
 		"search_web", "read_url_content",
 	}
 

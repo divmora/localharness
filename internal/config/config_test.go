@@ -24,9 +24,6 @@ func TestDefaultBuiltinTools(t *testing.T) {
 	if !cfg.SearchDir {
 		t.Error("SearchDir should be enabled by default")
 	}
-	if !cfg.FindFile {
-		t.Error("FindFile should be enabled by default")
-	}
 	if !cfg.Finish {
 		t.Error("Finish should be enabled by default")
 	}

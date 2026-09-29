@@ -21,9 +21,9 @@ func main() {
 	// Configure subagents to enable testing them
 	cfg.SubagentTypes = []adk.SubagentTypeDef{
 		{
-			Name:         "file_lister",
-			Description:  "A subagent that can list files and directories.",
-			SystemPrompt: "You are a subagent that lists files. You have access to find_file.",
+			Name:         "code_researcher",
+			Description:  "A subagent that researches code.",
+			SystemPrompt: "You are a subagent that researches code. You have access to view_file and grep_search.",
 		},
 	}
 
