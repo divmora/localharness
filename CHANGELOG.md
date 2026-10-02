@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.6.0](https://github.com/divmora/localharness/compare/v0.5.0...v0.6.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** remove grep_search tool and fix ollama tool call recovery
+* **tools:** remove find_file tool in favor of run_command
+* **tools:** remove multi_replace_file_content tool
+* **tools:** remove list_dir tool in favor of run_command
+
+### Features
+
+* **daemon:** auto-prune empty crashed sessions on daemon startup ([749dc61](https://github.com/divmora/localharness/commit/749dc619d6ea8d3bb22b9322149d16556524fc84))
+* **tools:** align tool schemas to AGY spec, add generate_image, and harden permission handling ([d823aa5](https://github.com/divmora/localharness/commit/d823aa56678b6a6198c9f857d02227b08f02e27c))
+* **tools:** remove find_file tool in favor of run_command ([57a0f04](https://github.com/divmora/localharness/commit/57a0f04d904d56f1495206ead11fb9f6ecda9df9))
+* **tools:** remove grep_search tool and fix ollama tool call recovery ([8501667](https://github.com/divmora/localharness/commit/85016675036bf15688001c76c0173480a49ddb54))
+* **tools:** remove list_dir tool in favor of run_command ([5686fda](https://github.com/divmora/localharness/commit/5686fda2c92e3b78ea4f602f90a7d5a38fbaec72))
+* **tools:** remove multi_replace_file_content tool ([283d984](https://github.com/divmora/localharness/commit/283d98406dc1d7eeea958a2c902f14cc8f337e90))
+
+
+### Bug Fixes
+
+* **tools:** align ask_question required schema and expand 14-tool AGY order test ([0ec18a7](https://github.com/divmora/localharness/commit/0ec18a742fa959986d629897deaa427a3f5c7371))
+
 ## [0.5.0](https://github.com/divmora/localharness/compare/v0.4.0...v0.5.0) (2026-09-29)
 
 
