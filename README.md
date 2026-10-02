@@ -7,7 +7,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/divmora/localharness)](go.mod)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/divmora/localharness)
 
-**An Agent Runtime Engine** — a Go binary that runs a complete agentic loop: receives user prompts via WebSocket, calls Gemini, dispatches built-in tools (file I/O, search, shell), and streams structured events back to ADK clients.
+**An Agent Runtime Engine** — a high-performance Go binary that runs a complete agentic loop: receives user prompts via WebSocket, interfaces with LLMs, orchestrates multi-agent subtasks, dispatches built-in tools (file I/O, search, shell, browser, desktop), and streams structured events back to ADK clients and the interactive TUI.
 
 Uses **pipe-based handshake** (stdin/stdout) for secure startup and **WebSocket + Protobuf** for wire protocol.
 
