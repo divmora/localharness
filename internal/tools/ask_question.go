@@ -61,7 +61,6 @@ func registerAskQuestion(r *Registry) {
 				},
 			},
 			"required": []string{
-				"Questions",
 				"ToolSummary",
 				"ToolAction",
 			},

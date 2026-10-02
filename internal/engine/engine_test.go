@@ -479,39 +479,52 @@ func TestBuildToolDeclarations_AGYOrder(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	reg := tools.NewRegistry(wsMgr, logger)
 	tools.RegisterBuiltinTools(reg, &pb.BuiltinToolsConfig{
-		ViewFile:   true,
-		CreateFile: true,
-		EditFile:   true,
-		RunCommand: true,
-		Schedule:   true,
+		ViewFile:      true,
+		CreateFile:    true,
+		EditFile:      true,
+		RunCommand:    true,
+		ManageTask:    true,
+		Schedule:      true,
+		GenerateImage: true,
+		WebSearch:     true,
+		WebFetch:      true,
 	})
 
 	eng := NewEngine(Config{
-		Provider:       &mockProvider{},
-		ToolRegistry:   reg,
-		ConversationID: "test-conv-id",
-		TrajectoryID:   "test-traj-id",
-		AppDataDir:     t.TempDir(),
+		Provider:         &mockProvider{},
+		ToolRegistry:     reg,
+		ConversationID:   "test-conv-id",
+		TrajectoryID:     "test-traj-id",
+		AppDataDir:       t.TempDir(),
+		SubagentsEnabled: true,
 	})
 
+	expected14 := []string{
+		"view_file",
+		"run_command",
+		"manage_task",
+		"send_message",
+		"schedule",
+		"invoke_subagent",
+		"define_subagent",
+		"manage_subagents",
+		"write_to_file",
+		"replace_file_content",
+		"generate_image",
+		"read_url_content",
+		"search_web",
+		"ask_question",
+	}
+
 	decls := eng.buildToolDeclarations()
-	if len(decls) < 5 {
-		t.Fatalf("expected at least 5 declarations, got %d", len(decls))
+	if len(decls) < len(expected14) {
+		t.Fatalf("expected at least %d declarations, got %d", len(expected14), len(decls))
 	}
-	if decls[0].Name != "view_file" {
-		t.Errorf("expected view_file at index 0, got %s", decls[0].Name)
-	}
-	if decls[1].Name != "run_command" {
-		t.Errorf("expected run_command at index 1, got %s", decls[1].Name)
-	}
-	if decls[2].Name != "schedule" {
-		t.Errorf("expected schedule at index 2, got %s", decls[2].Name)
-	}
-	if decls[3].Name != "write_to_file" {
-		t.Errorf("expected write_to_file at index 3, got %s", decls[3].Name)
-	}
-	if decls[4].Name != "replace_file_content" {
-		t.Errorf("expected replace_file_content at index 4, got %s", decls[4].Name)
+
+	for i, expectedName := range expected14 {
+		if decls[i].Name != expectedName {
+			t.Errorf("at index %d: expected tool %q, got %q", i, expectedName, decls[i].Name)
+		}
 	}
 }
 

@@ -2368,7 +2368,6 @@ func TestAskQuestion_Schema(t *testing.T) {
 		t.Fatal("expected required slice in schema")
 	}
 	expectedReq := []string{
-		"Questions",
 		"ToolSummary",
 		"ToolAction",
 	}
