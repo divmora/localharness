@@ -10,30 +10,64 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/errors"
+)
+
+const (
+	maxViewLines     = 800
+	maxViewByteChunk = 46080
+	maxBinaryBytes   = 100 * 1024 * 1024 // 100 MB
 )
 
 func registerViewFile(r *Registry) {
 	r.Register("view_file", executeViewFile, ToolSchema{
 		Group: ToolGroupRead,
 		Name:  "view_file",
-		Description: "View the contents of a file from the local filesystem. " +
-			"Use this instead of run_command with cat, head, tail, or less. " +
-			"Lines are 1-indexed. You can view at most 800 lines per call. " +
-			"IMPORTANT: To minimize context usage, prefer targeted reads by specifying start_line and end_line " +
-			"instead of reading the entire file. Locate relevant sections first with grep or rg via run_command, " +
-			"then read only the lines you need. Only omit start_line/end_line when you genuinely need the full file. " +
-			"Supports text files and detects binary files (returns metadata only for binaries).",
+		Description: "View the contents of a file from the local filesystem. This tool supports text files and following binary files: image, pdf, video, audio.\n" +
+			"Text file usage:\n" +
+			"- The lines of the file are 1-indexed\n" +
+			"- You can view at most 800 lines at a time\n" +
+			"- Specify StartLine and EndLine to view the lines of the file using slice notation:\n" +
+			"  - Omit both to view the entire file, or the first 800 lines of the file, whichever is smaller.\n" +
+			"  - Specify StartLine only to view the remaining lines of the file, or the next 800 lines, whichever is smaller\n" +
+			"  - Specify EndLine only to view the remaining preceding lines of the file, or the previous 800 lines, whichever is smaller\n" +
+			"  - Specify both to view a precise line range. This range must be smaller than 800 lines or only the first 800 lines of the range will be shown.\n" +
+			"- Content is limited to 46080 bytes per view. If content is truncated, use the ContentOffset parameter to view the remaining content\n" +
+			"Binary file usage:\n" +
+			"- Do not provide StartLine or EndLine arguments, this tool always returns the entire file\n" +
+			"- Files larger than 100 MB cannot be viewed.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"path":       map[string]interface{}{"type": "string", "description": "Absolute path to the file"},
-				"start_line": map[string]interface{}{"type": "integer", "description": "Start line (1-indexed, inclusive). 0 or omitted = from start."},
-				"end_line":   map[string]interface{}{"type": "integer", "description": "End line (1-indexed, inclusive). 0 or omitted = to end."},
+				"AbsolutePath": map[string]interface{}{
+					"type":        "string",
+					"description": "Path to file to view. Must be an absolute path.",
+				},
+				"ContentOffset": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional. Byte offset into the content. Use this to view content beyond the initial byte limit when the tool output indicates content was truncated.",
+				},
+				"EndLine": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional. Endline to view, 1-indexed, inclusive. When specified, this value must be greater than or equal to StartLine.",
+				},
+				"StartLine": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional. Startline to view, 1-indexed, inclusive. When specified, this value must be less than or equal to EndLine.",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
+				},
 			},
-			"required": []string{"path"},
+			"required": []string{"AbsolutePath", "ToolSummary", "ToolAction"},
 		},
 	})
 }
@@ -83,6 +117,14 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 			WithComponent("view_file")
 	}
 
+	if info.Size() > maxBinaryBytes {
+		return errors.New(errors.ErrCodeToolValidation,
+			"files larger than 100 MB cannot be viewed").
+			WithContext("path", path).
+			WithContext("size_bytes", info.Size()).
+			WithComponent("view_file")
+	}
+
 	// Detect binary files
 	f, err := os.Open(path)
 	if err != nil {
@@ -99,11 +141,15 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	n, _ := f.Read(header)
 	sample := header[:n]
 
+	nowStr := time.Now().Format("2006-01-02T15:04:05-07:00")
+
 	if isBinaryFile(path, sample) {
 		contentType := http.DetectContentType(sample)
-		vf.Content = fmt.Sprintf("[Binary file: %s, size: %d bytes, type: %s]", path, info.Size(), contentType)
-		vf.TotalBytes = info.Size()
 		vf.IsBinary = true
+		vf.MimeType = contentType
+		vf.TotalBytes = info.Size()
+		vf.Content = fmt.Sprintf("Created At: %s\nCompleted At: %s\nFile Path: `file://%s`\nMIME Type: %s\nTotal Bytes: %d\n[Binary file: %s, size: %d bytes]\n",
+			nowStr, nowStr, path, contentType, info.Size(), contentType, info.Size())
 		return nil
 	}
 
@@ -119,30 +165,33 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	startLine := int(vf.StartLine)
 	endLine := int(vf.EndLine)
 
-	if startLine <= 0 {
+	if startLine <= 0 && endLine <= 0 {
 		startLine = 1
-	}
-	// If the LLM accidentally reversed start/end, swap them.
-	if endLine > 0 && startLine > endLine {
-		startLine, endLine = endLine, startLine
-	}
-	// Default endLine if omitted: up to 800 lines from startLine
-	if endLine <= 0 {
-		endLine = startLine + 799
-	}
-	// Enforce 800 line max per read
-	if endLine-startLine+1 > 800 {
-		endLine = startLine + 799
-	}
-	if startLine < 1 {
-		startLine = 1
+		endLine = maxViewLines
+	} else if startLine > 0 && endLine <= 0 {
+		endLine = startLine + maxViewLines - 1
+	} else if endLine > 0 && startLine <= 0 {
+		startLine = endLine - maxViewLines + 1
+		if startLine < 1 {
+			startLine = 1
+		}
+	} else {
+		if startLine > endLine {
+			startLine, endLine = endLine, startLine
+		}
+		if endLine-startLine+1 > maxViewLines {
+			endLine = startLine + maxViewLines - 1
+		}
+		if startLine < 1 {
+			startLine = 1
+		}
 	}
 
 	scanner := bufio.NewScanner(f)
 	// Initial 64KB buffer, grow up to 4MB for long lines
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 
-	var sb strings.Builder
+	var lineBuf bytes.Buffer
 	currentLine := 0
 	actualEndLine := 0
 
@@ -150,10 +199,10 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		currentLine++
 		if currentLine >= startLine && currentLine <= endLine {
 			actualEndLine = currentLine
-			sb.WriteString(strconv.Itoa(currentLine))
-			sb.WriteString(": ")
-			sb.Write(scanner.Bytes())
-			sb.WriteByte('\n')
+			lineBuf.WriteString(strconv.Itoa(currentLine))
+			lineBuf.WriteString(": ")
+			lineBuf.Write(scanner.Bytes())
+			lineBuf.WriteByte('\n')
 		}
 	}
 
@@ -170,24 +219,64 @@ func executeViewFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		actualEndLine = totalLines
 	}
 
+	slicedBytes := lineBuf.Bytes()
+	totalSlicedBytes := len(slicedBytes)
+
+	offset := int(vf.ContentOffset)
+	if offset < 0 {
+		offset = 0
+	}
+
+	var displayBytes []byte
+	truncated := false
+	endOffset := 0
+
+	if offset < totalSlicedBytes {
+		remaining := totalSlicedBytes - offset
+		if remaining > maxViewByteChunk {
+			endOffset = offset + maxViewByteChunk
+			displayBytes = slicedBytes[offset:endOffset]
+			truncated = true
+		} else {
+			endOffset = totalSlicedBytes
+			displayBytes = slicedBytes[offset:]
+			truncated = false
+		}
+	} else if totalSlicedBytes > 0 {
+		offset = totalSlicedBytes
+		endOffset = totalSlicedBytes
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Created At: %s\nCompleted At: %s\nFile Path: `file://%s`\nTotal Lines: %d\nTotal Bytes: %d\n",
+		nowStr, nowStr, path, totalLines, info.Size()))
+
+	if totalLines == 0 {
+		sb.WriteString("Showing lines 0 to 0\nThe above content shows the entire, complete file contents of the requested file.\n")
+	} else if startLine > totalLines {
+		sb.WriteString(fmt.Sprintf("File only has %d lines (requested start_line %d is beyond end of file).\n", totalLines, startLine))
+	} else {
+		sb.WriteString(fmt.Sprintf("Showing lines %d to %d\n", startLine, actualEndLine))
+		if truncated {
+			sb.WriteString(fmt.Sprintf("Content truncated: showing bytes %d-%d of %d. To see more, call this tool again with the same line range and ContentOffset=%d.\n",
+				offset, endOffset, totalSlicedBytes, endOffset))
+		}
+		sb.WriteString("The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.\n")
+		sb.Write(displayBytes)
+
+		if !truncated {
+			if startLine == 1 && actualEndLine == totalLines {
+				sb.WriteString("The above content shows the entire, complete file contents of the requested file.\n")
+			} else {
+				sb.WriteString("The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.\n")
+			}
+		}
+	}
+
 	vf.Content = sb.String()
 	vf.TotalLines = int32(totalLines)
 	vf.TotalBytes = info.Size()
 	vf.IsBinary = false
-
-	// Add partial content indicator so the model knows it got a subset
-	if totalLines > 0 && startLine > totalLines {
-		vf.Content = fmt.Sprintf("File only has %d lines (requested start_line %d is beyond end of file).\n", totalLines, startLine)
-	} else if actualEndLine < totalLines {
-		vf.Content += fmt.Sprintf(
-			"The above content does NOT show the entire file contents. "+
-				"Showing lines %d-%d of %d total. "+
-				"Call view_file again with start_line/end_line to see remaining lines.\n",
-			startLine, actualEndLine, totalLines,
-		)
-	} else if startLine == 1 && actualEndLine == totalLines {
-		vf.Content += "The above content shows the entire, complete file contents of the requested file.\n"
-	}
 
 	return nil
 }

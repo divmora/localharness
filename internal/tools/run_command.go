@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,32 +15,69 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func getRunCommandDescription() string {
+	osName := "mac"
+	if runtime.GOOS == "linux" {
+		osName = "linux"
+	} else if runtime.GOOS == "windows" {
+		osName = "windows"
+	}
+	shellName := "zsh"
+	if runtime.GOOS != "darwin" {
+		shellName = "bash"
+	}
+	return fmt.Sprintf("PROPOSE a command to run on behalf of the user. Operating System: %s. Shell: %s.\n"+
+		"**NEVER PROPOSE A cd COMMAND**.\n"+
+		"If you have this tool, note that you DO have the ability to run commands directly on the USER's system.\n"+
+		"Make sure to specify CommandLine exactly as it should be run in the shell.\n"+
+		"If the step doesn't return the command output, it means that the command was sent to the background as a task. You will receive messages with the command's output as it runs. To interact with a running command, use the manage_task tool. Use `send_input` to send stdin, `kill` to terminate the command, and `status` to check current status. IMPORTANT: Do NOT poll or loop on `status` to wait for completion. The system will automatically notify you with a message when the command finishes. Simply proceed with other work or stop calling tools after launching a command.\n"+
+		"Commands will be run with PAGER=cat. You may want to limit the length of output for commands that usually rely on paging and may contain very long output (e.g. git log, use git log -n <N>).\n"+
+		"IMPORTANT: The Cwd (working directory) MUST be within the user's workspace. Do NOT use /tmp, /home, or any path outside the workspace. If you need a temporary directory, use the scratch/ directory in your artifact directory.",
+		osName, shellName)
+}
+
 func registerRunCommand(r *Registry) {
 	r.Register("run_command", executeRunCommand, ToolSchema{
-		Group: ToolGroupWrite,
-		Name:  "run_command",
-		Description: "Execute a shell command. Only use this when no purpose-built tool covers the task " +
-			"(e.g., running builds, tests, git commands, package managers, linters, or custom scripts). " +
-			"Do NOT use run_command for operations that have dedicated tools: " +
-			"use view_file instead of cat/head/tail, " +
-			"read_url_content instead of curl/wget, write_to_file instead of echo/cat >. " +
-			"The command runs in bash with PAGER=cat set by default. Returns stdout, stderr, and exit code. " +
-			"Commands are subject to a timeout (default 30s). Set background=true to run as a background task (returns task_id). " +
-			"Set persistent=true to run in a persistent terminal that preserves environment across invocations. " +
-			"Prefer non-destructive operations. Avoid rm -rf or similar destructive commands unless the user explicitly instructs it.",
+		Group:       ToolGroupWrite,
+		Name:        "run_command",
+		Description: getRunCommandDescription(),
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"command":              map[string]interface{}{"type": "string", "description": "The shell command to execute"},
-				"cwd":                  map[string]interface{}{"type": "string", "description": "Working directory for the command"},
-				"timeout_ms":           map[string]interface{}{"type": "integer", "description": "Timeout in milliseconds (default: 30000)"},
-				"env":                  map[string]interface{}{"type": "object", "description": "Additional environment variables"},
-				"background":           map[string]interface{}{"type": "boolean", "description": "If true, start as background task and return task_id"},
-				"persistent":           map[string]interface{}{"type": "boolean", "description": "If true, run in a persistent terminal session that preserves env vars"},
-				"terminal_id":          map[string]interface{}{"type": "string", "description": "Reuse an existing persistent terminal by ID"},
-				"wait_ms_before_async": map[string]interface{}{"type": "integer", "description": "Wait this many ms for initial output before promoting to background (used with background=true)"},
+				"CommandLine": map[string]interface{}{
+					"type":        "string",
+					"description": "The exact command line string to execute.",
+				},
+				"Cwd": map[string]interface{}{
+					"type":        "string",
+					"description": "The current working directory for the command",
+				},
+				"IsDaemon": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Set to true for long-running support processes that are meant to keep running in the background indefinitely and are not expected to finish on their own (e.g., dev servers, file watchers, tunnels). Leave false (the default) for normal commands that are expected to terminate.",
+				},
+				"RequestedTerminalID": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional ID of a persistent terminal to reuse. Specify a TerminalID returned from a previous persistent run_command to share its variables. Can only be used when RunPersistent is true. Leave this empty with RunPersistent set to true to create a new persistent terminal.",
+				},
+				"RunPersistent": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Set to true to run this command in a persistent terminal that preserves environment and shell variables between invocations. Returns a TerminalID that can be specified in future run_command calls to share the environment. Note: persistent terminals share variables but are separate bash -c invocations; shell state like working directory, aliases, and functions are not shared.",
+				},
+				"WaitMsBeforeAsync": map[string]interface{}{
+					"type":        "integer",
+					"description": "This specifies the number of milliseconds to wait after starting the command before sending it to the background. If you want the command to complete execution synchronously, set this to a large enough value that you expect the command to complete in that time under ordinary circumstances. If you're starting an interactive or long-running command, set it to a large enough value that it would cause possible failure cases to execute synchronously (e.g. 500ms). Keep the value as small as possible, with a maximum of 10000ms.",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
+				},
 			},
-			"required": []string{"command"},
+			"required": []string{"Cwd", "WaitMsBeforeAsync", "CommandLine", "ToolSummary", "ToolAction"},
 		},
 	})
 }
@@ -79,6 +117,8 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	// Merge context-provided env vars (from subagent/engine) with user-specified env vars
 	mergedEnv := mergeContextEnv(ctx, rc.Env)
 
+	startedAt := time.Now().Format("2006-01-02T15:04:05-07:00")
+
 	// ── Persistent terminal mode ──
 	if rc.Persistent {
 		if r.taskMgr == nil {
@@ -105,19 +145,26 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		if exitCode == -1 {
 			rc.TimedOut = true
 		}
+		completedAt := time.Now().Format("2006-01-02T15:04:05-07:00")
+		rc.FormattedOutput = formatRunCommandOutput(startedAt, completedAt, rc.ExitCode, rc.Stdout, "")
 		return nil
 	}
 
-	// ── Background mode ──
-	if rc.Background {
+	// ── Background / Async mode ──
+	if rc.Background || rc.IsDaemon || (rc.WaitMsBeforeAsync > 0 && r.taskMgr != nil) {
 		if r.taskMgr == nil {
 			return errors.New(errors.ErrCodeToolExecution,
 				"task manager not available for background mode").
 				WithContext("component", "run_command")
 		}
 
+		waitMs := int(rc.WaitMsBeforeAsync)
+		if waitMs <= 0 && (rc.Background || rc.IsDaemon) {
+			waitMs = 500
+		}
+
 		taskID, stdout, logPath, logURI, err := r.taskMgr.StartBackground(
-			ctx, rc.Command, cwd, mergedEnv, int(rc.WaitMsBeforeAsync), step,
+			ctx, rc.Command, cwd, mergedEnv, waitMs, step,
 		)
 		if err != nil {
 			return errors.Wrap(err, errors.ErrCodeToolExecution,
@@ -128,10 +175,24 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 				WithComponent("run_command")
 		}
 
+		completedAt := time.Now().Format("2006-01-02T15:04:05-07:00")
+		snap, err := r.taskMgr.GetTaskStatus(taskID)
+		if err == nil && snap.Status != TaskRunning {
+			// Finished within wait window
+			rc.Stdout = truncateOutput(snap.RecentOutput, 100000)
+			rc.ExitCode = int32(snap.ExitCode)
+			rc.LogPath = logPath
+			rc.LogUri = logURI
+			rc.FormattedOutput = formatRunCommandOutput(startedAt, completedAt, rc.ExitCode, rc.Stdout, "")
+			return nil
+		}
+
+		// Still running as a background task
 		rc.TaskId = taskID
 		rc.Stdout = truncateOutput(stdout, 100000)
 		rc.LogPath = logPath
 		rc.LogUri = logURI
+		rc.FormattedOutput = formatBackgroundTaskOutput(taskID, logURI)
 		return nil
 	}
 
@@ -199,10 +260,7 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		rc.TimedOut = true
 		rc.ExitCode = -1
-		return nil // Timeout is not a tool error, it's a result
-	}
-
-	if err != nil {
+	} else if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			rc.ExitCode = int32(exitErr.ExitCode())
 		} else {
@@ -217,7 +275,36 @@ func executeRunCommand(ctx context.Context, step *pb.StepUpdate, r *Registry) er
 		rc.ExitCode = 0
 	}
 
+	completedAt := time.Now().Format("2006-01-02T15:04:05-07:00")
+	rc.FormattedOutput = formatRunCommandOutput(startedAt, completedAt, rc.ExitCode, rc.Stdout, rc.Stderr)
 	return nil
+}
+
+func formatRunCommandOutput(startedAt, completedAt string, exitCode int32, stdout, stderr string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Created At: %s\nCompleted At: %s\n\nThe command exited with code %d.\n", startedAt, completedAt, exitCode))
+	if stderr != "" && exitCode != 0 {
+		sb.WriteString("Error:\n")
+		sb.WriteString(stderr)
+		if !strings.HasSuffix(stderr, "\n") {
+			sb.WriteByte('\n')
+		}
+	}
+	if stdout != "" {
+		sb.WriteString("Output:\n")
+		sb.WriteString(stdout)
+		if !strings.HasSuffix(stdout, "\n") {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
+func formatBackgroundTaskOutput(taskID, logURI string) string {
+	return fmt.Sprintf("Tool is running as a background task with task id: %s\n"+
+		"Task logs are available at: %s\n"+
+		"YOU MUST TAKE ONE OF THE FOLLOWING TWO ACTIONS: A) either proceed to other relevant work (if any) or, B) simply update the user with a short message (that you have launched the command and will wait for it to finish) and end the turn.\n"+
+		" DO NOTHING ELSE.\n", taskID, logURI)
 }
 
 // truncateOutput caps output length to prevent huge payloads.

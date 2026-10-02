@@ -215,7 +215,7 @@ func (a *Agent) createChildAgent(cfg SubtaskConfig) (*Agent, error) {
 		child.Capabilities.RunCommand = false
 		child.Capabilities.ManageTask = false
 		child.Capabilities.InvokeSubagent = false
-		// Read tools stay enabled (ViewFile, ListDir, SearchDir, FindFile, etc.)
+		// Read tools stay enabled (ViewFile, WebSearch, WebFetch, Schedule, etc.)
 		child.Policies = []policy.Policy{policy.AllowAll()}
 	} else {
 		// Write-enabled: inherit parent's policies

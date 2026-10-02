@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 	"github.com/divmora/localharness/internal/util"
@@ -17,47 +18,82 @@ func registerEditFile(r *Registry) {
 	r.Register("replace_file_content", executeEditFile, ToolSchema{
 		Group: ToolGroupWrite,
 		Name:  "replace_file_content",
-		Description: "Use this tool to edit an existing file by replacing target content with new content. " +
-			"ALWAYS read a file with view_file before modifying it. " +
-			"Use this tool ONLY when making a SINGLE CONTIGUOUS block of edits. " +
-			"To edit multiple, non-adjacent lines of code in the same file, make multiple calls to this tool. " +
-			"Do NOT make multiple parallel calls to this tool for the same file. " +
-			"Each chunk specifies a line range to narrow the search, the exact target text to find, and replacement text.",
+		Description: "Use this tool to edit an existing file. Follow these rules:\n" +
+			"1. Use this tool ONLY when you are making a SINGLE CONTIGUOUS block of edits to the same file (i.e. replacing a single contiguous block of text).\n" +
+			"2. Do NOT make multiple parallel calls to this tool for the same file.\n" +
+			"3. To edit multiple, non-adjacent lines of code in the same file, make multiple calls to this tool.\n" +
+			"4. For the ReplacementChunk, specify StartLine, EndLine, TargetContent and ReplacementContent. StartLine and EndLine should specify a range of lines containing precisely the instances of TargetContent that you wish to edit. To edit a single instance of the TargetContent, the range should be such that it contains that specific instance of the TargetContent and no other instances. In TargetContent, specify the precise lines of code to edit. These lines MUST EXACTLY MATCH text in the existing file content. In ReplacementContent, specify the replacement content for the specified target content. This must be a complete drop-in replacement of the TargetContent, with necessary modifications made.\n" +
+			"5. If you are making multiple edits across a single file, make multiple calls to this tool. DO NOT try to replace the entire existing content with the new content, this is very expensive.\n" +
+			"6. You may not edit file extensions: [.ipynb]",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"path": map[string]interface{}{"type": "string", "description": "Absolute path to the file to edit"},
-				"chunks": map[string]interface{}{
+				"AllowMultiple": map[string]interface{}{
+					"type":        "boolean",
+					"description": "If true, multiple occurrences of 'targetContent' will be replaced by 'replacementContent' if they are found. Otherwise if multiple occurrences are found, an error will be returned.",
+				},
+				"Description": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief, user-facing explanation of what this change did. Focus on non-obvious rationale, design decisions, or important context. Don't just restate what the code does.",
+				},
+				"EndLine": map[string]interface{}{
+					"type":        "integer",
+					"description": "The ending line number of the chunk (1-indexed). Should be at or after the last line containing the target content. Must satisfy StartLine <= EndLine <= number of lines in the file. The target content is searched for within the [StartLine, EndLine] range.",
+				},
+				"Instruction": map[string]interface{}{
+					"type":        "string",
+					"description": "A description of the changes that you are making to the file.",
+				},
+				"ReplacementContent": map[string]interface{}{
+					"type":        "string",
+					"description": "The content to replace the target content with.",
+				},
+				"StartLine": map[string]interface{}{
+					"type":        "integer",
+					"description": "The starting line number of the chunk (1-indexed). Should be at or before the first line containing the target content. Must satisfy 1 <= StartLine <= EndLine. The target content is searched for within the [StartLine, EndLine] range.",
+				},
+				"TargetContent": map[string]interface{}{
+					"type":        "string",
+					"description": "The exact string to be replaced. This must be the exact character-sequence to be replaced, including whitespace. Be very careful to include any leading whitespace otherwise this will not work at all. This must be a unique substring within the file, or else it will error.",
+				},
+				"TargetFile": map[string]interface{}{
+					"type":        "string",
+					"description": "The target file to modify. Must be an absolute path. Always specify the target file as the very first argument.",
+				},
+				"TargetLintErrorIds": map[string]interface{}{
 					"type":        "array",
-					"description": "List of edit chunks",
+					"description": "If applicable, IDs of lint errors this edit aims to fix (they'll have been given in recent IDE feedback). If you believe the edit could fix lints, do specify lint IDs; if the edit is wholly unrelated, do not. A rule of thumb is, if your edit was influenced by lint feedback, include lint IDs. Exercise honest judgement here.",
 					"items": map[string]interface{}{
-						"type": "object",
-						"properties": map[string]interface{}{
-							"start_line":     map[string]interface{}{"type": "integer", "description": "Start line of search range (1-indexed). Narrows where to look for target_content."},
-							"end_line":       map[string]interface{}{"type": "integer", "description": "End line of search range (1-indexed). Narrows where to look for target_content."},
-							"target_content": map[string]interface{}{"type": "string", "description": "Exact text to find and replace"},
-							"replacement":    map[string]interface{}{"type": "string", "description": "Replacement text"},
-							"allow_multiple": map[string]interface{}{"type": "boolean", "description": "Replace all occurrences in range"},
-						},
-						"required": []string{"target_content", "replacement"},
+						"type": "string",
 					},
 				},
-				"artifact_metadata": map[string]interface{}{
-					"type":        "object",
-					"description": "Metadata updates if updating an artifact file, leave blank if not updating an artifact. Should be updated if the content is changing meaningfully.",
-					"properties": map[string]interface{}{
-						"artifact_type":    map[string]interface{}{"type": "string", "description": "Type of artifact: 'implementation_plan', 'walkthrough', 'task', or 'other'."},
-						"summary":          map[string]interface{}{"type": "string", "description": "Description of the artifact contents after edits."},
-						"request_feedback": map[string]interface{}{"type": "boolean", "description": "Set to true to request user feedback on this artifact."},
-					},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
 				},
 			},
-			"required": []string{"path", "chunks"},
+			"required": []string{
+				"TargetFile",
+				"Instruction",
+				"Description",
+				"AllowMultiple",
+				"TargetContent",
+				"ReplacementContent",
+				"StartLine",
+				"EndLine",
+				"ToolSummary",
+				"ToolAction",
+			},
 		},
 	})
 }
 
 func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) error {
+	startTime := time.Now()
 	ef := step.GetReplaceFileContent()
 	if ef == nil {
 		return fmt.Errorf("replace_file_content: missing action")
@@ -65,7 +101,11 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 	path := ef.Path
 	if path == "" {
-		return fmt.Errorf("replace_file_content: path is required")
+		return fmt.Errorf("replace_file_content: TargetFile is required")
+	}
+
+	if strings.HasSuffix(strings.ToLower(path), ".ipynb") {
+		return fmt.Errorf("replace_file_content: editing .ipynb files is not supported")
 	}
 
 	// Workspace validation
@@ -76,8 +116,20 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 	path = validPath
 	ef.Path = path
 
+	if len(ef.Chunks) == 0 && ef.TargetContent != "" {
+		ef.Chunks = []*pb.EditChunk{
+			{
+				StartLine:     ef.StartLine,
+				EndLine:       ef.EndLine,
+				TargetContent: ef.TargetContent,
+				Replacement:   ef.ReplacementContent,
+				AllowMultiple: ef.AllowMultiple,
+			},
+		}
+	}
+
 	if len(ef.Chunks) == 0 {
-		return fmt.Errorf("replace_file_content: at least one chunk is required")
+		return fmt.Errorf("replace_file_content: TargetContent is required")
 	}
 
 	// Read the entire file into a single byte buffer
@@ -262,6 +314,23 @@ func executeEditFile(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		ef.DiffBlock = strings.Join(diffParts, "\n")
 	}
 	ef.Success = true
+
+	var cleanDiffLines []string
+	for _, l := range strings.Split(unifiedDiff, "\n") {
+		if strings.HasPrefix(l, "--- ") || strings.HasPrefix(l, "+++ ") {
+			continue
+		}
+		cleanDiffLines = append(cleanDiffLines, l)
+	}
+	cleanDiff := strings.TrimSpace(strings.Join(cleanDiffLines, "\n"))
+	if cleanDiff == "" {
+		cleanDiff = ef.DiffBlock
+	}
+
+	completedTime := time.Now()
+	timeFormat := "2006-01-02T15:04:05-07:00"
+	ef.FormattedOutput = fmt.Sprintf("Created At: %s\nCompleted At: %s\nThe following changes were made by the replace_file_content tool to: %s. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.\n[diff_block_start]\n%s\n[diff_block_end]\n\nPlease note that the above snippet only shows the MODIFIED lines from the last change. It shows up to 3 lines of unchanged lines before and after the modified lines. The actual file contents may have many more lines not shown.",
+		startTime.Format(timeFormat), completedTime.Format(timeFormat), path, cleanDiff)
 
 	// Save artifact metadata sidecar if provided
 	if ef.ArtifactMetadata != nil {

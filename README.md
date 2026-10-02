@@ -218,6 +218,7 @@ The harness provides a rich set of built-in tools organized into categories:
 | **Code Graph** | `codegraph_search`, `codegraph_find_references`, `codegraph_call_hierarchy`, `codegraph_get_impact`, `codegraph_diff_branches` | AST-level symbol search, call hierarchy, and blast radius in DuckDB ([docs](docs/codegraph.md)) |
 | **Browser** | `browser_*`, `browser_subagent` | Browser automation via Playwright MCP with persistent profiles (`--user-data-dir`), vision bounding boxes, session recordings, and 2FA/CAPTCHA handoff ([docs](docs/browser.md)) |
 | **Desktop** | `desktop_*`, `desktop_subagent` | Native cross-platform desktop automation (macOS, Linux, Windows) with visual screenshots |
+| **Media** | `generate_image` | Generate images or edit existing images via text prompt and save as artifacts |
 
 All file tools enforce **workspace restrictions** — operations outside configured workspace directories are rejected.
 

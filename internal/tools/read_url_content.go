@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	pb "github.com/divmora/localharness/gen/go/localharness/v1"
 )
@@ -27,26 +28,36 @@ var (
 
 func registerWebFetch(r *Registry) {
 	r.Register("read_url_content", executeWebFetch, ToolSchema{
-		Group: ToolGroupRead,
-		Name:  "read_url_content",
-		Description: "Fetch content from a URL via HTTP request. " +
-			"Use this instead of run_command with curl or wget. " +
-			"Converts HTML to clean plain text. No JavaScript execution, no authentication. " +
-			"Use for extracting text from public pages, reading documentation, or processing static content.",
+		Group:       ToolGroupRead,
+		Name:        "read_url_content",
+		Description: "Fetch content from a URL via HTTP request (invisible to USER). Use when: (1) extracting text from public pages, (2) reading static content/documentation, (3) batch processing multiple URLs, (4) speed is important, or (5) no visual interaction needed. Converts HTML to markdown. No JavaScript execution, no authentication. For pages requiring login, JavaScript, or USER visibility, use read_browser_page instead.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"url": map[string]interface{}{
+				"Url": map[string]interface{}{
 					"type":        "string",
-					"description": "The HTTP/HTTPS URL to fetch",
+					"description": "URL to read content from",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
 				},
 			},
-			"required": []string{"url"},
+			"required": []string{
+				"Url",
+				"ToolSummary",
+				"ToolAction",
+			},
 		},
 	})
 }
 
 func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) error {
+	startTime := time.Now()
 	wf := step.GetReadUrlContent()
 	if wf == nil {
 		return fmt.Errorf("read_url_content: missing action")
@@ -54,7 +65,7 @@ func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 	targetURL := wf.Url
 	if targetURL == "" {
-		return fmt.Errorf("read_url_content: url is required")
+		return fmt.Errorf("read_url_content: Url is required")
 	}
 
 	// Validate URL scheme and protect against SSRF
@@ -71,6 +82,11 @@ func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 		}
 		wf.Content = content
 		wf.ContentType = contentType
+
+		completedTime := time.Now()
+		timeFormat := "2006-01-02T15:04:05-07:00"
+		wf.FormattedOutput = fmt.Sprintf("Created At: %s\nCompleted At: %s\n%s",
+			startTime.Format(timeFormat), completedTime.Format(timeFormat), wf.Content)
 		return nil
 	}
 
@@ -128,6 +144,11 @@ func executeWebFetch(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 	wf.Content = content
 	wf.ContentType = contentType
+
+	completedTime := time.Now()
+	timeFormat := "2006-01-02T15:04:05-07:00"
+	wf.FormattedOutput = fmt.Sprintf("Created At: %s\nCompleted At: %s\n%s",
+		startTime.Format(timeFormat), completedTime.Format(timeFormat), wf.Content)
 	return nil
 }
 

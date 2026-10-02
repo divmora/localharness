@@ -110,9 +110,8 @@ func TestValidate_EmptyPolicies_NoWriteTools_Accepted(t *testing.T) {
 	cfg := &LocalAgentConfig{
 		Capabilities: CapabilitiesConfig{
 			ViewFile:  true,
-			ListDir:   true,
-			SearchDir: true,
 			WebSearch: true,
+			WebFetch:  true,
 		},
 		Policies: []policy.Policy{}, // Empty slice
 	}

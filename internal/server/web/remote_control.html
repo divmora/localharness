@@ -1165,10 +1165,6 @@
         toolName = 'view_file';
         summary = action.view_file.absolute_path || '';
         typeClass = 'tool-pill-read';
-      } else if (action.grep_search) {
-        toolName = 'grep_search';
-        summary = action.grep_search.query || '';
-        typeClass = 'tool-pill-read';
       } else if (action.invoke_subagent) {
         toolName = 'subagent';
         summary = action.invoke_subagent.subagents?.[0]?.role || 'child agent';

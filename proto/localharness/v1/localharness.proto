@@ -205,9 +205,6 @@ message StepUpdate {
     ActionViewFile view_file = 20;
     ActionWriteToFile write_to_file = 21;
     ActionReplaceFileContent replace_file_content = 22;
-    ActionListDir list_dir = 23;
-    ActionGrepSearch grep_search = 24;
-    ActionFindFile find_file = 25;
     ActionRunCommand run_command = 26;
     ActionFinish finish = 27;
     ActionHostToolCall host_tool_call = 28;
@@ -226,6 +223,7 @@ message StepUpdate {
     ActionBrowserSubagent browser_subagent = 53;        // Spawn browser subagent
     ActionCodeGraph code_graph = 54;                    // Code graph AST and structural queries
     ActionDesktopSubagent desktop_subagent = 55;        // Spawn desktop computer use subagent
+    ActionGenerateImage generate_image = 56;            // Image generation
   }
 
   // Error details (when state = STATE_ERROR)
@@ -287,13 +285,20 @@ message ActionViewFile {
   string path = 1;
   int32 start_line = 2;    // 1-indexed, inclusive. 0 = from start.
   int32 end_line = 3;      // 1-indexed, inclusive. 0 = to end.
+  int64 content_offset = 4; // Byte offset into content
+
+  // UI Metadata
+  string tool_action = 5;
+  string tool_summary = 6;
 
   // Result (set on STATE_DONE)
   string content = 10;
   int32 total_lines = 11;
   int64 total_bytes = 12;
   bool is_binary = 13;
+  string mime_type = 14;
 }
+
 
 // ArtifactMetadata provides metadata for artifact files (brain directory).
 // Used by create_file and edit_file when operating on conversation artifacts.
@@ -307,6 +312,9 @@ message ArtifactMetadata {
   // When true, signals the artifact needs user review before the agent continues.
   // SDKs can use OnArtifactFeedbackHook to detect this and surface the artifact.
   bool request_feedback = 3;
+
+  // AGY artifact property: true if presented to user, false for scratch/internal files
+  bool user_facing = 4;
 }
 
 // ActionWriteToFile creates a new file on disk.
@@ -320,9 +328,15 @@ message ActionWriteToFile {
   bool is_artifact = 4;
   ArtifactMetadata artifact_metadata = 5;
 
+  bool append = 6;
+  string description = 7;
+  string tool_action = 8;
+  string tool_summary = 9;
+
   // Result
   bool created = 10;
   string diff_block = 11;
+  string formatted_output = 12;
 }
 
 // ActionReplaceFileContent performs targeted edits on an existing file.
@@ -334,9 +348,22 @@ message ActionReplaceFileContent {
   // Artifact metadata (optional, for meaningful updates to artifact files)
   ArtifactMetadata artifact_metadata = 3;
 
+  // Flat fields matching AGY replace_file_content
+  string instruction = 4;
+  string description = 5;
+  bool allow_multiple = 6;
+  string target_content = 7;
+  string replacement_content = 8;
+  int32 start_line = 9;
+  int32 end_line = 12;
+  repeated string target_lint_error_ids = 13;
+  string tool_action = 14;
+  string tool_summary = 15;
+
   // Result
   string diff_block = 10;
   bool success = 11;
+  string formatted_output = 16;
 }
 
 // EditChunk describes a single contiguous replacement in a file.
@@ -346,57 +373,6 @@ message EditChunk {
   string target_content = 3;   // Exact text to find and replace
   string replacement = 4;      // Replacement text
   bool allow_multiple = 5;     // Replace all occurrences in range
-}
-
-// ActionListDir lists directory contents.
-message ActionListDir {
-  // Args
-  string path = 1;
-
-  // Result
-  repeated DirEntry entries = 10;
-}
-
-// DirEntry represents one item in a directory listing.
-message DirEntry {
-  string name = 1;
-  bool is_dir = 2;
-  int64 size_bytes = 3;
-  int32 child_count = 4;      // Recursive count for directories
-}
-
-// ActionGrepSearch performs grep-style search (wraps ripgrep).
-message ActionGrepSearch {
-  // Args
-  string query = 1;
-  string path = 2;
-  bool is_regex = 3;
-  bool case_insensitive = 4;
-  bool match_per_line = 5;
-  repeated string includes = 6;  // Glob patterns (e.g., "*.go")
-  int32 max_results = 7;         // Default: 50
-
-  // Result
-  repeated SearchMatch matches = 10;
-  int32 total_matches = 11;
-  bool truncated = 12;
-}
-
-// SearchMatch is a single grep result.
-message SearchMatch {
-  string filename = 1;
-  int32 line_number = 2;
-  string line_content = 3;
-}
-
-// ActionFindFile finds files by name/pattern.
-message ActionFindFile {
-  // Args
-  string pattern = 1;
-  string path = 2;
-
-  // Result
-  repeated string matches = 10;
 }
 
 // ActionRunCommand executes a shell command.
@@ -412,6 +388,11 @@ message ActionRunCommand {
   bool persistent = 6;              // If true, use a persistent terminal session
   string terminal_id = 7;           // Reuse an existing persistent terminal
   int32 wait_ms_before_async = 8;   // Wait this many ms before promoting to background
+  bool is_daemon = 9;               // Long-running support process
+
+  // UI Metadata
+  string tool_action = 18;
+  string tool_summary = 19;
 
   // Result
   string stdout = 10;
@@ -422,6 +403,7 @@ message ActionRunCommand {
   string assigned_terminal_id = 15; // Terminal ID assigned (when persistent=true)
   string log_path = 16;             // Path to task log file on disk (when background=true)
   string log_uri = 17;              // file:/// URI to task log file (when background=true)
+  string formatted_output = 20;     // Human-readable formatted output for LLM context
 }
 
 // ActionFinish signals task completion with optional structured output.
@@ -463,6 +445,9 @@ message ActionUserQuestion {
 
   // True if the user skipped (did not answer).
   bool skipped = 11;
+  string tool_action = 12;
+  string tool_summary = 13;
+  string formatted_output = 14;
 }
 
 // UserQuestion is a single question in an interactive prompt.
@@ -498,9 +483,14 @@ message ActionManageTask {
   string task_id = 2;    // Required for status/kill/send_input
   string input = 3;      // stdin input for send_input
 
+  // UI Metadata
+  string tool_action = 4;
+  string tool_summary = 5;
+
   // Result
   repeated TaskInfo tasks = 10;     // Populated by "list" and "status"
   bool success = 11;
+  string formatted_output = 12;     // Human-readable formatted output for LLM context
 }
 
 // TaskInfo describes a running or completed background task.
@@ -543,6 +533,11 @@ message ActionInvokeSubagent {
   string child_trajectory_id = 12 [deprecated = true];
   UsageMetadata child_usage = 13 [deprecated = true];
   string error_message = 14;
+
+  // UI Metadata
+  string tool_action = 22;
+  string tool_summary = 23;
+  string formatted_output = 24;
 }
 
 // SubagentInvocation describes a single subagent to launch.
@@ -551,6 +546,7 @@ message SubagentInvocation {
   string role = 2;         // 2-5 word job title (e.g. "Codebase Researcher")
   string prompt = 3;       // Task description for the subagent
   string workspace = 4;    // Workspace mode: "inherit" (default), "branch", "share"
+  string model = 5;        // Model tier: "inherit", "flash_lite", "flash", "pro"
 }
 
 // SubagentLaunchResult reports a successfully launched subagent.
@@ -601,15 +597,21 @@ message ActionDefineSubagent {
   bool enable_write_tools = 4;       // Give write tools (create_file, edit_file, run_command)
   bool enable_mcp_tools = 5;         // Give MCP server tools
   bool enable_subagent_tools = 6;    // Give subagent tools (recursive)
+  string tool_action = 7;
+  string tool_summary = 8;
+  string formatted_output = 9;
 }
 
 // ActionManageSubagents manages active subagent instances.
 message ActionManageSubagents {
   string action = 1;                          // "list", "kill", "kill_all"
   repeated string conversation_ids = 2;       // For "kill" action
+  string tool_action = 3;
+  string tool_summary = 4;
 
   // Result (set on STATE_DONE for "list")
   repeated SubagentInfo active_subagents = 10;
+  string formatted_output = 11;
 }
 
 // SubagentInfo describes an active subagent instance.
@@ -624,15 +626,22 @@ message SubagentInfo {
 message ActionSendMessage {
   string recipient = 1;     // Conversation ID of the recipient
   string message = 2;       // Message content
+  string tool_action = 3;
+  string tool_summary = 4;
+  string formatted_output = 5;
 }
 
 // ActionSearchWeb searches the web for a query.
 message ActionSearchWeb {
   // Args
   string query = 1;
+  string domain = 2;
+  string tool_action = 3;
+  string tool_summary = 4;
 
   // Result
   repeated WebSearchResult results = 10;
+  string formatted_output = 11;
 }
 
 // WebSearchResult represents a single search result.
@@ -646,10 +655,30 @@ message WebSearchResult {
 message ActionReadUrlContent {
   // Args
   string url = 1;
+  string tool_action = 2;
+  string tool_summary = 3;
 
   // Result
   string content = 10;
   string content_type = 11;
+  string formatted_output = 12;
+}
+
+// ActionGenerateImage generates an image or edits existing images based on a text prompt.
+message ActionGenerateImage {
+  // Args
+  string prompt = 1;
+  string image_name = 2;
+  string aspect_ratio = 3;
+  repeated string image_paths = 4;
+  string tool_action = 5;
+  string tool_summary = 6;
+
+  // Result
+  string artifact_path = 10;
+  string mime_type = 11;
+  int64 byte_size = 12;
+  string formatted_output = 13;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -925,9 +954,6 @@ message BuiltinToolsConfig {
   bool view_file = 1;        // default: true
   bool create_file = 2;      // default: true
   bool edit_file = 3;        // default: true
-  bool list_dir = 4 [deprecated = true];         // deprecated: use run_command with ls/find
-  bool search_dir = 5 [deprecated = true];       // deprecated: use run_command with grep/rg
-  bool find_file = 6 [deprecated = true];        // deprecated: use run_command with find
   bool run_command = 7;      // default: false (safety)
   bool finish = 8;           // default: true
   bool manage_task = 9;      // default: false (requires run_command)
@@ -941,6 +967,7 @@ message BuiltinToolsConfig {
   bool send_message = 17;    // default: false (follows invoke_subagent)
   bool code_graph = 18;       // default: true (AST repository code graph & symbol intelligence)
   bool desktop = 19;          // default: false (cross-platform desktop automation & computer use)
+  bool generate_image = 20;   // default: false (image generation)
 }
 
 // ToolConfigs provides per-tool configuration (Phase 2).
@@ -948,9 +975,6 @@ message ToolConfigs {
   ViewFileToolConfig view_file = 1;
   RunCommandToolConfig run_command = 2;
   FileEditToolConfig edit_file = 3;
-  FindToolConfig find_file = 4 [deprecated = true]; // deprecated: find_file removed
-  GrepSearchToolConfig grep_search = 5 [deprecated = true]; // deprecated: grep_search removed
-  ListDirToolConfig list_dir = 6 [deprecated = true]; // deprecated: list_dir removed
   WriteToFileToolConfig write_file = 7;
   WebSearchToolConfig web_search = 8;
   WebFetchToolConfig web_fetch = 9;
@@ -967,15 +991,6 @@ message RunCommandToolConfig {
 }
 message FileEditToolConfig {
   int32 max_chunk_lines = 1;      // Max lines per edit chunk
-}
-message FindToolConfig {
-  int32 max_results = 1;          // Max find results. Default: 100
-}
-message GrepSearchToolConfig {
-  int32 max_results = 1;          // Max search results. Default: 50
-}
-message ListDirToolConfig {
-  int32 max_entries = 1;          // Max entries to return. Default: 500
 }
 message WriteToFileToolConfig {
   int64 max_file_size = 1;        // Max file size in bytes
@@ -1231,6 +1246,16 @@ message ActionSchedule {
   // The notification message when the timer/cron fires.
   string prompt = 4;
 
+  // Early termination condition for one-shot timer: "never", "any", or sender ID.
+  string timer_condition = 5;
+
+  // Whether the cron schedule is an independent standing daemon.
+  bool is_daemon = 6;
+
+  // UI Metadata
+  string tool_action = 7;
+  string tool_summary = 8;
+
   // --- Result fields (populated on STATE_DONE) ---
 
   // The task ID assigned to this schedule (can be used with manage_task to cancel).
@@ -1238,6 +1263,9 @@ message ActionSchedule {
 
   // Whether the schedule was created successfully.
   bool success = 11;
+
+  // Human-readable formatted output for LLM context
+  string formatted_output = 12;
 }
 
 // ActionCodeGraph performs structural queries on the repository code graph.

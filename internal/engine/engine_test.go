@@ -470,6 +470,128 @@ func TestBuildToolDeclarations(t *testing.T) {
 	}
 }
 
+func TestBuildToolDeclarations_AGYOrder(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := tools.NewRegistry(wsMgr, logger)
+	tools.RegisterBuiltinTools(reg, &pb.BuiltinToolsConfig{
+		ViewFile:   true,
+		CreateFile: true,
+		EditFile:   true,
+		RunCommand: true,
+		Schedule:   true,
+	})
+
+	eng := NewEngine(Config{
+		Provider:       &mockProvider{},
+		ToolRegistry:   reg,
+		ConversationID: "test-conv-id",
+		TrajectoryID:   "test-traj-id",
+		AppDataDir:     t.TempDir(),
+	})
+
+	decls := eng.buildToolDeclarations()
+	if len(decls) < 5 {
+		t.Fatalf("expected at least 5 declarations, got %d", len(decls))
+	}
+	if decls[0].Name != "view_file" {
+		t.Errorf("expected view_file at index 0, got %s", decls[0].Name)
+	}
+	if decls[1].Name != "run_command" {
+		t.Errorf("expected run_command at index 1, got %s", decls[1].Name)
+	}
+	if decls[2].Name != "schedule" {
+		t.Errorf("expected schedule at index 2, got %s", decls[2].Name)
+	}
+	if decls[3].Name != "write_to_file" {
+		t.Errorf("expected write_to_file at index 3, got %s", decls[3].Name)
+	}
+	if decls[4].Name != "replace_file_content" {
+		t.Errorf("expected replace_file_content at index 4, got %s", decls[4].Name)
+	}
+}
+
+func TestBuildToolStep_RunCommandAndManageTask_PascalCase(t *testing.T) {
+	eng := &Engine{
+		convID:       "conv-1",
+		trajectoryID: "traj-1",
+	}
+
+	// 1. RunCommand
+	rcCall := llm.ToolCall{
+		ID:   "call-rc",
+		Name: "run_command",
+		Args: map[string]interface{}{
+			"CommandLine":       "git status",
+			"Cwd":               "/repo",
+			"IsDaemon":          true,
+			"WaitMsBeforeAsync": 500,
+			"ToolAction":        "Checking git status",
+			"ToolSummary":       "Git status check",
+		},
+	}
+	step1 := eng.buildToolStep(rcCall, 1)
+	rc := step1.GetRunCommand()
+	if rc == nil {
+		t.Fatal("expected ActionRunCommand")
+	}
+	if rc.Command != "git status" {
+		t.Errorf("expected Command 'git status', got %q", rc.Command)
+	}
+	if rc.Cwd != "/repo" {
+		t.Errorf("expected Cwd '/repo', got %q", rc.Cwd)
+	}
+	if !rc.IsDaemon {
+		t.Errorf("expected IsDaemon true, got false")
+	}
+	if rc.WaitMsBeforeAsync != 500 {
+		t.Errorf("expected WaitMsBeforeAsync 500, got %d", rc.WaitMsBeforeAsync)
+	}
+	if rc.ToolAction != "Checking git status" {
+		t.Errorf("expected ToolAction, got %q", rc.ToolAction)
+	}
+	if rc.ToolSummary != "Git status check" {
+		t.Errorf("expected ToolSummary, got %q", rc.ToolSummary)
+	}
+
+	// 2. ManageTask
+	mtCall := llm.ToolCall{
+		ID:   "call-mt",
+		Name: "manage_task",
+		Args: map[string]interface{}{
+			"Action":      "kill",
+			"TaskId":      "task-42",
+			"Input":       "hello\n",
+			"ToolAction":  "Stopping task",
+			"ToolSummary": "Task termination",
+		},
+	}
+	step2 := eng.buildToolStep(mtCall, 2)
+	mt := step2.GetManageTask()
+	if mt == nil {
+		t.Fatal("expected ActionManageTask")
+	}
+	if mt.Action != "kill" {
+		t.Errorf("expected Action 'kill', got %q", mt.Action)
+	}
+	if mt.TaskId != "task-42" {
+		t.Errorf("expected TaskId 'task-42', got %q", mt.TaskId)
+	}
+	if mt.Input != "hello\n" {
+		t.Errorf("expected Input 'hello\n', got %q", mt.Input)
+	}
+	if mt.ToolAction != "Stopping task" {
+		t.Errorf("expected ToolAction, got %q", mt.ToolAction)
+	}
+	if mt.ToolSummary != "Task termination" {
+		t.Errorf("expected ToolSummary, got %q", mt.ToolSummary)
+	}
+}
+
 // ─── Compaction Tests ────────────────────────────────────────────────────
 
 func TestEstimateTokens(t *testing.T) {
@@ -3548,6 +3670,7 @@ func TestEngine_PermissionCircuitBreaker(t *testing.T) {
 	wsDir := t.TempDir()
 	wsMgr, _ := workspace.NewManager([]string{wsDir})
 	reg := tools.NewRegistry(wsMgr, slog.Default())
+	tools.RegisterBuiltinTools(reg, &pb.BuiltinToolsConfig{RunCommand: true})
 
 	permissionCalls := 0
 	permHandler := func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
@@ -3561,28 +3684,28 @@ func TestEngine_PermissionCircuitBreaker(t *testing.T) {
 			{
 				FinishReason: "tool_calls",
 				ToolCalls: []llm.ToolCall{
-					{ID: "call-1", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create"}},
+					{ID: "call-1", Name: "run_command", Args: map[string]interface{}{"CommandLine": "gh issue create"}},
 				},
 			},
 			// 2nd tool call -> permission requested -> denied (count=2)
 			{
 				FinishReason: "tool_calls",
 				ToolCalls: []llm.ToolCall{
-					{ID: "call-2", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create --title 2"}},
+					{ID: "call-2", Name: "run_command", Args: map[string]interface{}{"CommandLine": "gh issue create --title 2"}},
 				},
 			},
 			// 3rd tool call -> permission requested -> denied (count=3)
 			{
 				FinishReason: "tool_calls",
 				ToolCalls: []llm.ToolCall{
-					{ID: "call-3", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create --title 3"}},
+					{ID: "call-3", Name: "run_command", Args: map[string]interface{}{"CommandLine": "gh issue create --title 3"}},
 				},
 			},
 			// 4th tool call -> circuit breaker TRIPPED! Tool call blocked without calling permHandler!
 			{
 				FinishReason: "tool_calls",
 				ToolCalls: []llm.ToolCall{
-					{ID: "call-4", Name: "run_command", Args: map[string]interface{}{"command": "gh issue create --title 4"}},
+					{ID: "call-4", Name: "run_command", Args: map[string]interface{}{"CommandLine": "gh issue create --title 4"}},
 				},
 			},
 			// 5th: Model produces final text response
@@ -3860,5 +3983,288 @@ func TestEngine_StandaloneExternalFileApproval(t *testing.T) {
 	// But it should be allowed in wsMgr so ValidatePath succeeds
 	if _, err := wsMgr.ValidatePath(extFile); err != nil {
 		t.Errorf("expected ValidatePath on approved external file to succeed, got err: %v", err)
+	}
+}
+
+func TestAskQuestion_PascalCaseAndFormattedOutput(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.Default()
+	reg := tools.NewRegistry(wsMgr, logger)
+	tools.RegisterBuiltinTools(reg, nil)
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-ask-1",
+						Name: "ask_question",
+						Args: map[string]interface{}{
+							"Questions": []interface{}{
+								map[string]interface{}{
+									"Question":      "Which color do you prefer?",
+									"Options":       []interface{}{"Blue", "Red"},
+									"IsMultiSelect": false,
+								},
+							},
+							"ToolAction":  "Asking user preference",
+							"ToolSummary": "User color question",
+						},
+					},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "You selected Blue!",
+			},
+		},
+	}
+
+	questionHandlerCalled := false
+	eng := NewEngine(Config{
+		Provider:     provider,
+		ToolRegistry: reg,
+		Logger:       logger,
+		MaxTurns:     5,
+		Workspaces:   []string{wsDir},
+		QuestionHandler: func(ctx context.Context, req *pb.ActionUserQuestion) (*pb.QuestionResponse, error) {
+			questionHandlerCalled = true
+			if len(req.Questions) != 1 {
+				t.Fatalf("expected 1 question, got %d", len(req.Questions))
+			}
+			if req.Questions[0].Question != "Which color do you prefer?" {
+				t.Errorf("unexpected question text: %q", req.Questions[0].Question)
+			}
+			if len(req.Questions[0].Options) != 2 {
+				t.Errorf("expected 2 options, got %d", len(req.Questions[0].Options))
+			}
+			return &pb.QuestionResponse{
+				RequestId: req.RequestId,
+				Answers: []*pb.QuestionAnswer{
+					{
+						SelectedOptions: []string{"Blue"},
+						Text:            "Blue",
+					},
+				},
+			}, nil
+		},
+		ConversationID: "test-question-conv",
+		TrajectoryID:   "test-question-traj",
+	})
+
+	var userQuestionStep *pb.StepUpdate
+	eng.stepCB = func(step *pb.StepUpdate) {
+		if step.GetUserQuestion() != nil && step.State == pb.StepUpdate_STATE_DONE {
+			userQuestionStep = step
+		}
+	}
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "ask user for color"); err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	if !questionHandlerCalled {
+		t.Fatal("expected QuestionHandler to be invoked")
+	}
+
+	if userQuestionStep == nil {
+		t.Fatal("expected completed user question step")
+	}
+	uq := userQuestionStep.GetUserQuestion()
+	if uq.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput in user question")
+	}
+	if !strings.Contains(uq.FormattedOutput, "Created At:") || !strings.Contains(uq.FormattedOutput, "Completed At:") {
+		t.Errorf("expected timestamps in formatted output, got:\n%s", uq.FormattedOutput)
+	}
+	if !strings.Contains(uq.FormattedOutput, "Which color do you prefer?") || !strings.Contains(uq.FormattedOutput, "Blue") {
+		t.Errorf("expected question and answer in formatted output, got:\n%s", uq.FormattedOutput)
+	}
+}
+
+func TestRejectUnknownTool_BeforePermissionCheck(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.Default()
+	reg := tools.NewRegistry(wsMgr, logger)
+	tools.RegisterBuiltinTools(reg, nil)
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-unknown-1",
+						Name: `{\"name\": \"tool_name\", \"arguments\": {...}}`,
+						Args: map[string]interface{}{},
+					},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Done after unknown tool rejection.",
+			},
+		},
+	}
+
+	permHandlerCalled := false
+	eng := NewEngine(Config{
+		Provider:     provider,
+		ToolRegistry: reg,
+		Logger:       logger,
+		MaxTurns:     5,
+		Workspaces:   []string{wsDir},
+		PermissionHandler: func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+			permHandlerCalled = true
+			return true, "", nil
+		},
+		ConversationID: "test-unknown-conv",
+		TrajectoryID:   "test-unknown-traj",
+	})
+
+	var errorStep *pb.StepUpdate
+	eng.stepCB = func(step *pb.StepUpdate) {
+		if step.State == pb.StepUpdate_STATE_ERROR {
+			errorStep = step
+		}
+	}
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "test unknown tool rejection"); err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	if permHandlerCalled {
+		t.Fatal("PermissionHandler should NEVER be called for unknown tools")
+	}
+
+	if errorStep == nil {
+		t.Fatal("expected an error step for unknown tool")
+	}
+	if errorStep.ErrorInfo == nil || errorStep.ErrorInfo.Code != "UNKNOWN_TOOL" {
+		t.Errorf("expected ErrorInfo.Code = UNKNOWN_TOOL, got %v", errorStep.ErrorInfo)
+	}
+}
+
+func TestEarlyArgumentValidation_BeforePermissionCheck(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.Default()
+	reg := tools.NewRegistry(wsMgr, logger)
+	tools.RegisterBuiltinTools(reg, &pb.BuiltinToolsConfig{
+		RunCommand: true,
+		CreateFile: true,
+		EditFile:   true,
+		ViewFile:   true,
+	})
+
+	provider := &mockProvider{
+		responses: []*llm.GenerateResponse{
+			{
+				FinishReason: "tool_calls",
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call-empty-cmd",
+						Name: "run_command",
+						Args: map[string]interface{}{"command": ""},
+					},
+					{
+						ID:   "call-empty-path",
+						Name: "write_to_file",
+						Args: map[string]interface{}{"content": "hello"},
+					},
+				},
+			},
+			{
+				FinishReason: "stop",
+				Content:      "Done after validation errors.",
+			},
+		},
+	}
+
+	permHandlerCalled := false
+	eng := NewEngine(Config{
+		Provider:     provider,
+		ToolRegistry: reg,
+		Logger:       logger,
+		MaxTurns:     5,
+		Workspaces:   []string{wsDir},
+		PermissionHandler: func(ctx context.Context, req *pb.ActionPermissionRequest) (bool, string, error) {
+			permHandlerCalled = true
+			return true, "", nil
+		},
+		ConversationID: "test-val-conv",
+		TrajectoryID:   "test-val-traj",
+	})
+
+	var errorSteps []*pb.StepUpdate
+	eng.stepCB = func(step *pb.StepUpdate) {
+		if step.State == pb.StepUpdate_STATE_ERROR {
+			errorSteps = append(errorSteps, step)
+		}
+	}
+
+	ctx := context.Background()
+	if err := eng.Run(ctx, "test early validation"); err != nil {
+		t.Fatalf("eng.Run failed: %v", err)
+	}
+
+	if permHandlerCalled {
+		t.Fatal("PermissionHandler should NEVER be called for tool calls missing mandatory arguments")
+	}
+
+	if len(errorSteps) < 2 {
+		t.Fatalf("expected at least 2 error steps, got %d", len(errorSteps))
+	}
+	for _, es := range errorSteps[:2] {
+		if es.ErrorInfo == nil || es.ErrorInfo.Code != "TOOL_VALIDATION" {
+			t.Errorf("expected ErrorInfo.Code = TOOL_VALIDATION, got %v", es.ErrorInfo)
+		}
+	}
+}
+
+func TestBuildToolStep_RawAndXMLExtraction(t *testing.T) {
+	eng := &Engine{}
+
+	// 1. Raw truncated JSON recovery
+	tc1 := llm.ToolCall{
+		Name: "write_to_file",
+		Args: map[string]interface{}{
+			"raw": `{"TargetFile": "/tmp/test.go", "CodeContent": "package main`,
+		},
+	}
+	step1 := eng.buildToolStep(tc1, 1)
+	wf1 := step1.GetWriteToFile()
+	if wf1 == nil || wf1.Path != "/tmp/test.go" {
+		t.Errorf("expected write_to_file path /tmp/test.go, got: %v", wf1)
+	}
+
+	// 2. XML tag fallback recovery
+	tc2 := llm.ToolCall{
+		Name: "run_command",
+		Args: map[string]interface{}{
+			"raw": `<arg_key>command</arg_key><arg_value>go version</arg_value><arg_key>cwd</arg_key><arg_value>/workspace</arg_value>`,
+		},
+	}
+	step2 := eng.buildToolStep(tc2, 2)
+	rc2 := step2.GetRunCommand()
+	if rc2 == nil || rc2.Command != "go version" {
+		t.Errorf("expected run_command Command 'go version', got: %v", rc2)
 	}
 }

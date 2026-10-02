@@ -357,6 +357,14 @@ func (r *Registry) dispatchArtifactFeedback(path, filename string, am *pb.Artifa
 	})
 }
 
+// GetSchema returns the tool schema for a given tool name if registered.
+func (r *Registry) GetSchema(name string) (ToolSchema, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.schemas[name]
+	return s, ok
+}
+
 // Schemas returns registered tool schemas for LLM function calling.
 // Internal tools (harness-only) are excluded — they are not declared to the LLM.
 // Schemas are returned in deterministic alphabetical order to ensure prompt cache stability.
@@ -409,12 +417,6 @@ func GetToolName(step *pb.StepUpdate) string {
 		return "write_to_file"
 	case *pb.StepUpdate_ReplaceFileContent:
 		return "replace_file_content"
-	case *pb.StepUpdate_ListDir:
-		return "list_dir"
-	case *pb.StepUpdate_GrepSearch:
-		return "grep_search"
-	case *pb.StepUpdate_FindFile:
-		return "find_file"
 	case *pb.StepUpdate_RunCommand:
 		return "run_command"
 	case *pb.StepUpdate_ManageTask:
@@ -427,6 +429,20 @@ func GetToolName(step *pb.StepUpdate) string {
 		return "browser_subagent"
 	case *pb.StepUpdate_DesktopSubagent:
 		return "desktop_subagent"
+	case *pb.StepUpdate_GenerateImage:
+		return "generate_image"
+	case *pb.StepUpdate_SearchWeb:
+		return "search_web"
+	case *pb.StepUpdate_ReadUrlContent:
+		return "read_url_content"
+	case *pb.StepUpdate_Schedule:
+		return "schedule"
+	case *pb.StepUpdate_DefineSubagent:
+		return "define_subagent"
+	case *pb.StepUpdate_ManageSubagents:
+		return "manage_subagents"
+	case *pb.StepUpdate_SendMessageAction:
+		return "send_message"
 	case *pb.StepUpdate_HostToolCall:
 		if htc := step.GetHostToolCall(); htc != nil {
 			return htc.ToolName
@@ -476,6 +492,9 @@ func RegisterBuiltinTools(r *Registry, cfg *pb.BuiltinToolsConfig) {
 	}
 	if cfg.Schedule {
 		registerSchedule(r)
+	}
+	if cfg.GenerateImage {
+		registerGenerateImage(r)
 	}
 	if cfg.CodeGraph {
 		registerCodeGraphTools(r)

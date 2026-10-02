@@ -1515,12 +1515,6 @@ func stepTypeFromAction(step *pb.StepUpdate) string {
 		return "CODE_ACTION"
 	case *pb.StepUpdate_ReplaceFileContent:
 		return "CODE_ACTION"
-	case *pb.StepUpdate_ListDir:
-		return "LIST_DIRECTORY"
-	case *pb.StepUpdate_GrepSearch:
-		return "GREP_SEARCH"
-	case *pb.StepUpdate_FindFile:
-		return "FIND_FILE"
 	case *pb.StepUpdate_RunCommand:
 		return "RUN_COMMAND"
 	case *pb.StepUpdate_ManageTask:
@@ -1577,16 +1571,6 @@ func extractToolCall(step *pb.StepUpdate) *conversation.TranscriptToolCall {
 	case *pb.StepUpdate_ReplaceFileContent:
 		tc.Name = "edit_file"
 		args["path"] = a.ReplaceFileContent.Path
-	case *pb.StepUpdate_ListDir:
-		tc.Name = "list_dir"
-		args["path"] = a.ListDir.Path
-	case *pb.StepUpdate_GrepSearch:
-		tc.Name = "grep_search"
-		args["path"] = a.GrepSearch.Path
-		args["query"] = a.GrepSearch.Query
-	case *pb.StepUpdate_FindFile:
-		tc.Name = "find_file"
-		args["pattern"] = a.FindFile.Pattern
 	case *pb.StepUpdate_RunCommand:
 		tc.Name = "run_command"
 		args["command"] = truncate(a.RunCommand.Command, 200)
@@ -1652,13 +1636,6 @@ func extractStepContent(step *pb.StepUpdate) string {
 			return fmt.Sprintf("Edited %s\n%s", a.ReplaceFileContent.Path, truncate(a.ReplaceFileContent.DiffBlock, 1500))
 		}
 		return fmt.Sprintf("Edit %s", a.ReplaceFileContent.Path)
-	case *pb.StepUpdate_ListDir:
-		return fmt.Sprintf("Listed %s (%d entries)", a.ListDir.Path, len(a.ListDir.Entries))
-	case *pb.StepUpdate_GrepSearch:
-		return fmt.Sprintf("Searched %s for %q (%d matches)",
-			a.GrepSearch.Path, a.GrepSearch.Query, a.GrepSearch.TotalMatches)
-	case *pb.StepUpdate_FindFile:
-		return fmt.Sprintf("Find %q (%d matches)", a.FindFile.Pattern, len(a.FindFile.Matches))
 	case *pb.StepUpdate_RunCommand:
 		rc := a.RunCommand
 		parts := fmt.Sprintf("Command: %s\nExit code: %d", truncate(rc.Command, 200), rc.ExitCode)

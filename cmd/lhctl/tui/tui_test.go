@@ -261,7 +261,7 @@ func TestSubagentViewManager(t *testing.T) {
 		t.Errorf("expected 1 running subagent, got %d", mgr.RunningCount())
 	}
 
-	mgr.AppendTranscript("sub-1", "Step 1: grep_search")
+	mgr.AppendTranscript("sub-1", "Step 1: run_command")
 	mgr.SelectDrillDown()
 
 	if !mgr.IsDrillDown() {
@@ -269,7 +269,7 @@ func TestSubagentViewManager(t *testing.T) {
 	}
 
 	renderedTranscript := mgr.Render(80, 24)
-	if !strings.Contains(renderedTranscript, "Step 1: grep_search") {
+	if !strings.Contains(renderedTranscript, "Step 1: run_command") {
 		t.Errorf("expected transcript line in render: %s", renderedTranscript)
 	}
 

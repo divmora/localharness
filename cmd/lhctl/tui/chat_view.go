@@ -126,11 +126,11 @@ func inferSemanticAction(toolName string) SemanticAction {
 	switch {
 	case lower == "view_file" || lower == "read_url_content" || strings.HasPrefix(lower, "read_"):
 		return ActionRead
-	case lower == "grep_search" || lower == "search_web" || strings.Contains(lower, "search"):
+	case lower == "search_web" || strings.Contains(lower, "search"):
 		return ActionSearch
-	case lower == "find_file" || lower == "list_dir" || strings.HasPrefix(lower, "find_") || strings.HasPrefix(lower, "list_"):
+	case strings.HasPrefix(lower, "find_") || strings.HasPrefix(lower, "list_"):
 		return ActionFind
-	case lower == "write_to_file" || lower == "replace_file_content" || lower == "multi_replace_file_content" || strings.HasPrefix(lower, "write_") || strings.HasPrefix(lower, "edit_"):
+	case lower == "write_to_file" || lower == "replace_file_content" || strings.HasPrefix(lower, "write_") || strings.HasPrefix(lower, "edit_"):
 		return ActionWrite
 	case lower == "run_command" || lower == "execute_command" || lower == "bash" || lower == "sh":
 		return ActionRun

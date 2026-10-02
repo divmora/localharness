@@ -1444,7 +1444,7 @@ func (m *Model) handleServerEvent(srvMsg *pb.ServerMessage) tea.Cmd {
 				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
 				return nil
 			}
-			if m.mode == ModeAcceptEdits && (pr.ToolName == "write_to_file" || pr.ToolName == "replace_file_content" || pr.ToolName == "multi_replace_file_content") {
+			if m.mode == ModeAcceptEdits && (pr.ToolName == "write_to_file" || pr.ToolName == "replace_file_content") {
 				_ = m.client.SendPermissionResponse(pr.RequestId, true, "", pb.PermissionResponse_SCOPE_ONCE)
 				return nil
 			}
@@ -1642,12 +1642,6 @@ func extractActionDetails(step *pb.StepUpdate) (string, string) {
 		return "replace_file_content", a.ReplaceFileContent.Path
 	case *pb.StepUpdate_RunCommand:
 		return "run_command", a.RunCommand.Command
-	case *pb.StepUpdate_ListDir:
-		return "list_dir", a.ListDir.Path
-	case *pb.StepUpdate_GrepSearch:
-		return "grep_search", a.GrepSearch.Query
-	case *pb.StepUpdate_FindFile:
-		return "find_file", a.FindFile.Pattern
 	case *pb.StepUpdate_BrowserSubagent:
 		return "browser_subagent", a.BrowserSubagent.Task
 	case *pb.StepUpdate_DesktopSubagent:
@@ -1699,12 +1693,6 @@ func extractActionResult(step *pb.StepUpdate) (string, string, string) {
 			return "view_file", "", fmt.Sprintf("%d lines", a.ViewFile.TotalLines)
 		}
 		return "view_file", "", "ok"
-	case *pb.StepUpdate_ListDir:
-		return "list_dir", "", fmt.Sprintf("%d items", len(a.ListDir.Entries))
-	case *pb.StepUpdate_GrepSearch:
-		return "grep_search", "", fmt.Sprintf("%d matches", a.GrepSearch.TotalMatches)
-	case *pb.StepUpdate_FindFile:
-		return "find_file", "", fmt.Sprintf("%d files", len(a.FindFile.Matches))
 	case *pb.StepUpdate_BrowserSubagent:
 		return "browser_subagent", "", a.BrowserSubagent.TaskSummary
 	case *pb.StepUpdate_DesktopSubagent:

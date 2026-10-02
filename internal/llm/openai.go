@@ -423,8 +423,12 @@ func (o *OpenAIProvider) parseResponse(body []byte) (*GenerateResponse, error) {
 		// Parse the arguments JSON string into a map
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-			// If the arguments aren't valid JSON, wrap them
-			args = map[string]interface{}{"raw": tc.Function.Arguments}
+			if repaired, ok := TryRepairJSON(tc.Function.Arguments); ok {
+				args = repaired
+			} else {
+				// If the arguments aren't valid JSON, wrap them
+				args = map[string]interface{}{"raw": tc.Function.Arguments}
+			}
 		}
 
 		resp.ToolCalls = append(resp.ToolCalls, ToolCall{
@@ -707,7 +711,11 @@ func (o *OpenAIProvider) parseOpenAISSEStream(ctx context.Context, body io.Reade
 		var args map[string]interface{}
 		argsStr := acc.ArgsJSON.String()
 		if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-			args = map[string]interface{}{"raw": argsStr}
+			if repaired, ok := TryRepairJSON(argsStr); ok {
+				args = repaired
+			} else {
+				args = map[string]interface{}{"raw": argsStr}
+			}
 		}
 		finalChunk.ToolCalls = append(finalChunk.ToolCalls, ToolCall{
 			ID:   acc.ID,
@@ -800,4 +808,49 @@ type openAIStreamToolCall struct {
 	ID       string         `json:"id,omitempty"`
 	Type     string         `json:"type,omitempty"`
 	Function openAIFunction `json:"function"`
+}
+
+// TryRepairJSON attempts to repair truncated or slightly malformed JSON
+// (e.g. unclosed string quotes or missing closing braces from token limit truncation).
+func TryRepairJSON(s string) (map[string]interface{}, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
+	var res map[string]interface{}
+	if err := json.Unmarshal([]byte(s), &res); err == nil {
+		return res, true
+	}
+
+	// Count unescaped double quotes
+	quotes := 0
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if s[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if s[i] == '"' {
+			quotes++
+		}
+	}
+
+	attempt := s
+	if quotes%2 != 0 {
+		attempt += `"`
+	}
+
+	openBraces := strings.Count(attempt, "{") - strings.Count(attempt, "}")
+	for b := 0; b < openBraces; b++ {
+		attempt += "}"
+	}
+
+	if err := json.Unmarshal([]byte(attempt), &res); err == nil {
+		return res, true
+	}
+	return nil, false
 }

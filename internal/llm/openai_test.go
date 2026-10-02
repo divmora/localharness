@@ -241,3 +241,63 @@ func TestOpenAICustomHeadersAndTimeout(t *testing.T) {
 		t.Errorf("server received header %q, want %q", receivedCustomHeader, "litellm-val")
 	}
 }
+
+func TestTryRepairJSON(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantKey string
+		wantVal string
+		wantOk  bool
+	}{
+		{
+			name:    "valid json",
+			input:   `{"path": "main.go"}`,
+			wantKey: "path",
+			wantVal: "main.go",
+			wantOk:  true,
+		},
+		{
+			name:    "unclosed quote and brace",
+			input:   `{"path": "main.go`,
+			wantKey: "path",
+			wantVal: "main.go",
+			wantOk:  true,
+		},
+		{
+			name:    "unclosed brace only",
+			input:   `{"path": "main.go"`,
+			wantKey: "path",
+			wantVal: "main.go",
+			wantOk:  true,
+		},
+		{
+			name:    "multiple missing braces",
+			input:   `{"outer": {"path": "main.go"`,
+			wantKey: "outer",
+			wantOk:  true,
+		},
+		{
+			name:   "empty string",
+			input:  "",
+			wantOk: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := TryRepairJSON(tt.input)
+			if ok != tt.wantOk {
+				t.Fatalf("TryRepairJSON() ok = %v, want %v", ok, tt.wantOk)
+			}
+			if tt.wantOk && tt.wantKey != "" {
+				if _, exists := got[tt.wantKey]; !exists {
+					t.Errorf("expected key %q in repaired JSON: %v", tt.wantKey, got)
+				}
+				if tt.wantVal != "" && got[tt.wantKey] != tt.wantVal {
+					t.Errorf("expected val %q, got %v", tt.wantVal, got[tt.wantKey])
+				}
+			}
+		})
+	}
+}

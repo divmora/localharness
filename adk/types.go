@@ -374,9 +374,6 @@ type CapabilitiesConfig struct {
 	ViewFile       bool
 	CreateFile     bool
 	EditFile       bool
-	ListDir        bool
-	SearchDir      bool
-	FindFile       bool
 	RunCommand     bool
 	Finish         bool
 	ManageTask     bool
@@ -394,9 +391,6 @@ func DefaultCapabilities() CapabilitiesConfig {
 		ViewFile:       true,
 		CreateFile:     true,
 		EditFile:       true,
-		ListDir:        true,
-		SearchDir:      true,
-		FindFile:       true,
 		RunCommand:     false,
 		Finish:         true,
 		ManageTask:     false,
@@ -411,9 +405,6 @@ func DefaultCapabilities() CapabilitiesConfig {
 func ReadOnlyCapabilities() CapabilitiesConfig {
 	return CapabilitiesConfig{
 		ViewFile:       true,
-		ListDir:        true,
-		SearchDir:      true,
-		FindFile:       true,
 		Finish:         true,
 		InvokeSubagent: false,
 		WebSearch:      true,
@@ -430,9 +421,6 @@ func AllTools() CapabilitiesConfig {
 		ViewFile:       true,
 		CreateFile:     true,
 		EditFile:       true,
-		ListDir:        true,
-		SearchDir:      true,
-		FindFile:       true,
 		RunCommand:     true,
 		Finish:         true,
 		ManageTask:     true,
@@ -459,9 +447,6 @@ func NondestructiveTools() CapabilitiesConfig {
 	return CapabilitiesConfig{
 		ViewFile:   true,
 		CreateFile: true,
-		ListDir:    true,
-		SearchDir:  true,
-		FindFile:   true,
 		Finish:     true,
 		WebSearch:  true,
 		WebFetch:   true,

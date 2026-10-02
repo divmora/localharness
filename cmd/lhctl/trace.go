@@ -144,9 +144,8 @@ func printTraceSummary(entries []traceEntry) {
 	var writeCount int
 
 	writingTools := map[string]bool{
-		"replace_file_content":       true,
-		"multi_replace_file_content": true,
-		"write_to_file":              true,
+		"replace_file_content": true,
+		"write_to_file":        true,
 	}
 
 	for _, e := range entries {
@@ -194,22 +193,13 @@ func extractToolDetail(tc traceToolCall, showCommands bool) string {
 	switch tc.Name {
 	case "view_file":
 		return shortenPath(getString(tc.Args, "path", "AbsolutePath"))
-	case "list_dir":
-		return shortenPath(getString(tc.Args, "path", "DirectoryPath"))
-	case "grep_search":
-		query := getString(tc.Args, "query", "Query")
-		path := shortenPath(getString(tc.Args, "path", "SearchPath"))
-		return fmt.Sprintf("\"%s\" in %s", query, path)
-	case "find_file":
-		pattern := getString(tc.Args, "pattern", "Query")
-		return fmt.Sprintf("pattern=%s", pattern)
 	case "run_command":
 		cmd := getString(tc.Args, "command", "CommandLine")
 		if !showCommands && len(cmd) > 40 {
 			cmd = cmd[:40] + "…"
 		}
 		return cmd
-	case "replace_file_content", "multi_replace_file_content":
+	case "replace_file_content":
 		return shortenPath(getString(tc.Args, "TargetFile", "path"))
 	case "write_to_file":
 		return shortenPath(getString(tc.Args, "TargetFile", "path"))
@@ -279,15 +269,9 @@ func toolIcon(name string) string {
 	switch name {
 	case "view_file":
 		return "📄"
-	case "list_dir":
-		return "📁"
-	case "grep_search":
-		return "🔍"
-	case "find_file":
-		return "🔎"
 	case "run_command":
 		return "⚙️"
-	case "replace_file_content", "multi_replace_file_content":
+	case "replace_file_content":
 		return "✏️"
 	case "write_to_file":
 		return "📝"

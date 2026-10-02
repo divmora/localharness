@@ -67,46 +67,49 @@ Be thorough, precise, and professional — this briefing is delivered directly t
 func defineSubagentDeclaration() llm.FunctionDeclaration {
 	return llm.FunctionDeclaration{
 		Name: "define_subagent",
-		Description: `Defines a new type of subagent that can be invoked via invoke_subagent.
-
-	Guidelines:
-	* Use this tool if you need a specialized subagent for a task and none of the existing subagents are suitable.
-	* Once the subagent is defined, it can be invoked repeatedly using invoke_subagent without calling this tool again.
-	* The subagent will be defined with the specified name, description, system prompt, and tool groups.
-	* By default, all subagents have read tools to research the codebase, and tools to communicate with other agents.`,
+		Description: "\tDefines a new type of subagent that can be invoked via invoke_subagent.\n\n" +
+			"\tGuidelines:\n" +
+			"\t* Use this tool if you need a specialized subagent for a task and none of the existing subagents are suitable.\n" +
+			"\t* Once the subagent is defined, it can be invoked repeatedly using invoke_subagent without calling this tool again.\n" +
+			"\t* The subagent will be defined with the specified name, description, system prompt, and tool groups.\n" +
+			"\t* By default, all subagents have read tools to research the codebase, and tools to communicate with other agents.\n\t",
 		Parameters: map[string]interface{}{
-			"type":     "object",
-			"required": []string{"name", "description", "system_prompt"},
+			"type": "object",
 			"properties": map[string]interface{}{
-				"name": map[string]interface{}{
+				"Description": map[string]interface{}{
 					"type":        "string",
-					"description": "Unique name for this subagent type. Used when invoking via invoke_subagent.",
+					"description": "Human-readable description of what this subagent does and when it should be used.",
 				},
-				"description": map[string]interface{}{
-					"type":        "string",
-					"description": "Human-readable description of what this subagent does.",
-				},
-				"system_prompt": map[string]interface{}{
-					"type":        "string",
-					"description": "System prompt for the subagent. Defines its role, capabilities, and behavior.",
-				},
-				"enable_write_tools": map[string]interface{}{
-					"type":        "boolean",
-					"description": "Set true to enable the subagent to create/edit files and run commands.",
-				},
-				"enable_mcp_tools": map[string]interface{}{
+				"EnableMcpTools": map[string]interface{}{
 					"type":        "boolean",
 					"description": "Set true to enable the subagent to call MCP tools.",
 				},
-				"enable_subagent_tools": map[string]interface{}{
+				"EnableSubagentTools": map[string]interface{}{
 					"type":        "boolean",
-					"description": "Set true to enable the subagent to define and invoke its own subagents.",
+					"description": "Set true to equip the subagent with tools to define and invoke its own subagents",
 				},
-				"default_model": map[string]interface{}{
+				"EnableWriteTools": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Set true to equip the subagent with tools to create and edit files, and run commands.",
+				},
+				"Name": map[string]interface{}{
 					"type":        "string",
-					"description": "Optional default model tier ('inherit', 'flash_lite', 'flash', 'pro') or explicit model name for this subagent type.",
+					"description": "Unique name for the subagent. Used to invoke it via invoke_subagent. Must start with a letter or digit and contain only letters, digits, '_', '-', and '.'.",
+				},
+				"SystemPrompt": map[string]interface{}{
+					"type":        "string",
+					"description": "A detailed system prompt for this subagent.",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
 				},
 			},
+			"required": []string{"Name", "Description", "SystemPrompt", "ToolSummary", "ToolAction"},
 		},
 	}
 }
@@ -115,52 +118,61 @@ func defineSubagentDeclaration() llm.FunctionDeclaration {
 func invokeSubagentDeclaration() llm.FunctionDeclaration {
 	return llm.FunctionDeclaration{
 		Name: "invoke_subagent",
-		Description: `Launch one or more subagents concurrently in the background. Each subagent runs in its own conversation context with a fresh history.
-
-The tool returns immediately with conversation IDs for each launched subagent. You do NOT need to poll — the system will automatically notify you when a subagent completes or sends a message.
-
-Use invoke_subagent when:
-1. A task benefits from a clean context (no history pollution)
-2. Work can be parallelized (e.g., research different areas)
-3. Tasks that might fail without affecting the parent
-4. Delegating specialized work (e.g., "write tests for X")`,
+		Description: "Invokes one or more subagents by name with a single tool call. Each subagent runs in the background with its own prompt and reports back when done.\n\n" +
+			"Specify the Subagents array with one or more entries. Each entry defines a subagent to launch.\n\n" +
+			"Communicate with subagents using the send_message tool. Examples of when to do this:\n" +
+			"* To check on the status of a subagent.\n" +
+			"* To send a running subagent further instructions.\n" +
+			"* To send an idle subagent new instructions.\n\n" +
+			"Guidelines:\n" +
+			"* Each invoked subagent will be uniquely identified by its conversationID.\n" +
+			"* Multiple subagents with the same type name can be invoked, with each subagent receiving a unique conversationID.\n" +
+			"* If a task is a natural continuation of an existing subagent's work, send a message to that subagent with the task rather than invoking a new subagent to conserve resources.\n" +
+			"* When selecting the Model argument, default to 'inherit' unless the user explicitly requests a different model.",
 		Parameters: map[string]interface{}{
-			"type":     "object",
-			"required": []string{"Subagents"},
+			"type": "object",
 			"properties": map[string]interface{}{
 				"Subagents": map[string]interface{}{
 					"type":        "array",
-					"description": "Array of subagents to launch concurrently.",
+					"description": "Array of subagents to invoke. Each entry specifies a separate subagent to launch concurrently.",
 					"items": map[string]interface{}{
-						"type":     "object",
-						"required": []string{"TypeName", "Role", "Prompt"},
+						"type": "object",
 						"properties": map[string]interface{}{
-							"TypeName": map[string]interface{}{
-								"type":        "string",
-								"description": "Name of the subagent type to invoke (from available subagents or define_subagent).",
-							},
-							"Role": map[string]interface{}{
-								"type":        "string",
-								"description": "Brief 2-5 word job title for this subagent instance (e.g., 'Codebase Researcher').",
-							},
-							"Prompt": map[string]interface{}{
-								"type":        "string",
-								"description": "Task description for the subagent. Must be specific and self-contained.",
-							},
 							"Model": map[string]interface{}{
 								"type":        "string",
 								"enum":        []string{"inherit", "flash_lite", "flash", "pro"},
-								"description": "Model tier or name to use. 'inherit' (default) uses the calling agent's model. 'flash_lite' uses a very light model. 'flash' uses a smaller, faster model suited for simple tasks like research lookups, file reading, or quick searches. 'pro' uses a larger, more capable model suited for complex tasks requiring deep reasoning, large refactors, or multi-step planning.",
+								"description": "Model to use for the subagent. 'inherit' (default) uses the calling agent's model. 'flash_lite' uses a very light model. 'flash' uses a smaller, faster model suited for simple tasks like research lookups, file reading, or quick searches. 'pro' uses a larger, more capable model suited for complex tasks requiring deep reasoning, large refactors, or multi-step planning.",
+							},
+							"Prompt": map[string]interface{}{
+								"type":        "string",
+								"description": "A clear, actionable task description for the subagent. Be specific about what the subagent should do and what information it should return.",
+							},
+							"Role": map[string]interface{}{
+								"type":        "string",
+								"description": "A 2-5 word description of the subagent's role. Should read similar to a job title, e.g. 'Codebase Researcher', 'Database Debugger', etc. Should also be detailed enough to distinguish between different subagents who might share similar purposes.",
+							},
+							"TypeName": map[string]interface{}{
+								"type":        "string",
+								"description": "Type name of the subagent to invoke.",
 							},
 							"Workspace": map[string]interface{}{
 								"type":        "string",
-								"enum":        []string{"inherit", "branch", "share"},
-								"description": "Workspace mode for the subagent. 'inherit' (default) uses the same workspace as the parent. 'branch' creates a new isolated workspace branched or cloned from the parent. 'share' creates a new workspace sharing the parent's underlying repository directory.",
+								"description": "Workspace mode for the subagent. 'inherit' (default) uses the same workspace as the parent. 'branch' creates a new isolated workspace branched or cloned from the parent. 'share' creates a new workspace sharing the parent's underlying repository directory (similar to a git worktree or Mercurial 'hg share'), allowing independent branching without duplicating storage. If omitted, defaults to 'inherit'.",
 							},
 						},
+						"required": []string{"TypeName", "Role", "Prompt"},
 					},
 				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
+				},
 			},
+			"required": []string{"Subagents", "ToolSummary", "ToolAction"},
 		},
 	}
 }
@@ -169,29 +181,38 @@ Use invoke_subagent when:
 func manageSubagentsDeclaration() llm.FunctionDeclaration {
 	return llm.FunctionDeclaration{
 		Name: "manage_subagents",
-		Description: `Manage background subagents. Use this tool to list running subagents or interact with them.
-
-Actions:
-- 'list': List all currently running subagents
-- 'kill': Cancel specific subagents by conversation ID
-- 'kill_all': Cancel all running subagents`,
+		Description: "\tManage existing subagents.\n" +
+			"\tActions:\n" +
+			"\t* 'list': List active direct subagents with their conversation IDs and live state. Each subagent is reported as a JSON object with this schema:\n" +
+			"\t{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"properties\":{\"role\":{\"type\":\"string\",\"description\":\"The subagent's role, or its type name if no role was set.\"},\"type\":{\"type\":\"string\",\"description\":\"The subagent's type name.\"},\"conversationId\":{\"type\":\"string\",\"description\":\"The subagent's conversation ID, used to message or kill it.\"},\"transcript\":{\"type\":\"string\",\"description\":\"Absolute URI of the subagent's transcript log, if available.\"},\"state\":{\"type\":\"string\",\"enum\":[\"running\",\"idle\",\"waiting_for_input\",\"waiting_for_dependents\",\"waiting_for_message\",\"canceling\",\"errored\",\"unspecified\"],\"description\":\"The subagent's current lifecycle state.\"},\"stateDetail\":{\"type\":\"string\",\"description\":\"Context for State: the current tool call (name and summary) when running or waiting_for_input, or the failure message when errored.\"}},\"additionalProperties\":false,\"type\":\"object\"}\n" +
+			"\t* 'kill': Terminate specific subagents and all their descendants.\n" +
+			"\t* 'kill_all': Terminate all subagents and all their descendants.\n\n" +
+			"\tWhen a subagent is killed, its branched workspaces will be deleted, but its logs and artifacts will be preserved.",
 		Parameters: map[string]interface{}{
-			"type":     "object",
-			"required": []string{"Action"},
+			"type": "object",
 			"properties": map[string]interface{}{
 				"Action": map[string]interface{}{
 					"type":        "string",
 					"enum":        []string{"list", "kill", "kill_all"},
-					"description": "The action to perform.",
+					"description": "The action to perform. Must be 'list' (list active direct subagents with their live state), 'kill' (terminate specific subagents and all their descendants), or 'kill_all' (terminate all subagents and all their descendants).",
 				},
 				"ConversationIds": map[string]interface{}{
 					"type":        "array",
-					"description": "Conversation IDs of subagents to kill. Required when Action is 'kill'.",
+					"description": "The IDs of the subagents to kill. Required for 'kill'.",
 					"items": map[string]interface{}{
 						"type": "string",
 					},
 				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
+				},
 			},
+			"required": []string{"Action", "ToolSummary", "ToolAction"},
 		},
 	}
 }
@@ -199,23 +220,29 @@ Actions:
 // sendMessageDeclaration returns the FunctionDeclaration for send_message.
 func sendMessageDeclaration() llm.FunctionDeclaration {
 	return llm.FunctionDeclaration{
-		Name: "send_message",
-		Description: `Send a message to another agent by its conversation ID (returned by invoke_subagent). This tool is ONLY for communicating with other agents.
-
-**Do NOT use send_message to communicate with the user.** Instead, output visible text to communicate with the user.`,
+		Name:        "send_message",
+		Description: "Send a message to another agent. This tool can be used to communicate with subagents, peer agents, etc. Do not use this tool to communicate with the user.",
 		Parameters: map[string]interface{}{
-			"type":     "object",
-			"required": []string{"Recipient", "Message"},
+			"type": "object",
 			"properties": map[string]interface{}{
-				"Recipient": map[string]interface{}{
-					"type":        "string",
-					"description": "The conversation ID of the recipient agent.",
-				},
 				"Message": map[string]interface{}{
 					"type":        "string",
-					"description": "The message content to send.",
+					"description": "The message content.",
+				},
+				"Recipient": map[string]interface{}{
+					"type":        "string",
+					"description": "The recipient ID to send the message to, e.g. a subagent conversation ID.",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
 				},
 			},
+			"required": []string{"Recipient", "Message", "ToolSummary", "ToolAction"},
 		},
 	}
 }
@@ -237,20 +264,45 @@ func subagentToolDeclarations() []llm.FunctionDeclaration {
 
 // executeDefineSubagent handles the define_subagent tool call.
 func (e *Engine) executeDefineSubagent(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) error {
-	name, _ := tc.Args["name"].(string)
-	description, _ := tc.Args["description"].(string)
-	systemPrompt, _ := tc.Args["system_prompt"].(string)
-	enableWrite, _ := tc.Args["enable_write_tools"].(bool)
-	enableMCP, _ := tc.Args["enable_mcp_tools"].(bool)
-	enableSubagent, _ := tc.Args["enable_subagent_tools"].(bool)
-	defaultModel, _ := tc.Args["default_model"].(string)
+	name, _ := tc.Args["Name"].(string)
+	if name == "" {
+		name, _ = tc.Args["name"].(string)
+	}
+	description, _ := tc.Args["Description"].(string)
+	if description == "" {
+		description, _ = tc.Args["description"].(string)
+	}
+	systemPrompt, _ := tc.Args["SystemPrompt"].(string)
+	if systemPrompt == "" {
+		systemPrompt, _ = tc.Args["system_prompt"].(string)
+	}
+	enableWrite, ok := tc.Args["EnableWriteTools"].(bool)
+	if !ok {
+		enableWrite, _ = tc.Args["enable_write_tools"].(bool)
+	}
+	enableMCP, ok := tc.Args["EnableMcpTools"].(bool)
+	if !ok {
+		enableMCP, _ = tc.Args["enable_mcp_tools"].(bool)
+	}
+	enableSubagent, ok := tc.Args["EnableSubagentTools"].(bool)
+	if !ok {
+		enableSubagent, _ = tc.Args["enable_subagent_tools"].(bool)
+	}
+	defaultModel, _ := tc.Args["DefaultModel"].(string)
+	if defaultModel == "" {
+		defaultModel, _ = tc.Args["default_model"].(string)
+	}
 
 	if name == "" {
-		e.feedToolError(tc, step, "name is required for define_subagent")
+		e.feedToolError(tc, step, "Name is required for define_subagent")
 		return nil
 	}
 	if description == "" {
-		e.feedToolError(tc, step, "description is required for define_subagent")
+		e.feedToolError(tc, step, "Description is required for define_subagent")
+		return nil
+	}
+	if systemPrompt == "" {
+		e.feedToolError(tc, step, "SystemPrompt is required for define_subagent")
 		return nil
 	}
 
@@ -288,6 +340,9 @@ func (e *Engine) executeDefineSubagent(ctx context.Context, tc llm.ToolCall, ste
 
 	// Feed success result
 	resultMsg := fmt.Sprintf("Subagent type '%s' defined successfully. You can now invoke it using invoke_subagent with TypeName='%s'.", name, name)
+	if def := step.GetDefineSubagent(); def != nil {
+		def.FormattedOutput = resultMsg
+	}
 	step.State = pb.StepUpdate_STATE_DONE
 	e.emitStep(step)
 
@@ -721,6 +776,9 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 	resultMsg := fmt.Sprintf("Launched %d subagent(s). They will run in the background and you will be notified when they complete.\n\n%s",
 		len(results), string(resultJSON))
 
+	if inv := step.GetInvokeSubagent(); inv != nil {
+		inv.FormattedOutput = resultMsg
+	}
 	step.State = pb.StepUpdate_STATE_DONE
 	e.emitStep(step)
 
@@ -736,6 +794,9 @@ func (e *Engine) executeSubagent(ctx context.Context, tc llm.ToolCall, step *pb.
 // executeManageSubagents handles the manage_subagents tool call.
 func (e *Engine) executeManageSubagents(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) error {
 	action, _ := tc.Args["Action"].(string)
+	if action == "" {
+		action, _ = tc.Args["action"].(string)
+	}
 
 	var resultMsg string
 
@@ -768,6 +829,9 @@ func (e *Engine) executeManageSubagents(ctx context.Context, tc llm.ToolCall, st
 
 	case "kill":
 		idsRaw := tc.Args["ConversationIds"]
+		if idsRaw == nil {
+			idsRaw = tc.Args["conversation_ids"]
+		}
 		idsJSON, _ := json.Marshal(idsRaw)
 		var ids []string
 		_ = json.Unmarshal(idsJSON, &ids)
@@ -799,6 +863,9 @@ func (e *Engine) executeManageSubagents(ctx context.Context, tc llm.ToolCall, st
 		return nil
 	}
 
+	if ms := step.GetManageSubagents(); ms != nil {
+		ms.FormattedOutput = resultMsg
+	}
 	step.State = pb.StepUpdate_STATE_DONE
 	e.emitStep(step)
 
@@ -814,7 +881,13 @@ func (e *Engine) executeManageSubagents(ctx context.Context, tc llm.ToolCall, st
 // executeSendMessage handles the send_message tool call.
 func (e *Engine) executeSendMessage(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) error {
 	recipient, _ := tc.Args["Recipient"].(string)
+	if recipient == "" {
+		recipient, _ = tc.Args["recipient"].(string)
+	}
 	message, _ := tc.Args["Message"].(string)
+	if message == "" {
+		message, _ = tc.Args["message"].(string)
+	}
 
 	if recipient == "" {
 		e.feedToolError(tc, step, "Recipient is required for send_message")
@@ -830,10 +903,13 @@ func (e *Engine) executeSendMessage(ctx context.Context, tc llm.ToolCall, step *
 		return nil
 	}
 
+	resultMsg := fmt.Sprintf("Message sent to %s.", recipient)
+	if sm := step.GetSendMessageAction(); sm != nil {
+		sm.FormattedOutput = resultMsg
+	}
 	step.State = pb.StepUpdate_STATE_DONE
 	e.emitStep(step)
 
-	resultMsg := fmt.Sprintf("Message sent to %s.", recipient)
 	e.history = append(e.history, toolResultMsg(tc, resultMsg, false))
 
 	return nil

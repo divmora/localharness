@@ -15,33 +15,81 @@ import (
 func registerSchedule(r *Registry) {
 	r.Register("schedule", executeSchedule, ToolSchema{
 		Name: "schedule",
-		Description: "Schedule a one-shot timer or a recurring cron job that sends notifications in the background. " +
-			"One-shot timers fire once after the specified duration (max 900 seconds). " +
-			"If you receive any message before the timer expires, the timer is cancelled silently. " +
-			"Cron uses a standard 5-field expression (minute hour day-of-month month day-of-week). " +
-			"You must specify exactly one of duration_seconds or cron_expression. " +
-			"Never run a background 'sleep' command to set a timer, use this tool instead.",
+		Description: "Schedule a one-shot timer or a recurring cron job that sends notifications in the background.\n\n" +
+			"**NOTE**: This tool call returns immediately and does not pause execution. To wait for the timer to fire, you must stop calling tools to end your turn.\n\n" +
+			"Modes:\n" +
+			"1. **One-shot timer**: Set a timer for a specified duration that will notify you with your Prompt when it expires. You can control early termination behavior using TimerCondition:\n\n" +
+			"- 'never' (default): The timer will always fire after the specified duration, unless explicitly cancelled.\n" +
+			"Usage: Use when setting unconditional timers that should always fire after DurationSeconds, unless explicitly cancelled.\n" +
+			"- 'any': The timer will be cancelled early if ANY message from any sender is received before the duration.\n" +
+			"Usage: Useful when multiple background tasks are running and you want to wait for any update, but with some guarantee that you won't be idle forever in case they are all stuck.\n" +
+			"- <sender-id>: The timer will be cancelled early if a message is received from that specific sender ID.\n" +
+			"Usage: Use when you're waiting for an update from a specific subagent or task, but want to set some limit on how long to wait.\n\n" +
+			"NOTE: When a timer is cancelled early, no separate cancellation notification is sent — the message that satisfied the condition is itself your wakeup, and the timer's tool step result records the cancellation.\n\n" +
+			"NOTE: You cannot have multiple concurrently active timers that would early terminate on the same sender ID.\n" +
+			"For example, if you already have a liveness timer set with \"any\", you cannot set another timer with \"any\" or any other condition.\n" +
+			"If you already have a timer set with early termination on \"task-123\", you cannot set another timer with \"task-123\" or \"any\".\n" +
+			"You should rely on the existing timer, or cancel and replace it if needed.\n\n" +
+			"Examples:\n\n" +
+			"Scenario: User asks explicitly for a reminder in 10 minutes.\n" +
+			"Args: DurationSeconds=600, Prompt=\"Remind the user\", TimerCondition=\"never\"\n" +
+			"Comments: TimerCondition=\"never\" is appropriate since this timer is unrelated to other ongoing tasks.\n\n" +
+			"Scenario: You just ran a command as \"task-123\". You already set a notification on it for 5 minutes, and it just notified you that it's still running. After checking the output, you want to set a new reminder to check on it in 10 minutes if it still hasn't finished.\n" +
+			"Args: DurationSeconds=600, Prompt=\"Check on the command status\", TimerCondition=\"task-123\"\n" +
+			"Comments: TimerCondition=\"task-123\" is appropriate since the timer is not needed if the command finishes ahead of time.\n\n" +
+			"Scenario: You just spawned 10 subagents, and you want to check in on progress after 5 minutes if you haven't heard back from any of them.\n" +
+			"Args: DurationSeconds=300, Prompt=\"Check in on the subagents' progress\", TimerCondition=\"any\"\n" +
+			"Comments: TimerCondition=\"any\" is appropriate since you are not waiting for any specific subagent.\n\n" +
+			"Scenario: You are running a command that you're sure will terminate, and you want to wait for it to finish.\n" +
+			"Args: N/A\n" +
+			"Comments: A timer is not needed at all in this scenario and will wastefully generate extra messages. Stop calling tools to end your turn instead.\n\n" +
+			"2. **Recurring cron**: Set CronExpression to a standard 5-field cron expression (e.g., '*/5 * * * *' for every 5 minutes). Each time the cron triggers, a notification with your Prompt is sent. The cron runs as a background task. Optionally set MaxIterations to limit the number of triggers. Optionally set IsDaemon to declare how the cron relates to your current task: leave it false (the default) when the cron is how your current task makes progress — polling or monitoring a job until it completes, heartbeat/liveness, or reminders — so your task stays active until the cron ends; set it true only when the cron is an independent standing job that should keep running after your current task is done — e.g. a recurring report or a maintenance job the user asked you to keep going — so you can finish now while it keeps firing in the background.\n\n" +
+			"Examples:\n" +
+			"- Poll deployment status every 5 minutes until it passes: CronExpression=\"*/5 * * * *\", Prompt=\"Check deployment status and report progress\", IsDaemon=false\n" +
+			"- Run a health check every hour, up to 3 times: CronExpression=\"0 * * * *\", MaxIterations=3, Prompt=\"Run the health check script and report results\", IsDaemon=false\n" +
+			"- Inspect newly filed issues in the last 24h and post a daily summary report: CronExpression=\"0 9 * * *\", Prompt=\"Summarize issues filed in the last 24h and post the report\", IsDaemon=true\n\n" +
+			"General Reminders:\n" +
+			"- You must specify exactly one of DurationSeconds or CronExpression.\n" +
+			"- Always provide a Prompt describing what the notification should say.\n" +
+			"- Never run a background 'sleep' command to set a timer, use this tool instead.\n" +
+			"- To cancel a running timer or cron schedule, use the manage_task tool with the task ID returned by this tool.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"duration_seconds": map[string]interface{}{
-					"type":        "integer",
-					"description": "Fire once after this many seconds (max 900). Mutually exclusive with cron_expression.",
-				},
-				"cron_expression": map[string]interface{}{
+				"CronExpression": map[string]interface{}{
 					"type":        "string",
-					"description": "Standard 5-field cron expression (minute hour day-of-month month day-of-week). Mutually exclusive with duration_seconds.",
+					"description": "A standard cron expression (5 fields: minute hour day-of-month month day-of-week). Use for recurring schedules. Mutually exclusive with DurationSeconds. Example: '*/5 * * * *' for every 5 minutes.",
 				},
-				"max_iterations": map[string]interface{}{
+				"DurationSeconds": map[string]interface{}{
 					"type":        "integer",
-					"description": "Maximum number of cron triggers before stopping. Only for cron schedules. 0 = unlimited.",
+					"description": "The number of seconds to wait. Use for one-shot timers. Mutually exclusive with CronExpression.",
 				},
-				"prompt": map[string]interface{}{
+				"IsDaemon": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Optional. Set to true only when the cron is an independent, standing job that should keep firing even after your current task is done (e.g. a recurring daily/weekly report or a standing maintenance job). Leave false (the default) whenever the cron is part of finishing your current task — including polling or monitoring a running job until it completes, heartbeat/liveness, or reminders.",
+				},
+				"MaxIterations": map[string]interface{}{
+					"type":        "integer",
+					"description": "Optional. Maximum number of times the cron schedule will fire before stopping. Only applicable when CronExpression is set. Defaults to unlimited.",
+				},
+				"Prompt": map[string]interface{}{
 					"type":        "string",
-					"description": "The notification message when the timer/cron fires.",
+					"description": "The message content to include in the notification when the timer fires or cron triggers. This is sent to the agent as a high-priority message.",
+				},
+				"TimerCondition": map[string]interface{}{
+					"type":        "string",
+					"description": "Optional. Controls when a one-shot timer should early terminate upon receiving a message. Options: 'never' (default, timer unconditionally waits until expiry), 'any' (timer cancels if any message is received), or a specific sender ID (timer cancels only if a message is received from that specific subagent conversation ID or background task ID). Only applicable when DurationSeconds is set.",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
 				},
 			},
-			"required": []string{"prompt"},
+			"required": []string{"Prompt", "ToolSummary", "ToolAction"},
 		},
 	})
 }
@@ -85,6 +133,7 @@ func executeSchedule(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 		sched.TaskId = taskID
 		sched.Success = true
+		sched.FormattedOutput = fmt.Sprintf("Scheduled a timer to fire in %d seconds. Task ID: %s", sched.DurationSeconds, taskID)
 
 		r.logger.Info("scheduled one-shot timer",
 			"task_id", taskID,
@@ -103,6 +152,7 @@ func executeSchedule(ctx context.Context, step *pb.StepUpdate, r *Registry) erro
 
 		sched.TaskId = taskID
 		sched.Success = true
+		sched.FormattedOutput = fmt.Sprintf("Scheduled recurring cron (%s). Task ID: %s", sched.CronExpression, taskID)
 
 		r.logger.Info("scheduled cron job",
 			"task_id", taskID,

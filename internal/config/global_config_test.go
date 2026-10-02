@@ -284,7 +284,7 @@ func TestExpandEnvString(t *testing.T) {
 func TestAllowedCommandsAndTools(t *testing.T) {
 	settings := &GlobalSettings{
 		AllowedCommands: []string{"go test", "git status", "cargo check"},
-		AllowedTools:    []string{"view_file", "list_dir"},
+		AllowedTools:    []string{"view_file", "write_to_file"},
 	}
 
 	// Commands

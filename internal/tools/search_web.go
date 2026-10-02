@@ -27,21 +27,37 @@ func registerWebSearch(r *Registry) {
 	r.Register("search_web", executeWebSearch, ToolSchema{
 		Group:       ToolGroupRead,
 		Name:        "search_web",
-		Description: "Perform a web search query and return a list of search results (title, url, snippet).",
+		Description: "Performs a web search for a given query. Returns a summary of relevant information along with URL citations.",
 		Parameters: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"query": map[string]interface{}{
+				"Domain": map[string]interface{}{
 					"type":        "string",
-					"description": "The search query string",
+					"description": "Optional domain to recommend the search prioritize",
+				},
+				"Query": map[string]interface{}{
+					"type": "string",
+				},
+				"ToolAction": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word phrase in -ing form describing the specific action. Capitalize like a sentence. Some examples: 'Analyzing directory', 'Searching the web', 'Checking git status', 'Running tests', 'Searching code'.",
+				},
+				"ToolSummary": map[string]interface{}{
+					"type":        "string",
+					"description": "Brief 2-5 word noun phrase describing the specific task. Capitalize like a sentence. Some examples: 'Directory analysis', 'Web search', 'Git status check', 'Test execution', 'Code search'.",
 				},
 			},
-			"required": []string{"query"},
+			"required": []string{
+				"Query",
+				"ToolSummary",
+				"ToolAction",
+			},
 		},
 	})
 }
 
 func executeWebSearch(ctx context.Context, step *pb.StepUpdate, r *Registry) error {
+	startTime := time.Now()
 	ws := step.GetSearchWeb()
 	if ws == nil {
 		return fmt.Errorf("search_web: missing action")
@@ -49,27 +65,47 @@ func executeWebSearch(ctx context.Context, step *pb.StepUpdate, r *Registry) err
 
 	query := ws.Query
 	if query == "" {
-		return fmt.Errorf("search_web: query is required")
+		return fmt.Errorf("search_web: Query is required")
 	}
 
-	r.Logger().Info("executing web search", "query", query)
+	effectiveQuery := query
+	if ws.Domain != "" && !strings.Contains(query, "site:") {
+		effectiveQuery = fmt.Sprintf("site:%s %s", ws.Domain, query)
+	}
 
+	r.Logger().Info("executing web search", "query", effectiveQuery)
+
+	var results []*pb.WebSearchResult
 	if MockSearchFunc != nil {
-		results, err := MockSearchFunc(query)
+		var err error
+		results, err = MockSearchFunc(effectiveQuery)
 		if err != nil {
 			return fmt.Errorf("web_search mock: %w", err)
 		}
-		ws.Results = results
-		return nil
-	}
-
-	// Perform real query using DuckDuckGo
-	results, err := performDuckDuckGoSearch(ctx, query)
-	if err != nil {
-		return fmt.Errorf("search_web: %w", err)
+	} else {
+		var err error
+		results, err = performDuckDuckGoSearch(ctx, effectiveQuery)
+		if err != nil {
+			return fmt.Errorf("search_web: %w", err)
+		}
 	}
 
 	ws.Results = results
+
+	completedTime := time.Now()
+	timeFormat := "2006-01-02T15:04:05-07:00"
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Created At: %s\nCompleted At: %s\n\n", startTime.Format(timeFormat), completedTime.Format(timeFormat))
+	if len(results) == 0 {
+		fmt.Fprintf(&sb, "The search for %q returned no results.", query)
+	} else {
+		fmt.Fprintf(&sb, "The search for %q returned %d results:\n\n", query, len(results))
+		for i, res := range results {
+			fmt.Fprintf(&sb, "%d. %s\n   URL: %s\n   %s\n\n", i+1, res.Title, res.Url, res.Snippet)
+		}
+	}
+	ws.FormattedOutput = strings.TrimSpace(sb.String())
+
 	return nil
 }
 

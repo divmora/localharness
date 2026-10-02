@@ -329,12 +329,12 @@ func TestTrimLargeResults_RunCommand(t *testing.T) {
 	}
 }
 
-func TestTrimLargeResults_ListDir(t *testing.T) {
-	largeDir := strings.Repeat("file.go\n", 100)
+func TestTrimLargeResults_WebFetch(t *testing.T) {
+	largeDoc := strings.Repeat("content line\n", 100)
 	messages := []llm.Message{
-		{Role: "user", Content: "list files"},
-		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "list_dir", Args: map[string]interface{}{"path": "."}}}},
-		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "list_dir", Content: largeDir}},
+		{Role: "user", Content: "fetch page"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "read_url_content", Args: map[string]interface{}{"url": "https://example.com"}}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "read_url_content", Content: largeDoc}},
 		// 8 fresh messages
 		{Role: "model", Content: "ok"},
 		{Role: "user", Content: "m1"},
@@ -349,10 +349,10 @@ func TestTrimLargeResults_ListDir(t *testing.T) {
 	result, stats := ReduceHistory(messages, 8)
 
 	if stats.TrimmedResults != 1 {
-		t.Fatalf("expected 1 trimmed list_dir result, got %d", stats.TrimmedResults)
+		t.Fatalf("expected 1 trimmed result, got %d", stats.TrimmedResults)
 	}
 	trimmed := result[2].ToolResult.Content
-	if !strings.Contains(trimmed, "directory entries trimmed") {
+	if !strings.Contains(trimmed, "lines trimmed") {
 		t.Fatalf("expected trimmed marker, got: %s", trimmed[:100])
 	}
 }
@@ -659,12 +659,12 @@ func BenchmarkTrimLargeResults(b *testing.B) {
 }
 
 func TestTrimLargeResults_SingleLineJSON(t *testing.T) {
-	// A 10KB single-line JSON string (like grep_search output without literal newlines)
+	// A 10KB single-line JSON string (like a large API payload without literal newlines)
 	largeJSON := `{"matches":[` + strings.Repeat(`{"filename":"/path/to/file.go","match":"abc"},`, 150) + `]}`
 	messages := []llm.Message{
-		{Role: "user", Content: "search"},
-		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "grep_search"}}},
-		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "grep_search", Content: largeJSON}},
+		{Role: "user", Content: "fetch API"},
+		{Role: "model", ToolCalls: []llm.ToolCall{{ID: "1", Name: "read_url_content"}}},
+		{Role: "tool", ToolResult: &llm.ToolCallResult{CallID: "1", Name: "read_url_content", Content: largeJSON}},
 	}
 	for i := 0; i < 8; i++ {
 		messages = append(messages, llm.Message{Role: "user", Content: "recent"})

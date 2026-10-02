@@ -83,8 +83,8 @@ func TestCreateChildAgent_ReadOnly(t *testing.T) {
 	if !childCfg.Capabilities.ViewFile {
 		t.Fatal("ViewFile should be enabled in read-only mode")
 	}
-	if !childCfg.Capabilities.ListDir {
-		t.Fatal("ListDir should be enabled in read-only mode")
+	if !childCfg.Capabilities.WebSearch {
+		t.Fatal("WebSearch should be enabled in read-only mode")
 	}
 
 	// Policy should be AllowAll (no write tools to guard)

@@ -135,9 +135,6 @@ Server → Client:
 | 20 | `view_file` | `ActionViewFile` | Read file with line range |
 | 21 | `write_to_file` | `ActionWriteToFile` | Create/overwrite file |
 | 22 | `replace_file_content` | `ActionReplaceFileContent` | Search-and-replace edit (single or multi-site) |
-| 23 | `list_dir` | `ActionListDir` | *[deprecated]* Directory listing (use `run_command` with `ls`/`find`) |
-| 24 | `grep_search` | `ActionGrepSearch` | *[deprecated]* Grep/ripgrep search (use `run_command` with `grep`/`rg`) |
-| 25 | `find_file` | `ActionFindFile` | *[deprecated]* Find by name pattern (use `run_command` with `find`/`fd`) |
 | 26 | `run_command` | `ActionRunCommand` | Shell execution (sync, background, persistent) |
 | 27 | `finish` | `ActionFinish` | Task completion |
 | 28 | `host_tool_call` | `ActionHostToolCall` | SDK-registered tool |
@@ -153,6 +150,10 @@ Server → Client:
 | 50 | `define_subagent` | `ActionDefineSubagent` | Define a new subagent type for this conversation |
 | 51 | `manage_subagents` | `ActionManageSubagents` | List, inspect, or kill active subagent instances |
 | 52 | `send_message_action` | `ActionSendMessage` | Send messages to another agent by conversation ID |
+| 53 | `browser_subagent` | `ActionBrowserSubagent` | Spawn browser automation subagent |
+| 54 | `code_graph` | `ActionCodeGraph` | Code graph AST and structural queries |
+| 55 | `desktop_subagent` | `ActionDesktopSubagent` | Spawn desktop computer use subagent |
+| 56 | `generate_image` | `ActionGenerateImage` | Generate an image or edit existing images based on a prompt |
 
 ## Context Compaction
 

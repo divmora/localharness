@@ -99,21 +99,46 @@ func TestInvokeSubagentDeclaration(t *testing.T) {
 		t.Fatal("parameters should not be nil")
 	}
 
-	// Check required fields (new schema: Subagents array)
 	props, ok := decl.Parameters["properties"].(map[string]interface{})
 	if !ok {
 		t.Fatal("parameters should have properties")
 	}
-	if _, ok := props["Subagents"]; !ok {
-		t.Error("parameters should have 'Subagents' property")
+	for _, prop := range []string{"Subagents", "ToolAction", "ToolSummary"} {
+		if _, ok := props[prop]; !ok {
+			t.Errorf("parameters should have '%s' property", prop)
+		}
 	}
 
-	// Check required
 	required, ok := decl.Parameters["required"].([]string)
-	if !ok || len(required) == 0 {
-		t.Error("parameters should have 'required' array")
-	} else if required[0] != "Subagents" {
-		t.Errorf("expected 'Subagents' in required, got %q", required[0])
+	if !ok {
+		t.Fatal("parameters should have 'required' array")
+	}
+	expectedReq := []string{"Subagents", "ToolSummary", "ToolAction"}
+	if len(required) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(required), required)
+	}
+	for i, r := range expectedReq {
+		if required[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, required[i])
+		}
+	}
+
+	subagentsProp, ok := props["Subagents"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Subagents property should be a map")
+	}
+	items, ok := subagentsProp["items"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Subagents should have items map")
+	}
+	itemProps, ok := items["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("items should have properties map")
+	}
+	for _, prop := range []string{"TypeName", "Role", "Prompt", "Workspace"} {
+		if _, ok := itemProps[prop]; !ok {
+			t.Errorf("items properties should have '%s'", prop)
+		}
 	}
 }
 
@@ -126,9 +151,23 @@ func TestDefineSubagentDeclaration(t *testing.T) {
 	if !ok {
 		t.Fatal("parameters should have properties")
 	}
-	for _, field := range []string{"name", "description", "system_prompt"} {
+	expectedProps := []string{"Description", "EnableMcpTools", "EnableSubagentTools", "EnableWriteTools", "Name", "SystemPrompt", "ToolAction", "ToolSummary"}
+	for _, field := range expectedProps {
 		if _, ok := props[field]; !ok {
 			t.Errorf("parameters should have '%s' property", field)
+		}
+	}
+	required, ok := decl.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("parameters should have 'required' array")
+	}
+	expectedReq := []string{"Name", "Description", "SystemPrompt", "ToolSummary", "ToolAction"}
+	if len(required) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(required), required)
+	}
+	for i, r := range expectedReq {
+		if required[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, required[i])
 		}
 	}
 }
@@ -138,12 +177,58 @@ func TestManageSubagentsDeclaration(t *testing.T) {
 	if decl.Name != "manage_subagents" {
 		t.Errorf("expected name 'manage_subagents', got %q", decl.Name)
 	}
+	props, ok := decl.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("parameters should have properties")
+	}
+	expectedProps := []string{"Action", "ConversationIds", "ToolAction", "ToolSummary"}
+	for _, field := range expectedProps {
+		if _, ok := props[field]; !ok {
+			t.Errorf("parameters should have '%s' property", field)
+		}
+	}
+	required, ok := decl.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("parameters should have 'required' array")
+	}
+	expectedReq := []string{"Action", "ToolSummary", "ToolAction"}
+	if len(required) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(required), required)
+	}
+	for i, r := range expectedReq {
+		if required[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, required[i])
+		}
+	}
 }
 
 func TestSendMessageDeclaration(t *testing.T) {
 	decl := sendMessageDeclaration()
 	if decl.Name != "send_message" {
 		t.Errorf("expected name 'send_message', got %q", decl.Name)
+	}
+	props, ok := decl.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("parameters should have properties")
+	}
+	expectedProps := []string{"Message", "Recipient", "ToolAction", "ToolSummary"}
+	for _, field := range expectedProps {
+		if _, ok := props[field]; !ok {
+			t.Errorf("parameters should have '%s' property", field)
+		}
+	}
+	required, ok := decl.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("parameters should have 'required' array")
+	}
+	expectedReq := []string{"Recipient", "Message", "ToolSummary", "ToolAction"}
+	if len(required) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(required), required)
+	}
+	for i, r := range expectedReq {
+		if required[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, required[i])
+		}
 	}
 }
 

@@ -29,8 +29,6 @@ This document serves as the **living product roadmap** for LocalHarness.
 
 ## 3. Tooling & Extensions
 
-- [ ] **Image Generation Tool**
-  - Add native image generation tool integrating with Imagen / Gemini multimodal capabilities.
 - [ ] **Full MCP Protocol Coverage (Resources & Prompts)**
   - Implement `resources/list`, `resources/read`, and `prompts/get` in `internal/mcp/manager.go` to expose external context sources (database schemas, PR templates, tickets) directly to agents.
 - [ ] **Fault-Tolerant MCP Server Connections**

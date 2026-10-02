@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1752,6 +1754,52 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 
 	e.emitStep(step)
 
+	// ── Pre-execution Tool Validation ──
+	// 1. Unknown tool check: reject hallucinated/corrupted tool calls immediately
+	// without prompting the user for permissions or timing out while detached.
+	if !e.isKnownTool(tc.Name) {
+		errMsg := fmt.Sprintf("Error: unknown tool: %s", tc.Name)
+		e.logger.Warn("rejecting unknown tool call before permission check", "tool", tc.Name)
+		e.history = append(e.history, toolResultMsg(tc, errMsg, true))
+		step.State = pb.StepUpdate_STATE_ERROR
+		step.ErrorInfo = &pb.ErrorInfo{
+			Message: errMsg,
+			Code:    "UNKNOWN_TOOL",
+		}
+		e.emitStep(step)
+		return nil
+	}
+
+	// 2. Early argument validation: check mandatory fields before prompting for permissions.
+	// Prompting the user to approve an empty command or empty path that is guaranteed to fail
+	// causes confusion and leads to 10-minute timeouts when detached.
+	switch tc.Name {
+	case "run_command":
+		if strings.TrimSpace(extractToolCommand(tc)) == "" {
+			errMsg := "Error: [TOOL_VALIDATION] run_command CommandLine is required"
+			e.history = append(e.history, toolResultMsg(tc, errMsg, true))
+			step.State = pb.StepUpdate_STATE_ERROR
+			step.ErrorInfo = &pb.ErrorInfo{
+				Message: errMsg,
+				Code:    "TOOL_VALIDATION",
+			}
+			e.emitStep(step)
+			return nil
+		}
+	case "write_to_file", "replace_file_content", "view_file":
+		if strings.TrimSpace(extractToolPath(tc)) == "" {
+			errMsg := fmt.Sprintf("Error: [TOOL_VALIDATION] %s path is required", tc.Name)
+			e.history = append(e.history, toolResultMsg(tc, errMsg, true))
+			step.State = pb.StepUpdate_STATE_ERROR
+			step.ErrorInfo = &pb.ErrorInfo{
+				Message: errMsg,
+				Code:    "TOOL_VALIDATION",
+			}
+			e.emitStep(step)
+			return nil
+		}
+	}
+
 	// ── Permission check (if handler registered) ──
 	if e.toolRequiresPermission(tc) {
 		// Circuit breaker: prevent infinite loops and runaway token bleed
@@ -1990,7 +2038,7 @@ func (e *Engine) executeTool(ctx context.Context, tc llm.ToolCall, usage *pb.Usa
 	if e.codeGraphManager != nil {
 		switch tc.Name {
 		case "write_to_file", "replace_file_content":
-			if p, ok := tc.Args["path"].(string); ok && p != "" {
+			if p := extractToolPath(tc); p != "" {
 				ws := "."
 				if len(e.workspaces) > 0 {
 					ws = e.workspaces[0]
@@ -2072,6 +2120,7 @@ func (e *Engine) executeHostTool(ctx context.Context, tc llm.ToolCall, step *pb.
 // to the user via the SDK and waiting for their response.
 // It follows the same STATE_WAITING → block → STATE_DONE pattern as permission requests.
 func (e *Engine) executeAskQuestion(ctx context.Context, tc llm.ToolCall, step *pb.StepUpdate) error {
+	startTime := time.Now()
 	if e.questionHandler == nil {
 		// No handler — fall back to returning a "skipped" result
 		e.logger.Warn("ask_question called but no question handler registered")
@@ -2086,23 +2135,48 @@ func (e *Engine) executeAskQuestion(ctx context.Context, tc llm.ToolCall, step *
 		RequestId: fmt.Sprintf("question-%d", step.StepIndex),
 	}
 
-	// Parse questions from tool args
-	if questionsRaw, ok := tc.Args["questions"]; ok {
+	if ta, ok := tc.Args["ToolAction"].(string); ok {
+		req.ToolAction = ta
+	} else if ta, ok := tc.Args["toolAction"].(string); ok {
+		req.ToolAction = ta
+	}
+	if ts, ok := tc.Args["ToolSummary"].(string); ok {
+		req.ToolSummary = ts
+	} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+		req.ToolSummary = ts
+	}
+
+	// Parse questions from tool args (support PascalCase and snake_case)
+	questionsRaw, ok := tc.Args["Questions"]
+	if !ok {
+		questionsRaw = tc.Args["questions"]
+	}
+	if questionsRaw != nil {
 		if questionsList, ok := questionsRaw.([]interface{}); ok {
 			for _, qRaw := range questionsList {
 				if qMap, ok := qRaw.(map[string]interface{}); ok {
 					q := &pb.UserQuestion{}
-					if text, ok := qMap["question"].(string); ok {
+					if text, ok := qMap["Question"].(string); ok {
+						q.Question = text
+					} else if text, ok := qMap["question"].(string); ok {
 						q.Question = text
 					}
-					if options, ok := qMap["options"].([]interface{}); ok {
+
+					optionsRaw, ok := qMap["Options"]
+					if !ok {
+						optionsRaw = qMap["options"]
+					}
+					if options, ok := optionsRaw.([]interface{}); ok {
 						for _, o := range options {
 							if s, ok := o.(string); ok {
 								q.Options = append(q.Options, s)
 							}
 						}
 					}
-					if multi, ok := qMap["is_multi_select"].(bool); ok {
+
+					if multi, ok := qMap["IsMultiSelect"].(bool); ok {
+						q.IsMultiSelect = multi
+					} else if multi, ok := qMap["is_multi_select"].(bool); ok {
 						q.IsMultiSelect = multi
 					}
 					req.Questions = append(req.Questions, q)
@@ -2142,10 +2216,16 @@ func (e *Engine) executeAskQuestion(ctx context.Context, tc llm.ToolCall, step *
 		return err
 	}
 
-	// Build result for LLM
+	// Build formatted output and JSON result for LLM
+	completedTime := time.Now()
+	timeFormat := "2006-01-02T15:04:05-07:00"
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Created At: %s\nCompleted At: %s\n\n", startTime.Format(timeFormat), completedTime.Format(timeFormat))
+
 	var resultJSON string
 	if resp.Skipped {
 		resultJSON = `{"skipped": true, "reason": "user skipped the question"}`
+		sb.WriteString("User skipped the question.")
 	} else {
 		// Format answers nicely
 		type answerResult struct {
@@ -2156,6 +2236,7 @@ func (e *Engine) executeAskQuestion(ctx context.Context, tc llm.ToolCall, step *
 		}
 
 		var results []answerResult
+		sb.WriteString("User answered:\n")
 		for i, answer := range resp.Answers {
 			ar := answerResult{
 				QuestionIndex:   i,
@@ -2166,6 +2247,27 @@ func (e *Engine) executeAskQuestion(ctx context.Context, tc llm.ToolCall, step *
 				ar.Question = req.Questions[i].Question
 			}
 			results = append(results, ar)
+
+			qText := ""
+			if i < len(req.Questions) {
+				qText = req.Questions[i].Question
+			}
+			ansStr := answer.Text
+			if len(answer.SelectedOptions) > 0 {
+				if ansStr != "" {
+					ansStr = strings.Join(answer.SelectedOptions, ", ") + " (" + ansStr + ")"
+				} else {
+					ansStr = strings.Join(answer.SelectedOptions, ", ")
+				}
+			}
+			if ansStr == "" {
+				ansStr = "(no answer provided)"
+			}
+			if qText != "" {
+				fmt.Fprintf(&sb, "%d. Question: %s\n   Answer: %s\n", i+1, qText, ansStr)
+			} else {
+				fmt.Fprintf(&sb, "%d. Answer: %s\n", i+1, ansStr)
+			}
 		}
 		b, _ := json.Marshal(map[string]interface{}{
 			"skipped": false,
@@ -2174,17 +2276,25 @@ func (e *Engine) executeAskQuestion(ctx context.Context, tc llm.ToolCall, step *
 		resultJSON = string(b)
 	}
 
+	formattedOutput := strings.TrimSpace(sb.String())
+	req.FormattedOutput = formattedOutput
+
 	// Update step with answers
 	uq := step.GetUserQuestion()
 	if uq != nil {
 		uq.Answers = resp.Answers
 		uq.Skipped = resp.Skipped
+		uq.FormattedOutput = formattedOutput
 	}
 	step.State = pb.StepUpdate_STATE_DONE
 	e.emitStep(step)
 
 	// Add to conversation history
-	e.history = append(e.history, toolResultMsg(tc, resultJSON, false))
+	outputMsg := formattedOutput
+	if outputMsg == "" {
+		outputMsg = resultJSON
+	}
+	e.history = append(e.history, toolResultMsg(tc, outputMsg, false))
 
 	return nil
 }
@@ -2403,6 +2513,31 @@ func isAlwaysAllowedTool(toolName string) bool {
 	}
 }
 
+// isKnownTool returns true if name corresponds to a registered or engine-intercepted tool.
+func (e *Engine) isKnownTool(name string) bool {
+	if e.toolRegistry != nil && e.toolRegistry.HasTool(name) {
+		return true
+	}
+	if e.hostToolNames != nil && e.hostToolNames[name] {
+		return true
+	}
+	if e.mcpMgr != nil && e.mcpMgr.IsMCPTool(name) {
+		return true
+	}
+	switch name {
+	case "invoke_subagent", "define_subagent", "manage_subagents", "send_message",
+		"browser_subagent", "desktop_subagent",
+		"desktop_screenshot", "desktop_list_windows", "desktop_focus_window",
+		"desktop_click", "desktop_type", "desktop_shortcut",
+		"knowledge_read", "knowledge_write", "knowledge_replace", "knowledge_delete",
+		"codegraph_search", "codegraph_find_references", "codegraph_call_hierarchy",
+		"codegraph_get_impact", "codegraph_diff_branches",
+		"publish", "ask_question", "ask_permission", "list_permissions", "finish":
+		return true
+	}
+	return false
+}
+
 // extractToolPath extracts the target file or directory path from tool call arguments.
 func extractToolPath(tc llm.ToolCall) string {
 	keys := []string{
@@ -2539,8 +2674,15 @@ func summarizeToolCall(tc llm.ToolCall) string {
 
 	switch tc.Name {
 	case "run_command":
-		if cmd, ok := tc.Args["command"].(string); ok {
-			cwd, _ := tc.Args["cwd"].(string)
+		cmd, _ := tc.Args["CommandLine"].(string)
+		if cmd == "" {
+			cmd, _ = tc.Args["command"].(string)
+		}
+		if cmd != "" {
+			cwd, _ := tc.Args["Cwd"].(string)
+			if cwd == "" {
+				cwd, _ = tc.Args["cwd"].(string)
+			}
 			if cwd != "" {
 				if repoRoot, isRepo := workspace.FindProjectRoot(cwd); isRepo {
 					return fmt.Sprintf("Run command: %s (in %s [external repository '%s'])", cmd, cwd, filepath.Base(repoRoot))
@@ -2550,33 +2692,54 @@ func summarizeToolCall(tc llm.ToolCall) string {
 			return fmt.Sprintf("Run command: %s", cmd)
 		}
 	case "write_to_file":
-		if path, ok := tc.Args["path"].(string); ok {
+		if path := extractToolPath(tc); path != "" {
 			return fmt.Sprintf("Create file: %s%s", path, repoSuffix)
 		}
-	case "replace_file_content", "multi_replace_file_content":
-		if path, ok := tc.Args["path"].(string); ok {
+	case "replace_file_content":
+		if path := extractToolPath(tc); path != "" {
 			return fmt.Sprintf("Edit file: %s%s", path, repoSuffix)
 		}
 	case "view_file":
-		if path, ok := tc.Args["path"].(string); ok {
+		path, _ := tc.Args["AbsolutePath"].(string)
+		if path == "" {
+			path, _ = tc.Args["path"].(string)
+		}
+		if path != "" {
 			return fmt.Sprintf("View file: %s%s", path, repoSuffix)
 		}
-	case "list_dir":
-		if path, ok := tc.Args["path"].(string); ok {
-			return fmt.Sprintf("List directory: %s%s", path, repoSuffix)
-		}
-	case "find_file":
-		if path, ok := tc.Args["path"].(string); ok {
-			return fmt.Sprintf("Find files in: %s%s", path, repoSuffix)
-		}
 	case "search_web":
-		if q, ok := tc.Args["query"].(string); ok {
+		q, _ := tc.Args["Query"].(string)
+		if q == "" {
+			q, _ = tc.Args["query"].(string)
+		}
+		if q != "" {
 			return fmt.Sprintf("Web search: %s", q)
 		}
 	case "read_url_content":
-		if u, ok := tc.Args["url"].(string); ok {
+		u, _ := tc.Args["Url"].(string)
+		if u == "" {
+			u, _ = tc.Args["url"].(string)
+		}
+		if u != "" {
 			return fmt.Sprintf("Fetch URL: %s", u)
 		}
+	case "generate_image":
+		name, _ := tc.Args["ImageName"].(string)
+		if name == "" {
+			name, _ = tc.Args["image_name"].(string)
+		}
+		prompt, _ := tc.Args["Prompt"].(string)
+		if prompt == "" {
+			prompt, _ = tc.Args["prompt"].(string)
+		}
+		if name != "" {
+			return fmt.Sprintf("Generate image: %s (%s)", name, prompt)
+		}
+		if prompt != "" {
+			return fmt.Sprintf("Generate image: %s", prompt)
+		}
+	case "ask_question":
+		return "Ask user question(s)"
 	}
 	argsJSON, _ := json.Marshal(tc.Args)
 	return fmt.Sprintf("Tool: %s, Args: %s", tc.Name, string(argsJSON))
@@ -2585,8 +2748,14 @@ func summarizeToolCall(tc llm.ToolCall) string {
 func generateDiffPreview(tc llm.ToolCall) string {
 	switch tc.Name {
 	case "write_to_file":
-		path, _ := tc.Args["path"].(string)
-		content, _ := tc.Args["content"].(string)
+		path := extractToolPath(tc)
+		content, _ := tc.Args["CodeContent"].(string)
+		if content == "" {
+			content, _ = tc.Args["code_content"].(string)
+		}
+		if content == "" {
+			content, _ = tc.Args["content"].(string)
+		}
 		if path == "" {
 			return ""
 		}
@@ -2609,7 +2778,7 @@ func generateDiffPreview(tc llm.ToolCall) string {
 		return diff
 
 	case "replace_file_content":
-		path, _ := tc.Args["path"].(string)
+		path := extractToolPath(tc)
 		if path == "" {
 			return ""
 		}
@@ -2619,30 +2788,72 @@ func generateDiffPreview(tc llm.ToolCall) string {
 		}
 		oldContent := string(data)
 		lines := strings.Split(strings.ReplaceAll(oldContent, "\r\n", "\n"), "\n")
-		chunksRaw, ok := tc.Args["chunks"].([]interface{})
-		if !ok || len(chunksRaw) == 0 {
-			return ""
+
+		type simpleChunk struct {
+			target      string
+			replacement string
+			startLine   int
+			endLine     int
 		}
-		for _, c := range chunksRaw {
-			chunkMap, ok := c.(map[string]interface{})
-			if !ok {
-				continue
+		var chunks []simpleChunk
+
+		if tcStr, ok := tc.Args["TargetContent"].(string); ok && tcStr != "" {
+			rcStr, _ := tc.Args["ReplacementContent"].(string)
+			sl := 1
+			if s, ok := tc.Args["StartLine"]; ok {
+				sl = int(toInt64(s))
 			}
-			target, _ := chunkMap["target_content"].(string)
-			replacement, _ := chunkMap["replacement"].(string)
-			startLine := 1
-			if sl, ok := chunkMap["start_line"].(float64); ok && int(sl) > 0 {
-				startLine = int(sl)
+			el := len(lines)
+			if e, ok := tc.Args["EndLine"]; ok {
+				el = int(toInt64(e))
 			}
-			endLine := len(lines)
-			if el, ok := chunkMap["end_line"].(float64); ok && int(el) > 0 && int(el) <= len(lines) {
-				endLine = int(el)
+			chunks = append(chunks, simpleChunk{target: tcStr, replacement: rcStr, startLine: sl, endLine: el})
+		} else if tcStr, ok := tc.Args["target_content"].(string); ok && tcStr != "" {
+			rcStr, _ := tc.Args["replacement_content"].(string)
+			if rcStr == "" {
+				rcStr, _ = tc.Args["replacement"].(string)
 			}
-			if startLine <= len(lines) && startLine <= endLine {
-				scopeStart := startLine - 1
-				scopeEnd := endLine
+			sl := 1
+			if s, ok := tc.Args["start_line"]; ok {
+				sl = int(toInt64(s))
+			}
+			el := len(lines)
+			if e, ok := tc.Args["end_line"]; ok {
+				el = int(toInt64(e))
+			}
+			chunks = append(chunks, simpleChunk{target: tcStr, replacement: rcStr, startLine: sl, endLine: el})
+		} else if chunksRaw, ok := tc.Args["chunks"].([]interface{}); ok {
+			for _, c := range chunksRaw {
+				chunkMap, ok := c.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				target, _ := chunkMap["target_content"].(string)
+				replacement, _ := chunkMap["replacement"].(string)
+				startLine := 1
+				if sl, ok := chunkMap["start_line"].(float64); ok && int(sl) > 0 {
+					startLine = int(sl)
+				}
+				endLine := len(lines)
+				if el, ok := chunkMap["end_line"].(float64); ok && int(el) > 0 && int(el) <= len(lines) {
+					endLine = int(el)
+				}
+				chunks = append(chunks, simpleChunk{target: target, replacement: replacement, startLine: startLine, endLine: endLine})
+			}
+		}
+
+		for _, c := range chunks {
+			if c.startLine <= len(lines) && c.startLine <= c.endLine {
+				scopeStart := c.startLine - 1
+				if scopeStart < 0 {
+					scopeStart = 0
+				}
+				scopeEnd := c.endLine
+				if scopeEnd > len(lines) {
+					scopeEnd = len(lines)
+				}
 				scopedText := strings.Join(lines[scopeStart:scopeEnd], "\n")
-				newScopedText := strings.Replace(scopedText, target, replacement, 1)
+				newScopedText := strings.Replace(scopedText, c.target, c.replacement, 1)
 				newLines := strings.Split(newScopedText, "\n")
 				result := make([]string, 0, scopeStart+len(newLines)+(len(lines)-scopeEnd))
 				result = append(result, lines[:scopeStart]...)
@@ -2689,7 +2900,7 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 	}
 
 	// Extract target path from tool args
-	targetPath, _ := tc.Args["path"].(string)
+	targetPath := extractToolPath(tc)
 	if targetPath == "" {
 		return false, ""
 	}
@@ -2737,11 +2948,73 @@ func (e *Engine) checkPlanningGuard(tc llm.ToolCall) (bool, string) {
 		"wait for user approval."
 }
 
+func toInt64(v interface{}) int64 {
+	switch val := v.(type) {
+	case float64:
+		return int64(val)
+	case float32:
+		return int64(val)
+	case int:
+		return int64(val)
+	case int32:
+		return int64(val)
+	case int64:
+		return val
+	case string:
+		n, _ := strconv.ParseInt(val, 10, 64)
+		return n
+	case json.Number:
+		n, _ := val.Int64()
+		return n
+	default:
+		return 0
+	}
+}
+
+// extractXMLFallbackArgs parses XML-style tags from raw model strings when structured arguments
+// are corrupted or embedded in tag form (e.g. <arg_key>path</arg_key><arg_value>...</arg_value>
+// or <path>...</path>).
+func extractXMLFallbackArgs(s string, args map[string]interface{}) {
+	// Pattern 1: <arg_key>k</arg_key><arg_value>v</arg_value>
+	keyValRegex := regexp.MustCompile(`(?s)<arg_key>\s*([^<]+?)\s*</arg_key>\s*<arg_value>\s*(.*?)\s*</arg_value>`)
+	for _, m := range keyValRegex.FindAllStringSubmatch(s, -1) {
+		k := strings.TrimSpace(m[1])
+		v := strings.TrimSpace(m[2])
+		if _, exists := args[k]; !exists {
+			args[k] = v
+		}
+	}
+	// Pattern 2: <key>value</key> for standard tool parameters
+	for _, param := range []string{"path", "TargetFile", "command", "CommandLine", "content", "CodeContent"} {
+		tagRegex := regexp.MustCompile(fmt.Sprintf(`(?s)<%s>\s*(.*?)\s*</%s>`, param, param))
+		if m := tagRegex.FindStringSubmatch(s); len(m) > 1 {
+			if _, exists := args[param]; !exists {
+				args[param] = strings.TrimSpace(m[1])
+			}
+		}
+	}
+}
+
 func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 	step := &pb.StepUpdate{
 		ConversationId: e.convID,
 		TrajectoryId:   e.trajectoryID,
 		StepIndex:      stepIdx,
+	}
+
+	// If tc.Args contains "raw" (due to upstream JSON truncation/escaping issues),
+	// attempt to repair and unpack fields from the raw string.
+	if rawVal, hasRaw := tc.Args["raw"]; hasRaw {
+		if rawStr, ok := rawVal.(string); ok {
+			if repaired, ok := llm.TryRepairJSON(rawStr); ok {
+				for k, v := range repaired {
+					if _, exists := tc.Args[k]; !exists {
+						tc.Args[k] = v
+					}
+				}
+			}
+			extractXMLFallbackArgs(rawStr, tc.Args)
+		}
 	}
 
 	argsJSON, _ := json.Marshal(tc.Args)
@@ -2750,26 +3023,339 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 	case "view_file":
 		action := &pb.ActionViewFile{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Path == "" {
+			if p, ok := tc.Args["AbsolutePath"].(string); ok {
+				action.Path = p
+			} else if p, ok := tc.Args["target_file"].(string); ok {
+				action.Path = p
+			}
+		}
+		if action.StartLine == 0 {
+			if sl, ok := tc.Args["StartLine"]; ok {
+				action.StartLine = int32(toInt64(sl))
+			}
+		}
+		if action.EndLine == 0 {
+			if el, ok := tc.Args["EndLine"]; ok {
+				action.EndLine = int32(toInt64(el))
+			}
+		}
+		if action.ContentOffset == 0 {
+			if co, ok := tc.Args["ContentOffset"]; ok {
+				action.ContentOffset = int64(toInt64(co))
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_ViewFile{ViewFile: action}
 
 	case "write_to_file":
 		action := &pb.ActionWriteToFile{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Path == "" {
+			if p, ok := tc.Args["TargetFile"].(string); ok {
+				action.Path = p
+			} else if p, ok := tc.Args["target_file"].(string); ok {
+				action.Path = p
+			} else if p, ok := tc.Args["path"].(string); ok {
+				action.Path = p
+			}
+		}
+		if action.Content == "" {
+			if c, ok := tc.Args["CodeContent"].(string); ok {
+				action.Content = c
+			} else if c, ok := tc.Args["code_content"].(string); ok {
+				action.Content = c
+			} else if c, ok := tc.Args["content"].(string); ok {
+				action.Content = c
+			}
+		}
+		if !action.Overwrite {
+			if ow, ok := tc.Args["Overwrite"].(bool); ok {
+				action.Overwrite = ow
+			} else if ow, ok := tc.Args["overwrite"].(bool); ok {
+				action.Overwrite = ow
+			}
+		}
+		if !action.Append {
+			if ap, ok := tc.Args["Append"].(bool); ok {
+				action.Append = ap
+			} else if ap, ok := tc.Args["append"].(bool); ok {
+				action.Append = ap
+			}
+		}
+		if action.Description == "" {
+			if d, ok := tc.Args["Description"].(string); ok {
+				action.Description = d
+			} else if d, ok := tc.Args["description"].(string); ok {
+				action.Description = d
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
+		if action.ArtifactMetadata == nil {
+			rawMeta := tc.Args["ArtifactMetadata"]
+			if rawMeta == nil {
+				rawMeta = tc.Args["artifact_metadata"]
+			}
+			if metaMap, ok := rawMeta.(map[string]interface{}); ok {
+				meta := &pb.ArtifactMetadata{}
+				if s, ok := metaMap["Summary"].(string); ok {
+					meta.Summary = s
+				} else if s, ok := metaMap["summary"].(string); ok {
+					meta.Summary = s
+				}
+				if rf, ok := metaMap["RequestFeedback"].(bool); ok {
+					meta.RequestFeedback = rf
+				} else if rf, ok := metaMap["request_feedback"].(bool); ok {
+					meta.RequestFeedback = rf
+				}
+				if uf, ok := metaMap["UserFacing"].(bool); ok {
+					meta.UserFacing = uf
+				} else if uf, ok := metaMap["user_facing"].(bool); ok {
+					meta.UserFacing = uf
+				}
+				if at, ok := metaMap["artifact_type"].(string); ok {
+					meta.ArtifactType = at
+				}
+				action.ArtifactMetadata = meta
+				action.IsArtifact = true
+			}
+		}
 		step.Action = &pb.StepUpdate_WriteToFile{WriteToFile: action}
 
 	case "replace_file_content":
 		action := &pb.ActionReplaceFileContent{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Path == "" {
+			if p, ok := tc.Args["TargetFile"].(string); ok {
+				action.Path = p
+			} else if p, ok := tc.Args["target_file"].(string); ok {
+				action.Path = p
+			} else if p, ok := tc.Args["path"].(string); ok {
+				action.Path = p
+			}
+		}
+		if action.Instruction == "" {
+			if ins, ok := tc.Args["Instruction"].(string); ok {
+				action.Instruction = ins
+			} else if ins, ok := tc.Args["instruction"].(string); ok {
+				action.Instruction = ins
+			}
+		}
+		if action.Description == "" {
+			if d, ok := tc.Args["Description"].(string); ok {
+				action.Description = d
+			} else if d, ok := tc.Args["description"].(string); ok {
+				action.Description = d
+			}
+		}
+		if !action.AllowMultiple {
+			if am, ok := tc.Args["AllowMultiple"].(bool); ok {
+				action.AllowMultiple = am
+			} else if am, ok := tc.Args["allow_multiple"].(bool); ok {
+				action.AllowMultiple = am
+			}
+		}
+		if action.TargetContent == "" {
+			if tcStr, ok := tc.Args["TargetContent"].(string); ok {
+				action.TargetContent = tcStr
+			} else if tcStr, ok := tc.Args["target_content"].(string); ok {
+				action.TargetContent = tcStr
+			}
+		}
+		if action.ReplacementContent == "" {
+			if rcStr, ok := tc.Args["ReplacementContent"].(string); ok {
+				action.ReplacementContent = rcStr
+			} else if rcStr, ok := tc.Args["replacement_content"].(string); ok {
+				action.ReplacementContent = rcStr
+			} else if rcStr, ok := tc.Args["replacement"].(string); ok {
+				action.ReplacementContent = rcStr
+			}
+		}
+		if action.StartLine == 0 {
+			if sl, ok := tc.Args["StartLine"]; ok {
+				action.StartLine = int32(toInt64(sl))
+			} else if sl, ok := tc.Args["start_line"]; ok {
+				action.StartLine = int32(toInt64(sl))
+			}
+		}
+		if action.EndLine == 0 {
+			if el, ok := tc.Args["EndLine"]; ok {
+				action.EndLine = int32(toInt64(el))
+			} else if el, ok := tc.Args["end_line"]; ok {
+				action.EndLine = int32(toInt64(el))
+			}
+		}
+		if len(action.TargetLintErrorIds) == 0 {
+			if rawIds, ok := tc.Args["TargetLintErrorIds"].([]interface{}); ok {
+				for _, id := range rawIds {
+					if s, ok := id.(string); ok {
+						action.TargetLintErrorIds = append(action.TargetLintErrorIds, s)
+					}
+				}
+			} else if rawIds, ok := tc.Args["target_lint_error_ids"].([]interface{}); ok {
+				for _, id := range rawIds {
+					if s, ok := id.(string); ok {
+						action.TargetLintErrorIds = append(action.TargetLintErrorIds, s)
+					}
+				}
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
+		if len(action.Chunks) == 0 && action.TargetContent != "" {
+			action.Chunks = []*pb.EditChunk{
+				{
+					StartLine:     action.StartLine,
+					EndLine:       action.EndLine,
+					TargetContent: action.TargetContent,
+					Replacement:   action.ReplacementContent,
+					AllowMultiple: action.AllowMultiple,
+				},
+			}
+		}
 		step.Action = &pb.StepUpdate_ReplaceFileContent{ReplaceFileContent: action}
 
 	case "run_command":
 		action := &pb.ActionRunCommand{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Command == "" {
+			if cmd, ok := tc.Args["CommandLine"].(string); ok {
+				action.Command = cmd
+			} else if cmd, ok := tc.Args["command"].(string); ok {
+				action.Command = cmd
+			}
+		}
+		if action.Cwd == "" {
+			if cwd, ok := tc.Args["Cwd"].(string); ok {
+				action.Cwd = cwd
+			} else if cwd, ok := tc.Args["cwd"].(string); ok {
+				action.Cwd = cwd
+			}
+		}
+		if !action.IsDaemon {
+			if d, ok := tc.Args["IsDaemon"].(bool); ok {
+				action.IsDaemon = d
+			} else if d, ok := tc.Args["is_daemon"].(bool); ok {
+				action.IsDaemon = d
+			}
+		}
+		if action.TerminalId == "" {
+			if rtid, ok := tc.Args["RequestedTerminalID"].(string); ok {
+				action.TerminalId = rtid
+			} else if rtid, ok := tc.Args["requested_terminal_id"].(string); ok {
+				action.TerminalId = rtid
+			} else if rtid, ok := tc.Args["terminal_id"].(string); ok {
+				action.TerminalId = rtid
+			}
+		}
+		if !action.Persistent {
+			if p, ok := tc.Args["RunPersistent"].(bool); ok {
+				action.Persistent = p
+			} else if p, ok := tc.Args["run_persistent"].(bool); ok {
+				action.Persistent = p
+			} else if p, ok := tc.Args["persistent"].(bool); ok {
+				action.Persistent = p
+			}
+		}
+		if action.WaitMsBeforeAsync == 0 {
+			if w, ok := tc.Args["WaitMsBeforeAsync"]; ok {
+				action.WaitMsBeforeAsync = int32(toInt64(w))
+			} else if w, ok := tc.Args["wait_ms_before_async"]; ok {
+				action.WaitMsBeforeAsync = int32(toInt64(w))
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_RunCommand{RunCommand: action}
 
 	case "manage_task":
 		action := &pb.ActionManageTask{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Action == "" {
+			if a, ok := tc.Args["Action"].(string); ok {
+				action.Action = a
+			} else if a, ok := tc.Args["action"].(string); ok {
+				action.Action = a
+			}
+		}
+		if action.TaskId == "" {
+			if tid, ok := tc.Args["TaskId"].(string); ok {
+				action.TaskId = tid
+			} else if tid, ok := tc.Args["task_id"].(string); ok {
+				action.TaskId = tid
+			}
+		}
+		if action.Input == "" {
+			if in, ok := tc.Args["Input"].(string); ok {
+				action.Input = in
+			} else if in, ok := tc.Args["input"].(string); ok {
+				action.Input = in
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_ManageTask{ManageTask: action}
 
 	case "finish":
@@ -2780,21 +3366,194 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 	case "invoke_subagent":
 		action := &pb.ActionInvokeSubagent{}
 		_ = json.Unmarshal(argsJSON, action)
+		if len(action.Subagents) == 0 {
+			rawSubs := tc.Args["Subagents"]
+			if rawSubs == nil {
+				rawSubs = tc.Args["subagents"]
+			}
+			if subsList, ok := rawSubs.([]interface{}); ok {
+				for _, subItem := range subsList {
+					if subMap, ok := subItem.(map[string]interface{}); ok {
+						inv := &pb.SubagentInvocation{}
+						if tn, ok := subMap["TypeName"].(string); ok {
+							inv.TypeName = tn
+						} else if tn, ok := subMap["type_name"].(string); ok {
+							inv.TypeName = tn
+						}
+						if r, ok := subMap["Role"].(string); ok {
+							inv.Role = r
+						} else if r, ok := subMap["role"].(string); ok {
+							inv.Role = r
+						}
+						if p, ok := subMap["Prompt"].(string); ok {
+							inv.Prompt = p
+						} else if p, ok := subMap["prompt"].(string); ok {
+							inv.Prompt = p
+						}
+						if ws, ok := subMap["Workspace"].(string); ok {
+							inv.Workspace = ws
+						} else if ws, ok := subMap["workspace"].(string); ok {
+							inv.Workspace = ws
+						}
+						if m, ok := subMap["Model"].(string); ok {
+							inv.Model = m
+						} else if m, ok := subMap["model"].(string); ok {
+							inv.Model = m
+						}
+						action.Subagents = append(action.Subagents, inv)
+					}
+				}
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_InvokeSubagent{InvokeSubagent: action}
 
 	case "define_subagent":
 		action := &pb.ActionDefineSubagent{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Name == "" {
+			if n, ok := tc.Args["Name"].(string); ok {
+				action.Name = n
+			} else if n, ok := tc.Args["name"].(string); ok {
+				action.Name = n
+			}
+		}
+		if action.Description == "" {
+			if d, ok := tc.Args["Description"].(string); ok {
+				action.Description = d
+			} else if d, ok := tc.Args["description"].(string); ok {
+				action.Description = d
+			}
+		}
+		if action.SystemPrompt == "" {
+			if sp, ok := tc.Args["SystemPrompt"].(string); ok {
+				action.SystemPrompt = sp
+			} else if sp, ok := tc.Args["system_prompt"].(string); ok {
+				action.SystemPrompt = sp
+			}
+		}
+		if !action.EnableWriteTools {
+			if ew, ok := tc.Args["EnableWriteTools"].(bool); ok {
+				action.EnableWriteTools = ew
+			} else if ew, ok := tc.Args["enable_write_tools"].(bool); ok {
+				action.EnableWriteTools = ew
+			}
+		}
+		if !action.EnableMcpTools {
+			if em, ok := tc.Args["EnableMcpTools"].(bool); ok {
+				action.EnableMcpTools = em
+			} else if em, ok := tc.Args["enable_mcp_tools"].(bool); ok {
+				action.EnableMcpTools = em
+			}
+		}
+		if !action.EnableSubagentTools {
+			if es, ok := tc.Args["EnableSubagentTools"].(bool); ok {
+				action.EnableSubagentTools = es
+			} else if es, ok := tc.Args["enable_subagent_tools"].(bool); ok {
+				action.EnableSubagentTools = es
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_DefineSubagent{DefineSubagent: action}
 
 	case "manage_subagents":
 		action := &pb.ActionManageSubagents{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Action == "" {
+			if a, ok := tc.Args["Action"].(string); ok {
+				action.Action = a
+			} else if a, ok := tc.Args["action"].(string); ok {
+				action.Action = a
+			}
+		}
+		if len(action.ConversationIds) == 0 {
+			if cids, ok := tc.Args["ConversationIds"].([]interface{}); ok {
+				for _, cid := range cids {
+					if s, ok := cid.(string); ok {
+						action.ConversationIds = append(action.ConversationIds, s)
+					}
+				}
+			} else if cids, ok := tc.Args["conversation_ids"].([]interface{}); ok {
+				for _, cid := range cids {
+					if s, ok := cid.(string); ok {
+						action.ConversationIds = append(action.ConversationIds, s)
+					}
+				}
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_ManageSubagents{ManageSubagents: action}
 
 	case "send_message":
 		action := &pb.ActionSendMessage{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Recipient == "" {
+			if r, ok := tc.Args["Recipient"].(string); ok {
+				action.Recipient = r
+			} else if r, ok := tc.Args["recipient"].(string); ok {
+				action.Recipient = r
+			}
+		}
+		if action.Message == "" {
+			if m, ok := tc.Args["Message"].(string); ok {
+				action.Message = m
+			} else if m, ok := tc.Args["message"].(string); ok {
+				action.Message = m
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_SendMessageAction{SendMessageAction: action}
 
 	case "browser_subagent":
@@ -2810,16 +3569,195 @@ func (e *Engine) buildToolStep(tc llm.ToolCall, stepIdx int32) *pb.StepUpdate {
 	case "search_web":
 		action := &pb.ActionSearchWeb{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Query == "" {
+			if q, ok := tc.Args["Query"].(string); ok {
+				action.Query = q
+			} else if q, ok := tc.Args["query"].(string); ok {
+				action.Query = q
+			}
+		}
+		if action.Domain == "" {
+			if d, ok := tc.Args["Domain"].(string); ok {
+				action.Domain = d
+			} else if d, ok := tc.Args["domain"].(string); ok {
+				action.Domain = d
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_SearchWeb{SearchWeb: action}
 
 	case "read_url_content":
 		action := &pb.ActionReadUrlContent{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Url == "" {
+			if u, ok := tc.Args["Url"].(string); ok {
+				action.Url = u
+			} else if u, ok := tc.Args["url"].(string); ok {
+				action.Url = u
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_ReadUrlContent{ReadUrlContent: action}
+
+	case "generate_image":
+		action := &pb.ActionGenerateImage{}
+		_ = json.Unmarshal(argsJSON, action)
+		if action.Prompt == "" {
+			if p, ok := tc.Args["Prompt"].(string); ok {
+				action.Prompt = p
+			} else if p, ok := tc.Args["prompt"].(string); ok {
+				action.Prompt = p
+			}
+		}
+		if action.ImageName == "" {
+			if in, ok := tc.Args["ImageName"].(string); ok {
+				action.ImageName = in
+			} else if in, ok := tc.Args["image_name"].(string); ok {
+				action.ImageName = in
+			}
+		}
+		if action.AspectRatio == "" {
+			if ar, ok := tc.Args["AspectRatio"].(string); ok {
+				action.AspectRatio = ar
+			} else if ar, ok := tc.Args["aspect_ratio"].(string); ok {
+				action.AspectRatio = ar
+			}
+		}
+		if len(action.ImagePaths) == 0 {
+			if ips, ok := tc.Args["ImagePaths"].([]interface{}); ok {
+				for _, ip := range ips {
+					if s, ok := ip.(string); ok {
+						action.ImagePaths = append(action.ImagePaths, s)
+					}
+				}
+			} else if ips, ok := tc.Args["image_paths"].([]interface{}); ok {
+				for _, ip := range ips {
+					if s, ok := ip.(string); ok {
+						action.ImagePaths = append(action.ImagePaths, s)
+					}
+				}
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
+		step.Action = &pb.StepUpdate_GenerateImage{GenerateImage: action}
+
+	case "ask_question":
+		action := &pb.ActionUserQuestion{}
+		_ = json.Unmarshal(argsJSON, action)
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
+		step.Action = &pb.StepUpdate_UserQuestion{UserQuestion: action}
 
 	case "schedule":
 		action := &pb.ActionSchedule{}
 		_ = json.Unmarshal(argsJSON, action)
+		if action.Prompt == "" {
+			if p, ok := tc.Args["Prompt"].(string); ok {
+				action.Prompt = p
+			} else if p, ok := tc.Args["prompt"].(string); ok {
+				action.Prompt = p
+			}
+		}
+		if action.DurationSeconds == 0 {
+			if ds, ok := tc.Args["DurationSeconds"]; ok {
+				action.DurationSeconds = int32(toInt64(ds))
+			} else if ds, ok := tc.Args["duration_seconds"]; ok {
+				action.DurationSeconds = int32(toInt64(ds))
+			}
+		}
+		if action.CronExpression == "" {
+			if ce, ok := tc.Args["CronExpression"].(string); ok {
+				action.CronExpression = ce
+			} else if ce, ok := tc.Args["cron_expression"].(string); ok {
+				action.CronExpression = ce
+			}
+		}
+		if action.MaxIterations == 0 {
+			if mi, ok := tc.Args["MaxIterations"]; ok {
+				action.MaxIterations = int32(toInt64(mi))
+			} else if mi, ok := tc.Args["max_iterations"]; ok {
+				action.MaxIterations = int32(toInt64(mi))
+			}
+		}
+		if action.TimerCondition == "" {
+			if tcVal, ok := tc.Args["TimerCondition"].(string); ok {
+				action.TimerCondition = tcVal
+			} else if tcVal, ok := tc.Args["timer_condition"].(string); ok {
+				action.TimerCondition = tcVal
+			}
+		}
+		if !action.IsDaemon {
+			if id, ok := tc.Args["IsDaemon"].(bool); ok {
+				action.IsDaemon = id
+			} else if id, ok := tc.Args["is_daemon"].(bool); ok {
+				action.IsDaemon = id
+			}
+		}
+		if action.ToolAction == "" {
+			if ta, ok := tc.Args["ToolAction"].(string); ok {
+				action.ToolAction = ta
+			} else if ta, ok := tc.Args["toolAction"].(string); ok {
+				action.ToolAction = ta
+			}
+		}
+		if action.ToolSummary == "" {
+			if ts, ok := tc.Args["ToolSummary"].(string); ok {
+				action.ToolSummary = ts
+			} else if ts, ok := tc.Args["toolSummary"].(string); ok {
+				action.ToolSummary = ts
+			}
+		}
 		step.Action = &pb.StepUpdate_Schedule{Schedule: action}
 
 	default:
@@ -2856,45 +3794,26 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 
 	switch a := step.Action.(type) {
 	case *pb.StepUpdate_ViewFile:
-		vf := a.ViewFile
-		result = map[string]interface{}{
-			"content": vf.Content, "total_lines": vf.TotalLines,
-			"total_bytes": vf.TotalBytes, "is_binary": vf.IsBinary,
-		}
+		return a.ViewFile.Content
 	case *pb.StepUpdate_WriteToFile:
-		result = map[string]interface{}{"created": a.WriteToFile.Created}
+		wf := a.WriteToFile
+		if wf.FormattedOutput != "" {
+			return wf.FormattedOutput
+		}
+		result = map[string]interface{}{"created": wf.Created}
 	case *pb.StepUpdate_ReplaceFileContent:
-		result = map[string]interface{}{
-			"success": a.ReplaceFileContent.Success, "diff": a.ReplaceFileContent.DiffBlock,
-		}
-	case *pb.StepUpdate_ListDir:
-		var entries []map[string]interface{}
-		for _, e := range a.ListDir.Entries {
-			entries = append(entries, map[string]interface{}{
-				"name": e.Name, "is_dir": e.IsDir,
-				"size_bytes": e.SizeBytes, "child_count": e.ChildCount,
-			})
+		rfc := a.ReplaceFileContent
+		if rfc.FormattedOutput != "" {
+			return rfc.FormattedOutput
 		}
 		result = map[string]interface{}{
-			"entries":       entries,
-			"total_entries": len(a.ListDir.Entries),
+			"success": rfc.Success, "diff": rfc.DiffBlock,
 		}
-	case *pb.StepUpdate_GrepSearch:
-		var matches []map[string]interface{}
-		for _, m := range a.GrepSearch.Matches {
-			matches = append(matches, map[string]interface{}{
-				"filename": m.Filename, "line_number": m.LineNumber,
-				"line_content": m.LineContent,
-			})
-		}
-		result = map[string]interface{}{
-			"matches": matches, "total": a.GrepSearch.TotalMatches,
-			"truncated": a.GrepSearch.Truncated,
-		}
-	case *pb.StepUpdate_FindFile:
-		result = map[string]interface{}{"matches": a.FindFile.Matches}
 	case *pb.StepUpdate_RunCommand:
 		rc := a.RunCommand
+		if rc.FormattedOutput != "" {
+			return rc.FormattedOutput
+		}
 		m := map[string]interface{}{
 			"stdout": rc.Stdout, "stderr": rc.Stderr,
 			"exit_code": rc.ExitCode, "timed_out": rc.TimedOut,
@@ -2909,6 +3828,9 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 		result = m
 	case *pb.StepUpdate_ManageTask:
 		mt := a.ManageTask
+		if mt.FormattedOutput != "" {
+			return mt.FormattedOutput
+		}
 		var tasks []map[string]interface{}
 		for _, t := range mt.Tasks {
 			tm := map[string]interface{}{
@@ -2935,6 +3857,9 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 		result = map[string]interface{}{"tool": a.HostToolCall.ToolName, "status": "delegated"}
 	case *pb.StepUpdate_InvokeSubagent:
 		sub := a.InvokeSubagent
+		if sub.FormattedOutput != "" {
+			return sub.FormattedOutput
+		}
 		resMap := map[string]interface{}{
 			"error": sub.ErrorMessage,
 		}
@@ -2949,8 +3874,48 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 			resMap["child_trajectory_id"] = sub.ChildTrajectoryId
 		}
 		result = resMap
+	case *pb.StepUpdate_Schedule:
+		sc := a.Schedule
+		if sc.FormattedOutput != "" {
+			return sc.FormattedOutput
+		}
+		result = map[string]interface{}{
+			"task_id": sc.TaskId,
+			"prompt":  sc.Prompt,
+			"status":  "scheduled",
+		}
+	case *pb.StepUpdate_DefineSubagent:
+		da := a.DefineSubagent
+		if da.FormattedOutput != "" {
+			return da.FormattedOutput
+		}
+		result = map[string]interface{}{
+			"name":   da.Name,
+			"status": "defined",
+		}
+	case *pb.StepUpdate_ManageSubagents:
+		ms := a.ManageSubagents
+		if ms.FormattedOutput != "" {
+			return ms.FormattedOutput
+		}
+		result = map[string]interface{}{
+			"action": ms.Action,
+			"status": "done",
+		}
+	case *pb.StepUpdate_SendMessageAction:
+		sm := a.SendMessageAction
+		if sm.FormattedOutput != "" {
+			return sm.FormattedOutput
+		}
+		result = map[string]interface{}{
+			"recipient": sm.Recipient,
+			"status":    "sent",
+		}
 	case *pb.StepUpdate_SearchWeb:
 		ws := a.SearchWeb
+		if ws.FormattedOutput != "" {
+			return ws.FormattedOutput
+		}
 		var results []map[string]interface{}
 		for _, res := range ws.Results {
 			results = append(results, map[string]interface{}{
@@ -2960,8 +3925,26 @@ func (e *Engine) extractToolResult(step *pb.StepUpdate) string {
 		result = map[string]interface{}{"results": results}
 	case *pb.StepUpdate_ReadUrlContent:
 		wf := a.ReadUrlContent
+		if wf.FormattedOutput != "" {
+			return wf.FormattedOutput
+		}
 		result = map[string]interface{}{
 			"content": wf.Content, "content_type": wf.ContentType,
+		}
+	case *pb.StepUpdate_GenerateImage:
+		gi := a.GenerateImage
+		if gi.FormattedOutput != "" {
+			return gi.FormattedOutput
+		}
+		result = map[string]interface{}{
+			"artifact_path": gi.ArtifactPath,
+			"mime_type":     gi.MimeType,
+			"byte_size":     gi.ByteSize,
+		}
+	case *pb.StepUpdate_UserQuestion:
+		uq := a.UserQuestion
+		if uq.FormattedOutput != "" {
+			return uq.FormattedOutput
 		}
 	case *pb.StepUpdate_McpTool:
 		mt := a.McpTool
@@ -3286,6 +4269,26 @@ func (e *Engine) streamGenerate(ctx context.Context, sp llm.StreamingProvider, r
 	}, streamStepIdx, nil
 }
 
+// agyToolOrder defines the canonical Antigravity tool declaration priority.
+// Core primitives appear first (view_file #1, run_command #2) to optimize transformer
+// attention bias and guide models toward reading and executing code first.
+var agyToolOrder = map[string]int{
+	"view_file":            1,
+	"run_command":          2,
+	"manage_task":          3,
+	"send_message":         4,
+	"schedule":             5,
+	"invoke_subagent":      6,
+	"define_subagent":      7,
+	"manage_subagents":     8,
+	"write_to_file":        9,
+	"replace_file_content": 10,
+	"generate_image":       11,
+	"read_url_content":     12,
+	"search_web":           13,
+	"ask_question":         14,
+}
+
 // buildToolDeclarations converts registered tools to LLM function declarations.
 // Includes built-in tools (from registry), host-side tools (from config),
 // MCP tools, and subagent tools. Applies tool group filtering for subagents.
@@ -3334,9 +4337,21 @@ func (e *Engine) buildToolDeclarations() []llm.FunctionDeclaration {
 		decls = append(decls, desktopToolDeclarations()...)
 	}
 
-	// Sort all declarations alphabetically by name for deterministic serialization
-	// and maximum prompt prefix cache hits across LLM providers.
+	// Sort all declarations according to AGY canonical priority order.
+	// Tools in agyToolOrder come first in exact canonical order (view_file #1, run_command #2, etc.),
+	// followed by any extension tools (MCP, host tools) sorted alphabetically for deterministic caching.
 	sort.Slice(decls, func(i, j int) bool {
+		orderI := agyToolOrder[decls[i].Name]
+		orderJ := agyToolOrder[decls[j].Name]
+		if orderI > 0 && orderJ > 0 {
+			return orderI < orderJ
+		}
+		if orderI > 0 {
+			return true
+		}
+		if orderJ > 0 {
+			return false
+		}
 		return decls[i].Name < decls[j].Name
 	})
 

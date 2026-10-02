@@ -229,16 +229,6 @@ func TestGetToolName(t *testing.T) {
 			expected: "replace_file_content",
 		},
 		{
-			name:     "search_dir action",
-			step:     &pb.StepUpdate{Action: &pb.StepUpdate_GrepSearch{GrepSearch: &pb.ActionGrepSearch{}}},
-			expected: "grep_search",
-		},
-		{
-			name:     "find_file action",
-			step:     &pb.StepUpdate{Action: &pb.StepUpdate_FindFile{FindFile: &pb.ActionFindFile{}}},
-			expected: "find_file",
-		},
-		{
 			name:     "run_command action",
 			step:     &pb.StepUpdate{Action: &pb.StepUpdate_RunCommand{RunCommand: &pb.ActionRunCommand{}}},
 			expected: "run_command",
@@ -1272,8 +1262,11 @@ func TestViewFile_LineStreaming(t *testing.T) {
 	if strings.Contains(vf.Content, "16: line content 16\n") {
 		t.Error("line 16 should not be in content")
 	}
-	if !strings.Contains(vf.Content, "Showing lines 10-15 of 50 total.") {
-		t.Errorf("expected partial content indicator, got %s", vf.Content)
+	if !strings.Contains(vf.Content, "Showing lines 10 to 15") {
+		t.Errorf("expected Showing lines 10 to 15 in header, got %s", vf.Content)
+	}
+	if !strings.Contains(vf.Content, "The above content does NOT show the entire file contents.") {
+		t.Errorf("expected partial content boundary notice, got %s", vf.Content)
 	}
 
 	// Case 2: StartLine beyond EOF
@@ -1458,5 +1451,933 @@ func TestWithEnvironment_RunCommandAndTaskManager(t *testing.T) {
 	// Process-wide env must NOT be mutated
 	if val := os.Getenv("ISOLATED_TEST_VAR"); val != "" {
 		t.Errorf("expected ISOLATED_TEST_VAR to NOT be set in process-wide env, got %q", val)
+	}
+}
+
+func TestViewFile_ContentOffsetAndTruncation(t *testing.T) {
+	reg, wsDir := testRegistry(t)
+	ctx := context.Background()
+
+	// Create a large file (> 60 KB)
+	var sb strings.Builder
+	for i := 1; i <= 600; i++ {
+		sb.WriteString(fmt.Sprintf("line %03d: %s\n", i, strings.Repeat("A", 100)))
+	}
+	largeFile := filepath.Join(wsDir, "large.txt")
+	if err := os.WriteFile(largeFile, []byte(sb.String()), 0644); err != nil {
+		t.Fatalf("failed to write large file: %v", err)
+	}
+
+	// 1. Initial read (offset 0): exceeds 46,080 bytes
+	step1 := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ViewFile{
+			ViewFile: &pb.ActionViewFile{
+				Path:      largeFile,
+				StartLine: 1,
+				EndLine:   600,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "view_file", step1); err != nil {
+		t.Fatalf("view_file step 1 failed: %v", err)
+	}
+	vf1 := step1.GetViewFile()
+	if !strings.Contains(vf1.Content, "Content truncated: showing bytes 0-46080") {
+		t.Errorf("expected 46KB truncation notice, got:\n%s", vf1.Content[:min(len(vf1.Content), 500)])
+	}
+	if !strings.Contains(vf1.Content, "ContentOffset=46080") {
+		t.Errorf("expected ContentOffset=46080 continuation hint, got:\n%s", vf1.Content[:min(len(vf1.Content), 500)])
+	}
+
+	// 2. Paginated read (offset 46080)
+	step2 := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ViewFile{
+			ViewFile: &pb.ActionViewFile{
+				Path:          largeFile,
+				StartLine:     1,
+				EndLine:       600,
+				ContentOffset: 46080,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "view_file", step2); err != nil {
+		t.Fatalf("view_file step 2 failed: %v", err)
+	}
+	vf2 := step2.GetViewFile()
+	if strings.Contains(vf2.Content, "1: line 001:") {
+		t.Errorf("paginated read should not contain line 1, got:\n%s", vf2.Content[:min(len(vf2.Content), 500)])
+	}
+}
+
+func TestViewFile_Schema(t *testing.T) {
+	reg, _ := testRegistry(t)
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "view_file" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected view_file schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{"AbsolutePath", "StartLine", "EndLine", "ContentOffset", "ToolAction", "ToolSummary"}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in view_file schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{"AbsolutePath", "ToolSummary", "ToolAction"}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestRunCommand_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{RunCommand: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "run_command" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected run_command schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"CommandLine", "Cwd", "IsDaemon", "RequestedTerminalID",
+		"RunPersistent", "WaitMsBeforeAsync", "ToolAction", "ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in run_command schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{"Cwd", "WaitMsBeforeAsync", "CommandLine", "ToolSummary", "ToolAction"}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestManageTask_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{ManageTask: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "manage_task" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected manage_task schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{"Action", "Input", "TaskId", "ToolAction", "ToolSummary"}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in manage_task schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{"Action", "ToolSummary", "ToolAction"}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestRunCommand_FormattedOutput(t *testing.T) {
+	reg, wsDir := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{RunCommand: true})
+	ctx := context.Background()
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_RunCommand{
+			RunCommand: &pb.ActionRunCommand{
+				Command: "echo 'hello world'",
+				Cwd:     wsDir,
+			},
+		},
+	}
+
+	if err := reg.Execute(ctx, "run_command", step); err != nil {
+		t.Fatalf("run_command failed: %v", err)
+	}
+
+	rc := step.GetRunCommand()
+	if rc.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput")
+	}
+	if !strings.Contains(rc.FormattedOutput, "The command exited with code 0.") {
+		t.Errorf("expected exit code 0 notice, got:\n%s", rc.FormattedOutput)
+	}
+	if !strings.Contains(rc.FormattedOutput, "hello world") {
+		t.Errorf("expected 'hello world' in output, got:\n%s", rc.FormattedOutput)
+	}
+}
+
+func TestManageTask_FormattedOutput(t *testing.T) {
+	reg, wsDir := testRegistryWithTasks(t)
+	defer reg.Shutdown()
+	ctx := context.Background()
+
+	// 1. List with no tasks
+	listStep := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ManageTask{
+			ManageTask: &pb.ActionManageTask{
+				Action: "list",
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "manage_task", listStep); err != nil {
+		t.Fatalf("manage_task list failed: %v", err)
+	}
+	mtList := listStep.GetManageTask()
+	if !strings.Contains(mtList.FormattedOutput, "No background tasks currently running.") {
+		t.Errorf("expected empty tasks notice, got:\n%s", mtList.FormattedOutput)
+	}
+
+	// 2. Start a background task
+	runStep := &pb.StepUpdate{
+		Action: &pb.StepUpdate_RunCommand{
+			RunCommand: &pb.ActionRunCommand{
+				Command:           "sleep 10",
+				Cwd:               wsDir,
+				Background:        true,
+				WaitMsBeforeAsync: 100,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "run_command", runStep); err != nil {
+		t.Fatalf("run_command background failed: %v", err)
+	}
+	rc := runStep.GetRunCommand()
+	if !strings.Contains(rc.FormattedOutput, "Tool is running as a background task with task id:") {
+		t.Errorf("expected background task notice, got:\n%s", rc.FormattedOutput)
+	}
+
+	// 3. Status
+	statusStep := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ManageTask{
+			ManageTask: &pb.ActionManageTask{
+				Action: "status",
+				TaskId: rc.TaskId,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "manage_task", statusStep); err != nil {
+		t.Fatalf("manage_task status failed: %v", err)
+	}
+	mtStatus := statusStep.GetManageTask()
+	if !strings.Contains(mtStatus.FormattedOutput, "Task: "+rc.TaskId) {
+		t.Errorf("expected task id in status, got:\n%s", mtStatus.FormattedOutput)
+	}
+
+	// 4. Kill
+	killStep := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ManageTask{
+			ManageTask: &pb.ActionManageTask{
+				Action: "kill",
+				TaskId: rc.TaskId,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "manage_task", killStep); err != nil {
+		t.Fatalf("manage_task kill failed: %v", err)
+	}
+	mtKill := killStep.GetManageTask()
+	if !strings.Contains(mtKill.FormattedOutput, fmt.Sprintf("Task %q cancelled.", rc.TaskId)) {
+		t.Errorf("expected cancelled notice, got:\n%s", mtKill.FormattedOutput)
+	}
+}
+
+func TestSchedule_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{Schedule: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "schedule" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected schedule schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"CronExpression",
+		"DurationSeconds",
+		"IsDaemon",
+		"MaxIterations",
+		"Prompt",
+		"TimerCondition",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in schedule schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{"Prompt", "ToolSummary", "ToolAction"}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestSchedule_FormattedOutput(t *testing.T) {
+	wsDir := t.TempDir()
+	wsMgr, err := workspace.NewManager([]string{wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	reg := NewRegistry(wsMgr, logger)
+	RegisterBuiltinTools(reg, &pb.BuiltinToolsConfig{
+		Schedule: true,
+	})
+	defer reg.Shutdown()
+
+	ctx := context.Background()
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_Schedule{
+			Schedule: &pb.ActionSchedule{
+				DurationSeconds: 10,
+				Prompt:          "Check status",
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "schedule", step); err != nil {
+		t.Fatalf("schedule execute failed: %v", err)
+	}
+
+	sched := step.GetSchedule()
+	if sched.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput")
+	}
+	if !strings.Contains(sched.FormattedOutput, "Scheduled a timer to fire in 10 seconds.") {
+		t.Errorf("expected timer schedule message, got:\n%s", sched.FormattedOutput)
+	}
+	if !strings.Contains(sched.FormattedOutput, sched.TaskId) {
+		t.Errorf("expected task id %q in FormattedOutput, got:\n%s", sched.TaskId, sched.FormattedOutput)
+	}
+}
+
+func TestWriteToFile_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{CreateFile: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "write_to_file" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected write_to_file schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"Append",
+		"ArtifactMetadata",
+		"CodeContent",
+		"Description",
+		"Overwrite",
+		"TargetFile",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in write_to_file schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{
+		"TargetFile",
+		"Overwrite",
+		"CodeContent",
+		"Description",
+		"ToolSummary",
+		"ToolAction",
+	}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestWriteToFile_FormattedOutput(t *testing.T) {
+	reg, wsDir := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{CreateFile: true})
+	ctx := context.Background()
+
+	target := filepath.Join(wsDir, "test.txt")
+
+	// 1. Create file
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_WriteToFile{
+			WriteToFile: &pb.ActionWriteToFile{
+				Path:        target,
+				Content:     "line 1\n",
+				Description: "Create test.txt",
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "write_to_file", step); err != nil {
+		t.Fatalf("write_to_file create failed: %v", err)
+	}
+	wf := step.GetWriteToFile()
+	if !strings.Contains(wf.FormattedOutput, fmt.Sprintf("Created file file://%s with requested content.", target)) {
+		t.Errorf("expected created message in formatted output, got:\n%s", wf.FormattedOutput)
+	}
+	if !strings.Contains(wf.FormattedOutput, "If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.") {
+		t.Errorf("expected AGY instruction trailer in formatted output, got:\n%s", wf.FormattedOutput)
+	}
+
+	// 2. Append to file
+	stepAppend := &pb.StepUpdate{
+		Action: &pb.StepUpdate_WriteToFile{
+			WriteToFile: &pb.ActionWriteToFile{
+				Path:        target,
+				Content:     "line 2\n",
+				Append:      true,
+				Description: "Append line 2",
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "write_to_file", stepAppend); err != nil {
+		t.Fatalf("write_to_file append failed: %v", err)
+	}
+	wfAppend := stepAppend.GetWriteToFile()
+	if !strings.Contains(wfAppend.FormattedOutput, fmt.Sprintf("Appended to file file://%s with requested content.", target)) {
+		t.Errorf("expected appended message in formatted output, got:\n%s", wfAppend.FormattedOutput)
+	}
+}
+
+func TestReplaceFileContent_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{EditFile: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "replace_file_content" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected replace_file_content schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"AllowMultiple",
+		"Description",
+		"EndLine",
+		"Instruction",
+		"ReplacementContent",
+		"StartLine",
+		"TargetContent",
+		"TargetFile",
+		"TargetLintErrorIds",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in replace_file_content schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{
+		"TargetFile",
+		"Instruction",
+		"Description",
+		"AllowMultiple",
+		"TargetContent",
+		"ReplacementContent",
+		"StartLine",
+		"EndLine",
+		"ToolSummary",
+		"ToolAction",
+	}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestReplaceFileContent_FormattedOutput(t *testing.T) {
+	reg, wsDir := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{EditFile: true})
+	ctx := context.Background()
+
+	target := filepath.Join(wsDir, "edit_test.txt")
+	if err := os.WriteFile(target, []byte("alpha\nbeta\ngamma\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Rejection of .ipynb files
+	stepIpynb := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReplaceFileContent{
+			ReplaceFileContent: &pb.ActionReplaceFileContent{
+				Path:               filepath.Join(wsDir, "notebook.ipynb"),
+				TargetContent:      "print(1)",
+				ReplacementContent: "print(2)",
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "replace_file_content", stepIpynb); err == nil {
+		t.Fatal("expected error when attempting to edit .ipynb file")
+	}
+
+	// 2. Flat AGY parameters execution and formatted output
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReplaceFileContent{
+			ReplaceFileContent: &pb.ActionReplaceFileContent{
+				Path:               target,
+				Instruction:        "Replace beta with delta",
+				Description:        "Update Greek letter",
+				TargetContent:      "beta",
+				ReplacementContent: "delta",
+				StartLine:          1,
+				EndLine:            3,
+			},
+		},
+	}
+	if err := reg.Execute(ctx, "replace_file_content", step); err != nil {
+		t.Fatalf("replace_file_content execute failed: %v", err)
+	}
+
+	rfc := step.GetReplaceFileContent()
+	if rfc.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput")
+	}
+	if !strings.Contains(rfc.FormattedOutput, fmt.Sprintf("The following changes were made by the replace_file_content tool to: %s.", target)) {
+		t.Errorf("expected target path in header, got:\n%s", rfc.FormattedOutput)
+	}
+	if !strings.Contains(rfc.FormattedOutput, "[diff_block_start]") || !strings.Contains(rfc.FormattedOutput, "[diff_block_end]") {
+		t.Errorf("expected diff block delimiters, got:\n%s", rfc.FormattedOutput)
+	}
+	if !strings.Contains(rfc.FormattedOutput, "-beta") || !strings.Contains(rfc.FormattedOutput, "+delta") {
+		t.Errorf("expected diff content, got:\n%s", rfc.FormattedOutput)
+	}
+	if !strings.Contains(rfc.FormattedOutput, "Please note that the above snippet only shows the MODIFIED lines from the last change.") {
+		t.Errorf("expected trailer note in formatted output, got:\n%s", rfc.FormattedOutput)
+	}
+}
+
+func TestGenerateImage_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{GenerateImage: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "generate_image" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected generate_image schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"AspectRatio",
+		"ImageName",
+		"ImagePaths",
+		"Prompt",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in generate_image schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{
+		"Prompt",
+		"ImageName",
+		"ToolSummary",
+		"ToolAction",
+	}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestGenerateImage_ExecutionAndFormattedOutput(t *testing.T) {
+	reg, wsDir := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{GenerateImage: true})
+	ctx := context.Background()
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_GenerateImage{
+			GenerateImage: &pb.ActionGenerateImage{
+				Prompt:    "A test image of a sunset",
+				ImageName: "sunset_test.png",
+			},
+		},
+	}
+
+	if err := reg.Execute(ctx, "generate_image", step); err != nil {
+		t.Fatalf("generate_image execute failed: %v", err)
+	}
+
+	gi := step.GetGenerateImage()
+	if gi.ArtifactPath == "" {
+		t.Fatal("expected non-empty ArtifactPath")
+	}
+	if gi.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput")
+	}
+	if !strings.Contains(gi.FormattedOutput, "Created At:") || !strings.Contains(gi.FormattedOutput, "Completed At:") {
+		t.Errorf("expected timestamps in formatted output, got:\n%s", gi.FormattedOutput)
+	}
+	if !strings.Contains(gi.FormattedOutput, "Image generated and saved to: file://") {
+		t.Errorf("expected image URI in formatted output, got:\n%s", gi.FormattedOutput)
+	}
+	// Verify file was written
+	if _, err := os.Stat(filepath.Join(wsDir, "sunset_test.png")); err != nil {
+		t.Errorf("expected generated image file to exist: %v", err)
+	}
+}
+
+func TestReadUrlContent_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{WebFetch: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "read_url_content" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected read_url_content schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"Url",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in read_url_content schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{
+		"Url",
+		"ToolSummary",
+		"ToolAction",
+	}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestReadUrlContent_FormattedOutput(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{WebFetch: true})
+	ctx := context.Background()
+
+	MockFetchFunc = func(url string) (string, string, error) {
+		return "Hello from documentation", "text/plain", nil
+	}
+	defer func() { MockFetchFunc = nil }()
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_ReadUrlContent{
+			ReadUrlContent: &pb.ActionReadUrlContent{
+				Url: "https://example.com/docs",
+			},
+		},
+	}
+
+	if err := reg.Execute(ctx, "read_url_content", step); err != nil {
+		t.Fatalf("read_url_content execute failed: %v", err)
+	}
+
+	wf := step.GetReadUrlContent()
+	if wf.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput")
+	}
+	if !strings.Contains(wf.FormattedOutput, "Created At:") || !strings.Contains(wf.FormattedOutput, "Completed At:") {
+		t.Errorf("expected timestamps in formatted output, got:\n%s", wf.FormattedOutput)
+	}
+	if !strings.Contains(wf.FormattedOutput, "Hello from documentation") {
+		t.Errorf("expected content in formatted output, got:\n%s", wf.FormattedOutput)
+	}
+}
+
+func TestSearchWeb_Schema(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{WebSearch: true})
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "search_web" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected search_web schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"Domain",
+		"Query",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in search_web schema", prop)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{
+		"Query",
+		"ToolSummary",
+		"ToolAction",
+	}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
+	}
+}
+
+func TestSearchWeb_FormattedOutput(t *testing.T) {
+	reg, _ := testRegistryWithConfig(t, &pb.BuiltinToolsConfig{WebSearch: true})
+	ctx := context.Background()
+
+	MockSearchFunc = func(query string) ([]*pb.WebSearchResult, error) {
+		return []*pb.WebSearchResult{
+			{Title: "Go Docs", Url: "https://golang.org", Snippet: "Go is an open source programming language."},
+		}, nil
+	}
+	defer func() { MockSearchFunc = nil }()
+
+	step := &pb.StepUpdate{
+		Action: &pb.StepUpdate_SearchWeb{
+			SearchWeb: &pb.ActionSearchWeb{
+				Query: "golang",
+			},
+		},
+	}
+
+	if err := reg.Execute(ctx, "search_web", step); err != nil {
+		t.Fatalf("search_web execute failed: %v", err)
+	}
+
+	ws := step.GetSearchWeb()
+	if ws.FormattedOutput == "" {
+		t.Fatal("expected non-empty FormattedOutput")
+	}
+	if !strings.Contains(ws.FormattedOutput, "Created At:") || !strings.Contains(ws.FormattedOutput, "Completed At:") {
+		t.Errorf("expected timestamps in formatted output, got:\n%s", ws.FormattedOutput)
+	}
+	if !strings.Contains(ws.FormattedOutput, "The search for \"golang\" returned 1 results:") {
+		t.Errorf("expected result count in formatted output, got:\n%s", ws.FormattedOutput)
+	}
+	if !strings.Contains(ws.FormattedOutput, "Go Docs") || !strings.Contains(ws.FormattedOutput, "https://golang.org") {
+		t.Errorf("expected title and url in formatted output, got:\n%s", ws.FormattedOutput)
+	}
+}
+
+func TestAskQuestion_Schema(t *testing.T) {
+	reg, _ := testRegistry(t)
+	var schema *ToolSchema
+	for _, s := range reg.Schemas() {
+		if s.Name == "ask_question" {
+			sCopy := s
+			schema = &sCopy
+			break
+		}
+	}
+	if schema == nil {
+		t.Fatal("expected ask_question schema to be registered")
+	}
+
+	props, ok := schema.Parameters["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected properties map in schema")
+	}
+
+	expectedProps := []string{
+		"Questions",
+		"ToolAction",
+		"ToolSummary",
+	}
+	for _, prop := range expectedProps {
+		if _, exists := props[prop]; !exists {
+			t.Errorf("expected property %q in ask_question schema", prop)
+		}
+	}
+
+	// Verify nested Questions item schema
+	questionsProp, ok := props["Questions"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected Questions property map in schema")
+	}
+	itemsMap, ok := questionsProp["items"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected items map in Questions property")
+	}
+	itemProps, ok := itemsMap["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected item properties in Questions")
+	}
+	for _, qp := range []string{"Question", "Options", "IsMultiSelect"} {
+		if _, exists := itemProps[qp]; !exists {
+			t.Errorf("expected nested property %q in Questions item schema", qp)
+		}
+	}
+
+	req, ok := schema.Parameters["required"].([]string)
+	if !ok {
+		t.Fatal("expected required slice in schema")
+	}
+	expectedReq := []string{
+		"Questions",
+		"ToolSummary",
+		"ToolAction",
+	}
+	if len(req) != len(expectedReq) {
+		t.Fatalf("expected required len %d, got %d (%v)", len(expectedReq), len(req), req)
+	}
+	for i, r := range expectedReq {
+		if req[i] != r {
+			t.Errorf("expected required[%d]=%q, got %q", i, r, req[i])
+		}
 	}
 }

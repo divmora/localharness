@@ -388,18 +388,6 @@ func (c *LocalConnection) handleStepUpdate(su *pb.StepUpdate) {
 			step.ToolName = "replace_file_content"
 			b, _ := json.Marshal(a.ReplaceFileContent)
 			step.ToolArgsJSON = string(b)
-		case *pb.StepUpdate_ListDir:
-			step.ToolName = "list_dir"
-			b, _ := json.Marshal(a.ListDir)
-			step.ToolArgsJSON = string(b)
-		case *pb.StepUpdate_GrepSearch:
-			step.ToolName = "grep_search"
-			b, _ := json.Marshal(a.GrepSearch)
-			step.ToolArgsJSON = string(b)
-		case *pb.StepUpdate_FindFile:
-			step.ToolName = "find_file"
-			b, _ := json.Marshal(a.FindFile)
-			step.ToolArgsJSON = string(b)
 		case *pb.StepUpdate_RunCommand:
 			step.ToolName = "run_command"
 			b, _ := json.Marshal(a.RunCommand)

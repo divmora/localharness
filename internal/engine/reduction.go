@@ -265,7 +265,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 		}
 
 		// Handle stale edit diff results (>40 lines)
-		if msg.ToolResult.Name == "replace_file_content" || msg.ToolResult.Name == "multi_replace_file_content" {
+		if msg.ToolResult.Name == "replace_file_content" {
 			content := msg.ToolResult.Content
 			if strings.HasPrefix(content, "[... diff lines trimmed") {
 				continue
@@ -352,9 +352,8 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 			continue
 		}
 
-		// Handle stale list_dir, grep_search, and web content results (>60 lines or >3000 bytes)
-		if msg.ToolResult.Name == "list_dir" || msg.ToolResult.Name == "grep_search" ||
-			msg.ToolResult.Name == "read_url_content" || msg.ToolResult.Name == "web_fetch" {
+		// Handle stale web content results (>60 lines or >3000 bytes)
+		if msg.ToolResult.Name == "read_url_content" || msg.ToolResult.Name == "web_fetch" {
 			content := msg.ToolResult.Content
 			if strings.Contains(content, "lines trimmed —") || strings.Contains(content, "trimmed —") {
 				continue
@@ -373,15 +372,7 @@ func trimLargeResults(messages []llm.Message, freshWindow int) (int, int) {
 				trimmedCount = 1
 			}
 
-			var label string
-			switch msg.ToolResult.Name {
-			case "list_dir":
-				label = fmt.Sprintf("[... %d directory entries trimmed — re-run tool if needed ...]", trimmedCount)
-			case "grep_search":
-				label = fmt.Sprintf("[... %d search matches trimmed — re-run tool if needed ...]", trimmedCount)
-			default:
-				label = fmt.Sprintf("[... %d lines trimmed — re-run tool if needed ...]", trimmedCount)
-			}
+			label := fmt.Sprintf("[... %d lines trimmed — re-run tool if needed ...]", trimmedCount)
 
 			var sb strings.Builder
 			sb.WriteString(topLines)
