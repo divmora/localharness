@@ -277,16 +277,12 @@ The `agents/` directory contains specialized AI agent submodules built on the Lo
 | Agent | Path | Focus |
 |:---|:---|:---|
 | **Jules** | `agents/jules` | Codebase analysis — performance (Bolt), design (Palette), security (Sentinel), maintainability (Sweeper) |
-| **Code Reviewer** | `agents/code-reviewer` | PR/diff review across GitLab, GitHub, Bitbucket — posts inline comments, labels, commit statuses |
 
 ### Building Agents
 
 ```bash
 # Build Jules (codebase analysis agents)
 cd agents/jules && go build -o ../../bin/jules . && cd ../..
-
-# Build Code Reviewer (PR review agent)
-cd agents/code-reviewer && go build -o ../../bin/code-reviewer . && cd ../..
 ```
 
 ### Running Agents
@@ -294,13 +290,9 @@ cd agents/code-reviewer && go build -o ../../bin/code-reviewer . && cd ../..
 ```bash
 # Jules — analyze a workspace for security issues
 ./bin/jules --agent sentinel --workspace /path/to/project --prompt "Audit for security vulnerabilities"
-
-# Code Reviewer — review a GitHub PR and post comments
-./bin/code-reviewer --url https://github.com/org/repo/pull/123 --token $GITHUB_TOKEN --post
-
-# Code Reviewer — review local uncommitted changes
-./bin/code-reviewer --workspace . --diff
 ```
+
+> **Code review:** the former Code Reviewer agent has been replaced by [divmora/code-review-bot](https://github.com/divmora/code-review-bot), a standalone CLI that no longer depends on LocalHarness.
 
 > **Note:** Agent submodules are checked out automatically with `git clone --recursive`. If you already cloned without submodules, run `git submodule update --init --recursive`.
 
